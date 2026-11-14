@@ -74,13 +74,13 @@ run() {
   local name=$1 want=$2 out="$work/$1"
   mkdir -p "$out"
   echo "== $name"
-  nsx hostA "$natlab" host --bore 198.51.100.254 --stun 198.51.100.254:3478 --out "$out/code" \
+  nsx hostA env HORIZON_FRIENDS_TRACE=1 "$natlab" host --bore 198.51.100.254 --stun 198.51.100.254:3478 --out "$out/code" \
     > "$out/host.log" 2> "$out/host.err" &
   local host=$!
   for _ in $(seq 1 300); do [ -s "$out/code" ] && break; sleep 0.1; done
   [ -s "$out/code" ] || { cat "$out/host.err"; echo "$name: the host shared nothing"; return 1; }
   local result
-  if ! result=$(timeout 90 ip netns exec hostB "$natlab" guest --code "$out/code" --stun 198.51.100.254:3478 2> "$out/guest.err"); then
+  if ! result=$(timeout 90 ip netns exec hostB env HORIZON_FRIENDS_TRACE=1 "$natlab" guest --code "$out/code" --stun 198.51.100.254:3478 2> "$out/guest.err"); then
     cat "$out/host.err" "$out/guest.err"; echo "$name: the guest didn't join"; kill "$host" || true; return 1
   fi
   sleep 0.5
@@ -88,6 +88,7 @@ run() {
   wait "$host" 2>/dev/null || true
   echo "guest: $result"
   echo "host:  $(cat "$out/host.log")"
+  grep -h "horizon-friends:" "$out/host.err" "$out/guest.err" | sed "s/^/  /" || true
   python3 - "$want" "$result" <<'PY'
 import json, sys
 want, got = sys.argv[1], json.loads(sys.argv[2])

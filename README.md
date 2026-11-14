@@ -182,10 +182,19 @@ Each friend's game connects straight to the host's whenever it can, which is the
    there both dial the other at the same moment. Over IPv6 (most mobile networks and many home
    connections have it) and through most home routers, the two connections meet and the game goes
    straight between the phones: that friend leaves bore.pub at once.
-3. **bore.pub:** only when neither works (both behind a carrier's shared address, with no IPv6)
-   does a friend play through the tunnel. It can be slower, and it is run by volunteers. That
-   friend and the host are told, and the host's Friends screen says why and how many friends
-   connect each way. The world stays encrypted between the host and each friend either way.
+3. **UDP, only when TCP found nothing:** the two games try once more over UDP, the kind of
+   connection video calls use, which gets through far more routers and mobile networks. Each
+   sends small signed probes to the other at the same time; when they meet, QUIC (the
+   connection layer browsers use) carries the game straight between the phones, encrypted with
+   the world's own key as well as QUIC's. This adds a few seconds to that friend's join, and
+   nothing at all for anyone who connected directly before it.
+4. **bore.pub:** only when none of that works (both behind a carrier's shared address that gives
+   a new port for every destination) does a friend play through the tunnel. It can be slower,
+   and it is run by volunteers. That friend and the host are told. The world stays encrypted
+   between the host and each friend either way.
+
+The Friends screen (Game Menu, Friends) always says how each connection goes: the host sees
+every player as "(direct)", "(direct, UDP)" or "(bore.pub)", and each guest sees its own.
 
 Faster for everyone: a host on home Wi-Fi with UPnP on in the router; or, when the host is behind
 the tunnel, **Give Host** to a player marked "(faster)", whose network takes direct connections.

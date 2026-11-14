@@ -138,7 +138,9 @@ pub fn mapped_on(
     let found = servers.iter().find_map(|server| {
         let target = server.to_socket_addrs().ok()?.find(SocketAddr::is_ipv4)?;
         let wire = match target {
-            SocketAddr::V4(a) if v6 => SocketAddr::new(IpAddr::V6(a.ip().to_ipv6_mapped()), a.port()),
+            SocketAddr::V4(a) if v6 => {
+                SocketAddr::new(IpAddr::V6(a.ip().to_ipv6_mapped()), a.port())
+            }
             other => other,
         };
         socket.set_read_timeout(Some(timeout / 3)).ok()?;
@@ -146,7 +148,10 @@ pub fn mapped_on(
             socket.send_to(&request(&id), wire).ok()?;
             loop {
                 match socket.recv_from(&mut buf) {
-                    Ok((n, from)) if from.ip().to_canonical() == target.ip() && from.port() == target.port() => {
+                    Ok((n, from))
+                        if from.ip().to_canonical() == target.ip()
+                            && from.port() == target.port() =>
+                    {
                         if let Some(a) = parse_response(&buf[..n], &id) {
                             return Some(a);
                         }

@@ -116,7 +116,12 @@ fn through_the_tunnel(host: &Host) -> (SocketAddr, String) {
     (tunnel, invite.encode())
 }
 
-fn join(code: &str, relay: Option<&str>, tunnels: Vec<SocketAddr>, path: PathMode) -> guest::Tunnel {
+fn join(
+    code: &str,
+    relay: Option<&str>,
+    tunnels: Vec<SocketAddr>,
+    path: PathMode,
+) -> guest::Tunnel {
     guest::join(&GuestConfig {
         code: code.to_owned(),
         relay: relay.map(str::to_owned),
@@ -173,7 +178,11 @@ fn when_tcp_finds_nothing_udp_carries_the_game_and_the_tunnel_is_left() {
     assert!(joined.direct && joined.udp && !joined.tunneled);
     assert_eq!(carried_as(&host), (true, false, true));
     assert_eq!(carried.load(Ordering::SeqCst), 1);
-    assert!(started.elapsed() < Duration::from_secs(12), "{:?}", started.elapsed());
+    assert!(
+        started.elapsed() < Duration::from_secs(12),
+        "{:?}",
+        started.elapsed()
+    );
     round_trip(joined, &payload(2 << 20));
     // A second guest at the same time, as well.
     let a = join(&code, None, vec![tunnel], PathMode::Auto);

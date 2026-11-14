@@ -123,16 +123,38 @@ impl Socket {
     /// candidates are what STUN saw of it (the address the other end aims at from outside),
     /// then the interface addresses on its port.
     pub fn bind(options: &Options) -> io::Result<Self> {
-        let (socket, v6) = match dual_stack() {
-            Ok(s) => (s, true),
-            Err(_) => (UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0))?, false),
+        let addresses = crate::reach::interface_addresses(options.loopback);
+        let v4 = || UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0));
+        // Both families on one socket only where this device has an IPv6 address: elsewhere an
+        // IPv6 socket may send nothing at all, IPv4 mapped into it included.
+        let dual = if addresses.iter().any(IpAddr::is_ipv6) {
+            dual_stack().ok()
+        } else {
+            None
         };
+        let (mut socket, mut v6) = match dual {
+            Some(s) => (s, true),
+            None => (v4()?, false),
+        };
+        let mut mapped = crate::stun::mapped_on(&socket, v6, &options.stun, STUN_WAIT);
+        if mapped.is_none() && v6 && !options.stun.is_empty() {
+            // The IPv6 socket reached no STUN server: an IPv4 one may.
+            let plain = v4()?;
+            if let Some(m) = crate::stun::mapped_on(&plain, false, &options.stun, STUN_WAIT) {
+                (socket, v6, mapped) = (plain, false, Some(m));
+            }
+        }
         let port = socket.local_addr()?.port();
         let mut candidates = Vec::new();
-        if let Some(mapped) = crate::stun::mapped_on(&socket, v6, &options.stun, STUN_WAIT) {
+        if let Some(mapped) = mapped {
             candidates.push(canonical(mapped));
         }
-        for ip in crate::reach::interface_addresses(options.loopback) {
+        crate::trace!(
+            "udp: socket {} ({}), mapped {mapped:?}",
+            socket.local_addr()?,
+            if v6 { "IPv6 and IPv4" } else { "IPv4" }
+        );
+        for ip in addresses {
             let a = SocketAddr::new(ip, port);
             if (v6 || ip.is_ipv4()) && !candidates.contains(&a) {
                 candidates.push(a);
@@ -210,6 +232,11 @@ impl Socket {
             }
         }
         self.socket.set_read_timeout(None)?;
+        crate::trace!(
+            "udp: {role:?} probed {targets:?}: answered by {:?}, heard from {:?}",
+            found.confirmed,
+            found.heard
+        );
         Ok(found)
     }
 }
@@ -400,7 +427,11 @@ fn runtime() -> io::Result<tokio::runtime::Runtime> {
 /// The host's side: QUIC on `socket` for the first connection from one of `from` (the
 /// addresses the guest's probes came from) whose first stream starts with the mark. The
 /// stream comes back as a loopback TCP stream; a thread carries it until it ends.
-pub fn serve(socket: Socket, cert: &Certificate, from: Vec<SocketAddr>) -> io::Result<Receiver<io::Result<TcpStream>>> {
+pub fn serve(
+    socket: Socket,
+    cert: &Certificate,
+    from: Vec<SocketAddr>,
+) -> io::Result<Receiver<io::Result<TcpStream>>> {
     let config = server_config(cert)?;
     let (tx, rx) = channel();
     std::thread::Builder::new()
@@ -433,7 +464,9 @@ pub fn serve(socket: Socket, cert: &Certificate, from: Vec<SocketAddr>) -> io::R
                             incoming.refuse();
                             continue;
                         }
-                        let Ok(connection) = incoming.await else { continue };
+                        let Ok(connection) = incoming.await else {
+                            continue;
+                        };
                         let Ok((send, mut recv)) = connection.accept_bi().await else {
                             continue;
                         };
@@ -560,7 +593,10 @@ mod tests {
         assert_ne!(p, packet(&k, ACK_KIND, Role::Host, 1));
         assert_ne!(p, packet(&k, PROBE_KIND, Role::Guest, 1));
         assert_ne!(p, packet(&k, PROBE_KIND, Role::Host, 2));
-        assert_ne!(p, packet(&Key::for_tests([8u8; 32]), PROBE_KIND, Role::Host, 1));
+        assert_ne!(
+            p,
+            packet(&Key::for_tests([8u8; 32]), PROBE_KIND, Role::Host, 1)
+        );
         assert_eq!(p, packet(&k, PROBE_KIND, Role::Host, 1));
     }
 
@@ -578,7 +614,10 @@ mod tests {
             stun: Vec::new(),
             loopback: true,
         };
-        (Socket::bind(&options).unwrap(), Socket::bind(&options).unwrap())
+        (
+            Socket::bind(&options).unwrap(),
+            Socket::bind(&options).unwrap(),
+        )
     }
 
     #[test]
@@ -592,12 +631,16 @@ mod tests {
         let (hk, hstop) = (k.clone(), stop.clone());
         let hosting = std::thread::spawn(move || {
             let until = Instant::now() + Duration::from_secs(10);
-            let found = host.punch(&gc, &hk, Role::Host, session, until, &hstop, true).unwrap();
+            let found = host
+                .punch(&gc, &hk, Role::Host, session, until, &hstop, true)
+                .unwrap();
             (host, found)
         });
         let until = Instant::now() + PROBE;
         let never = AtomicBool::new(false);
-        let found = guest.punch(&hc, &k, Role::Guest, session, until, &never, false).unwrap();
+        let found = guest
+            .punch(&hc, &k, Role::Guest, session, until, &never, false)
+            .unwrap();
         let at = found.confirmed.expect("an answer from the host");
         stop.store(true, Ordering::Relaxed);
         let (host, heard) = hosting.join().unwrap();
@@ -606,7 +649,10 @@ mod tests {
         let pin = cert.pin();
         let served = serve(host, &cert, heard.heard).unwrap();
         let mut g = connect(guest, at, &pin).unwrap();
-        let mut h = served.recv_timeout(Duration::from_secs(10)).unwrap().unwrap();
+        let mut h = served
+            .recv_timeout(Duration::from_secs(10))
+            .unwrap()
+            .unwrap();
         g.write_all(b"hello host").unwrap();
         let mut got = [0u8; 10];
         h.read_exact(&mut got).unwrap();
@@ -635,12 +681,22 @@ mod tests {
         let (hk, hstop) = (k.clone(), stop.clone());
         let hosting = std::thread::spawn(move || {
             let until = Instant::now() + Duration::from_secs(10);
-            let found = host.punch(&gc, &hk, Role::Host, session, until, &hstop, true).unwrap();
+            let found = host
+                .punch(&gc, &hk, Role::Host, session, until, &hstop, true)
+                .unwrap();
             (host, found)
         });
         let never = AtomicBool::new(false);
         let at = guest
-            .punch(&hc, &k, Role::Guest, session, Instant::now() + PROBE, &never, false)
+            .punch(
+                &hc,
+                &k,
+                Role::Guest,
+                session,
+                Instant::now() + PROBE,
+                &never,
+                false,
+            )
             .unwrap()
             .confirmed
             .unwrap();
@@ -662,11 +718,20 @@ mod tests {
         let (hk, hstop) = (k.clone(), stop.clone());
         let hosting = std::thread::spawn(move || {
             let until = Instant::now() + Duration::from_secs(3);
-            host.punch(&gc, &hk, Role::Host, 1, until, &hstop, true).unwrap()
+            host.punch(&gc, &hk, Role::Host, 1, until, &hstop, true)
+                .unwrap()
         });
         let never = AtomicBool::new(false);
         let found = guest
-            .punch(&hc, &k, Role::Guest, 2, Instant::now() + Duration::from_millis(800), &never, false)
+            .punch(
+                &hc,
+                &k,
+                Role::Guest,
+                2,
+                Instant::now() + Duration::from_millis(800),
+                &never,
+                false,
+            )
             .unwrap();
         stop.store(true, Ordering::Relaxed);
         assert_eq!(found.confirmed, None);

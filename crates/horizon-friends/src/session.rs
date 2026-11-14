@@ -107,7 +107,10 @@ fn authenticate(raw: TcpStream, key: &Key, role: Role) -> Option<Secure> {
 }
 
 fn parse(list: &[String]) -> Vec<SocketAddr> {
-    list.iter().filter_map(|a| a.parse().ok()).take(16).collect()
+    list.iter()
+        .filter_map(|a| a.parse().ok())
+        .take(16)
+        .collect()
 }
 
 /// Settle a session on the bridged stream `relay` (already protected) or a direct one. `udp`:
@@ -151,6 +154,9 @@ pub(crate) fn settle(
     };
     let theirs = parse(&theirs);
     let both_udp = wants_udp && they_udp;
+    crate::trace!(
+        "{role:?}: direct {wants}/{they_want}, udp {wants_udp}/{they_udp}, theirs {theirs:?}"
+    );
     let stop = Arc::new(AtomicBool::new(false));
     let (atx, arx) = channel::<Secure>();
     let race = wants && they_want && (role == Role::Host || tcp_race());
@@ -215,6 +221,7 @@ pub(crate) fn settle(
                     },
                 )?;
                 let _ = rr.get_ref().shutdown(std::net::Shutdown::Both);
+                crate::trace!("guest: a direct TCP stream");
                 return finish((r, w), true, false);
             }
             // TCP found nothing: UDP, when both ends can.
@@ -316,7 +323,11 @@ fn guest_udp(
     send(
         rw,
         &Control::Udp {
-            candidates: socket.candidates.iter().map(SocketAddr::to_string).collect(),
+            candidates: socket
+                .candidates
+                .iter()
+                .map(SocketAddr::to_string)
+                .collect(),
             pin: String::new(),
         },
     )?;
@@ -332,6 +343,7 @@ fn guest_udp(
         return Ok(None);
     }
     let never = AtomicBool::new(false);
+    crate::trace!("guest: udp, the host's {theirs:?}");
     let punched = socket.punch(
         &theirs,
         key,
@@ -350,7 +362,9 @@ fn guest_udp(
         Control::UdpReady { ok: false } => return Ok(None),
         _ => return Err(unexpected("the host's QUIC")),
     }
-    Ok(udp::connect(socket, at, &pin).ok())
+    let connected = udp::connect(socket, at, &pin);
+    crate::trace!("guest: QUIC to {at}: {:?}", connected.as_ref().map(|_| ()));
+    Ok(connected.ok())
 }
 
 /// The host's side of the UDP step, as the guest's messages come.
@@ -460,19 +474,36 @@ mod tests {
     #[test]
     fn an_older_ends_messages_read_as_no_udp() {
         // As horizon-friends before the UDP step sends them.
-        let hello: Control =
-            serde_json::from_str(r#"{"t":"hello","direct":true,"candidates":["203.0.113.5:25580"]}"#)
-                .unwrap();
-        assert!(matches!(hello, Control::Hello { direct: true, udp: false, .. }));
+        let hello: Control = serde_json::from_str(
+            r#"{"t":"hello","direct":true,"candidates":["203.0.113.5:25580"]}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            hello,
+            Control::Hello {
+                direct: true,
+                udp: false,
+                ..
+            }
+        ));
         let path: Control = serde_json::from_str(r#"{"t":"path","direct":true}"#).unwrap();
-        assert!(matches!(path, Control::Path { direct: true, udp: false }));
+        assert!(matches!(
+            path,
+            Control::Path {
+                direct: true,
+                udp: false
+            }
+        ));
         // And what this one sends, an older one reads (it ignores the fields it doesn't know).
         let text = serde_json::to_string(&Control::Path {
             direct: false,
             udp: false,
         })
         .unwrap();
-        assert!(text.contains(r#""t":"path""#) && text.contains(r#""direct":false"#), "{text}");
+        assert!(
+            text.contains(r#""t":"path""#) && text.contains(r#""direct":false"#),
+            "{text}"
+        );
     }
 
     #[test]

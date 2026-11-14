@@ -86,7 +86,10 @@ fn host(args: &[String]) {
         std::thread::sleep(Duration::from_millis(50));
     };
     std::fs::write(&out, format!("{code}\n{tunnel}\n")).unwrap();
-    eprintln!("host: code ready, tunnel {tunnel}, {}", host.state().summary);
+    eprintln!(
+        "host: code ready, tunnel {tunnel}, {}",
+        host.state().summary
+    );
     // Until the lab stops it: how each session is carried.
     let end = Instant::now() + Duration::from_secs(600);
     while Instant::now() < end {

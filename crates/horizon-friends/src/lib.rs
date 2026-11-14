@@ -8,6 +8,17 @@
 //! local port the guest's client connects to), end-to-end encrypted with a
 //! key only the holders of the code can derive. The design, the protocol and
 //! what the relay sees are in docs/play-with-friends.md.
+/// `HORIZON_FRIENDS_TRACE=1`: what the direct races and the UDP step do, on stderr (the NAT
+/// lab, and a device's log when a connection takes an unexpected way).
+macro_rules! trace {
+    ($($t:tt)*) => {
+        if std::env::var_os("HORIZON_FRIENDS_TRACE").is_some() {
+            eprintln!("horizon-friends: {}", format_args!($($t)*));
+        }
+    };
+}
+pub(crate) use trace;
+
 pub mod code;
 pub mod crypto;
 pub mod direct;
