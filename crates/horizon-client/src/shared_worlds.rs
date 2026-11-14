@@ -360,7 +360,8 @@ pub fn refresh(now: bool) {
                         // This device's own game held it and stopped (it was closed, or the
                         // system ended it): nobody is in it, and Start takes it back at once.
                         let left = !ours && me.as_deref().is_some_and(|m| lease.left_by(m, &here));
-                        let live = matches!(lease.state, LeaseState::Hosting | LeaseState::Starting);
+                        let live =
+                            matches!(lease.state, LeaseState::Hosting | LeaseState::Starting);
                         Status::Known {
                             playing: if left { 0 } else { lease.playing() },
                             silent: live && !left && !ours && Timing::REAL.silent(quiet),

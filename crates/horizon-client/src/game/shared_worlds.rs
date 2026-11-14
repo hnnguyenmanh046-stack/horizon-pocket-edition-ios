@@ -832,13 +832,7 @@ impl Game<'_> {
             .replacen("%s", &host_name, 1)
             .replacen("%d", &left.as_secs().max(1).to_string(), 1)
         };
-        match next_step(
-            Some(&seen.lease),
-            quiet,
-            &me,
-            &shared.ctx.device,
-            &timing,
-        ) {
+        match next_step(Some(&seen.lease), quiet, &me, &shared.ctx.device, &timing) {
             Next::Join { code, tunnel } => {
                 if connected && guest.joined.as_ref() == Some(&code) {
                     return Ok(true);

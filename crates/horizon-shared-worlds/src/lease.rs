@@ -449,7 +449,6 @@ impl Timing {
 
 /// A watcher's view of a lease it doesn't hold: how long its heartbeat has stood still, on the
 /// watcher's own timer.
-#[derive(Debug)]
 #[derive(Clone, Debug)]
 pub struct Watch {
     mark: Option<(u64, u64, String)>,
@@ -558,7 +557,10 @@ mod tests {
         assert_eq!(lease.tunnel_at, None);
         // Written back, it has no new field for an older game to stumble on.
         let back = serde_json::to_string(&lease).unwrap();
-        assert!(!back.contains("tunnel_at") && !back.contains("closing"), "{back}");
+        assert!(
+            !back.contains("tunnel_at") && !back.contains("closing"),
+            "{back}"
+        );
         assert!(!lease.closing);
         let with = Lease {
             tunnel_at: Some("203.0.113.9:4000".into()),

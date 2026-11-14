@@ -1175,7 +1175,13 @@ mod tests {
         let lease = alex.ctx.status().unwrap().unwrap().lease;
         assert_eq!(lease.playing(), 2);
         assert_eq!(
-            next_step(Some(&lease), Duration::ZERO, &member(1, false).uuid, "elsewhere", &FAST),
+            next_step(
+                Some(&lease),
+                Duration::ZERO,
+                &member(1, false).uuid,
+                "elsewhere",
+                &FAST
+            ),
             Next::Join {
                 code: "CODE-STEVE".into(),
                 tunnel: None
@@ -1204,11 +1210,23 @@ mod tests {
             (State::Handoff, Some(last))
         );
         assert_eq!(
-            next_step(Some(&lease), Duration::ZERO, &member(1, false).uuid, "elsewhere", &FAST),
+            next_step(
+                Some(&lease),
+                Duration::ZERO,
+                &member(1, false).uuid,
+                "elsewhere",
+                &FAST
+            ),
             Next::Host(Claim::Free)
         );
         assert_eq!(
-            next_step(Some(&lease), Duration::ZERO, &member(3, false).uuid, "elsewhere", &FAST),
+            next_step(
+                Some(&lease),
+                Duration::ZERO,
+                &member(3, false).uuid,
+                "elsewhere",
+                &FAST
+            ),
             Next::Wait
         );
         drop(hosting);
@@ -1347,8 +1365,13 @@ mod tests {
         let mut taken = None;
         wait_for("the takeover", || {
             if let Some((Ok(Some(seen)), quiet)) = watcher.latest()
-                && next_step(Some(&seen.lease), quiet, &steve.ctx.me.uuid, &steve.ctx.device, &FAST)
-                    == Next::Host(Claim::Takeover)
+                && next_step(
+                    Some(&seen.lease),
+                    quiet,
+                    &steve.ctx.me.uuid,
+                    &steve.ctx.device,
+                    &FAST,
+                ) == Next::Host(Claim::Takeover)
             {
                 taken = Some(seen);
             }
@@ -1580,25 +1603,46 @@ mod tests {
             at(&lease(State::Closed, None, None), 0),
             Next::Host(Claim::Free)
         );
-        assert_eq!(next_step(None, Duration::ZERO, &me, "elsewhere", &FAST), Next::Gone);
+        assert_eq!(
+            next_step(None, Duration::ZERO, &me, "elsewhere", &FAST),
+            Next::Gone
+        );
         assert!(FAST.consistent());
         // The host's own game on its own device, after it stopped (closed, or ended by the
         // system): it takes the world back at once, Hosting or Starting, whatever the code.
         let host = member(1, true).uuid;
         for state in [State::Hosting, State::Starting] {
             assert_eq!(
-                next_step(Some(&lease(state, Some("C"), None)), Duration::ZERO, &host, "d", &FAST),
+                next_step(
+                    Some(&lease(state, Some("C"), None)),
+                    Duration::ZERO,
+                    &host,
+                    "d",
+                    &FAST
+                ),
                 Next::Host(Claim::Free)
             );
             // The same player on another device waits as anyone does: that one may be playing.
             assert_eq!(
-                next_step(Some(&lease(state, None, None)), Duration::ZERO, &host, "other", &FAST),
+                next_step(
+                    Some(&lease(state, None, None)),
+                    Duration::ZERO,
+                    &host,
+                    "other",
+                    &FAST
+                ),
                 Next::Wait
             );
         }
         // A world it handed off or closed isn't its own leftover.
         assert_eq!(
-            next_step(Some(&lease(State::Handoff, None, Some(2))), Duration::ZERO, &host, "d", &FAST),
+            next_step(
+                Some(&lease(State::Handoff, None, Some(2))),
+                Duration::ZERO,
+                &host,
+                "d",
+                &FAST
+            ),
             Next::Wait
         );
         // Silence: shown after two heartbeats and two reads; taken only at `dead`.

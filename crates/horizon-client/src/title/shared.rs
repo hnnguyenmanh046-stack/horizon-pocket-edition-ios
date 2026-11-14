@@ -118,8 +118,11 @@ fn status_line(status: &Status) -> String {
         Status::Known { playing: 0, .. } => tr("nobody", "Nobody playing"),
         Status::Known {
             silent: true, host, ..
-        } => tr("silent", "%s's game isn't answering")
-            .replacen("%s", host.as_deref().unwrap_or(""), 1),
+        } => tr("silent", "%s's game isn't answering").replacen(
+            "%s",
+            host.as_deref().unwrap_or(""),
+            1,
+        ),
         Status::Known {
             playing,
             host,
