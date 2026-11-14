@@ -220,6 +220,10 @@ def run(client, resources, work):
         epoch = hosting['epoch']
         alex.kill()
         alex = player('Alex')
+        # Where the system has no secure store (this runner), the invite lived in memory only:
+        # added again, it goes back on the same world and folder. Elsewhere it is still there.
+        alex(f'shared add {invite}', check=False)
+        assert [w['id'] for w in alex('shared list')['worlds']] == [world]
         alex.wait('shared list', lambda v: 'playing: 0' in v['worlds'][0]['status'], 60,
                   'the list showing nobody in the world its own game left')
         started = time.monotonic()

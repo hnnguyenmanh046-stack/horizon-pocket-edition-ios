@@ -394,6 +394,20 @@ pub fn refresh(now: bool) {
                 state.refreshing = false;
                 state.refreshed = Some(Instant::now());
                 state.watches = watches;
+                // A world whose invite this device no longer holds can't be read: say so, and
+                // how to get it back, rather than "Reading..." for ever.
+                let lost: Vec<String> = state
+                    .entries
+                    .iter()
+                    .filter(|e| !state.invites.contains_key(&e.id))
+                    .map(|e| e.id.clone())
+                    .collect();
+                for entry in state.entries.iter_mut().filter(|e| lost.contains(&e.id)) {
+                    entry.status = Status::Failed(tr(
+                        "horizon.shared.invite_lost",
+                        "This device no longer holds this world's invite. Add it again with Add with Invite...: its copy here is kept.",
+                    ));
+                }
             });
         });
     if spawned.is_err() {
@@ -454,11 +468,17 @@ pub fn add(text: &str) -> Result<String, String> {
     S3Store::new(&invite.bucket).map_err(|e| e.to_string())?;
     let name = invite.name.clone();
     with(|state| {
-        if state.entries.iter().any(|e| e.id == invite.world) {
-            return Err(tr(
-                "horizon.shared.already_added",
-                "This world is already in your list.",
-            ));
+        if let Some(listed) = state.entries.iter().find(|e| e.id == invite.world) {
+            if state.invites.contains_key(&invite.world) {
+                return Err(tr(
+                    "horizon.shared.already_added",
+                    "This world is already in your list.",
+                ));
+            }
+            // This device lost the world's invite (its secure storage was cleared, or it never
+            // kept one): the world keeps its folder, and its copy here, and takes it again.
+            let folder = listed.folder.clone();
+            return remember(state, invite, folder);
         }
         let folder = new_folder(&name);
         remember(state, invite, folder)
