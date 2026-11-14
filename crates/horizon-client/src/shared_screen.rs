@@ -257,7 +257,10 @@ mod tests {
             assert_eq!(shown.join("-"), code, "{size:?}");
             let copy = &buttons[buttons.len() - 2];
             let done = &buttons[buttons.len() - 1];
-            assert_eq!((&copy.action, &done.action), (&Action::CopyCode, &Action::Done));
+            assert_eq!(
+                (&copy.action, &done.action),
+                (&Action::CopyCode, &Action::Done)
+            );
             assert!(copy.active && copy.x + copy.w <= done.x, "{size:?}");
             assert_eq!(
                 click(&atlas, size, (copy.x + 5.0, copy.y + 5.0), &view),
@@ -274,17 +277,14 @@ mod tests {
                 .collect();
             assert!(give.len() >= 3, "{size:?}: {}", give.len());
             let bottom = lines.iter().map(|(_, _, y)| *y + 10.0).fold(0.0, f32::max);
-            assert!(give.iter().all(|b| b.y >= bottom && b.y + 20.0 <= size.1 - 33.0), "{size:?}");
+            assert!(
+                give.iter()
+                    .all(|b| b.y >= bottom && b.y + 20.0 <= size.1 - 33.0),
+                "{size:?}"
+            );
         }
         // Before the code is known there is nothing to copy.
-        let (_, buttons) = layout(
-            &atlas,
-            (427.0, 240.0),
-            &View {
-                code: None,
-                ..view
-            },
-        );
+        let (_, buttons) = layout(&atlas, (427.0, 240.0), &View { code: None, ..view });
         assert!(buttons.iter().all(|b| b.action != Action::CopyCode));
     }
 }

@@ -135,10 +135,7 @@ pub fn join(config: &GuestConfig) -> Result<Tunnel, JoinError> {
         }
         Parsed::Long(invite) => {
             // A tunnel is no direct path: a guest that never goes direct still takes it.
-            let tunnels = invite
-                .endpoints
-                .iter()
-                .any(|e| config.tunnels.contains(e));
+            let tunnels = invite.endpoints.iter().any(|e| config.tunnels.contains(e));
             if (config.path != PathMode::RelayOnly || tunnels)
                 && !invite.endpoints.is_empty()
                 && let Some(t) = join_direct(&invite, config)?

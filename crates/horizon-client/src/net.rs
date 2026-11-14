@@ -388,12 +388,14 @@ pub const FRIEND: &str = horizon_friends::ADDRESS_PREFIX;
 /// out of it (its secret is in there).
 pub fn shown_address(address: &str) -> String {
     match address.strip_prefix(FRIEND) {
-        Some(code) => match horizon_friends::invite::parse(horizon_friends::split_tunnels(code).0) {
-            Some(horizon_friends::invite::Parsed::Short(c)) => {
-                format!("Friend's world ({}-****)", c.nameplate)
+        Some(code) => {
+            match horizon_friends::invite::parse(horizon_friends::split_tunnels(code).0) {
+                Some(horizon_friends::invite::Parsed::Short(c)) => {
+                    format!("Friend's world ({}-****)", c.nameplate)
+                }
+                _ => "Friend's world".to_owned(),
             }
-            _ => "Friend's world".to_owned(),
-        },
+        }
         None => address.to_owned(),
     }
 }

@@ -430,12 +430,12 @@ impl HostLease {
         let result = if let Some(asked) = open {
             self.write(|held| held.open(&asked.0, asked.1.as_deref()))
                 .map(|()| {
-                let mut open = locked(&self.open);
-                // A newer code that came meanwhile is written next.
-                if open.as_ref() == Some(&asked) {
-                    *open = None;
-                }
-            })
+                    let mut open = locked(&self.open);
+                    // A newer code that came meanwhile is written next.
+                    if open.as_ref() == Some(&asked) {
+                        *open = None;
+                    }
+                })
         } else if changed || due {
             self.write(|held| held.heartbeat(&players)).map(|()| {
                 let mut listed = locked(&self.players);

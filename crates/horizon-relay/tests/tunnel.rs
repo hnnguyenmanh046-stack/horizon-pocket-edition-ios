@@ -242,7 +242,11 @@ fn through_the_public_tunnel_the_two_ends_still_connect_directly() {
     assert!(joined.direct && !joined.tunneled);
     assert_eq!(carried_as(&host), (true, false));
     assert_eq!(carried.load(Ordering::SeqCst), 1);
-    assert!(started.elapsed() < Duration::from_secs(8), "{:?}", started.elapsed());
+    assert!(
+        started.elapsed() < Duration::from_secs(8),
+        "{:?}",
+        started.elapsed()
+    );
     round_trip(joined, &payload(1 << 20));
 }
 
@@ -293,9 +297,12 @@ fn tunnel_marks_ride_along_in_an_address_and_come_back_off_it() {
     let marked = horizon_friends::with_tunnels("0B33K-Q405Q", &tunnels);
     assert_eq!(
         horizon_friends::split_tunnels(&marked),
-        ("0B33K-Q405Q", tunnels)
+        ("0B33K-Q405Q", tunnels.clone())
     );
-    assert_eq!(horizon_friends::with_tunnels("0B33K-Q405Q", &[]), "0B33K-Q405Q");
+    assert_eq!(
+        horizon_friends::with_tunnels("0B33K-Q405Q", &[]),
+        "0B33K-Q405Q"
+    );
     assert_eq!(
         horizon_friends::split_tunnels("0B33K-Q405Q"),
         ("0B33K-Q405Q", Vec::new())

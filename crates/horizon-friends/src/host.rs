@@ -442,18 +442,18 @@ fn serve_tunneled(shared: &Arc<Shared>, mut s: TcpStream, session: u64, deadline
     );
     shared.routes.lock().unwrap().remove(&session);
     if let Ok(settled) = settled {
-        carry(shared, session, settled.secure, settled.direct, !settled.direct);
+        carry(
+            shared,
+            session,
+            settled.secure,
+            settled.direct,
+            !settled.direct,
+        );
     }
 }
 
 /// Connect a settled session to the integrated server and carry it.
-fn carry(
-    shared: &Arc<Shared>,
-    session: u64,
-    (r, w): session::Secure,
-    direct: bool,
-    tunnel: bool,
-) {
+fn carry(shared: &Arc<Shared>, session: u64, (r, w): session::Secure, direct: bool, tunnel: bool) {
     if shared.sessions.fetch_add(1, Ordering::Relaxed) >= MAX_SESSIONS {
         shared.sessions.fetch_sub(1, Ordering::Relaxed);
         let _ = r.get_ref().shutdown(Shutdown::Both);
