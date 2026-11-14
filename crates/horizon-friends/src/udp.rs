@@ -29,6 +29,15 @@ use std::{
 /// How long the ends send probes before they give UDP up.
 pub const PROBE: Duration = Duration::from_millis(3000);
 const PROBE_EVERY: Duration = Duration::from_millis(100);
+/// First, probes that live only a few hops: they open this end's own NAT (its mapping toward
+/// the other end) but die on the way, before the other end's NAT. A NAT that a probe reaches
+/// before its own side has sent anything takes it for a stranger, and on Linux (most home
+/// routers) that makes it map its own side's probes to another port, so the two never meet.
+/// The other end starts its probes up to one trip through the bridged stream later.
+const OPENERS: Duration = Duration::from_millis(700);
+/// A home router is the first hop, a carrier's NAT a few more; the other end's NAT is many
+/// hops further on the internet.
+const OPENER_TTLS: [u32; 4] = [2, 3, 4, 5];
 /// QUIC's handshake and first stream, once a probe went both ways.
 pub const CONNECT: Duration = Duration::from_secs(5);
 const STUN_WAIT: Duration = Duration::from_millis(1200);
@@ -40,6 +49,8 @@ const MAGIC: &[u8; 4] = b"HZU1";
 const PROBE_KIND: u8 = 0;
 const ACK_KIND: u8 = 1;
 const PACKET: usize = 4 + 1 + 1 + 8 + 16;
+/// What everything else, QUIC included, is sent with.
+const NORMAL_TTL: u32 = 64;
 const ALPN: &[u8] = b"horizon-friends/1";
 const SERVER_NAME: &str = "horizon-friends";
 /// The first bytes of the guest's QUIC stream: the host keeps only a stream that starts so.
@@ -168,6 +179,21 @@ impl Socket {
         })
     }
 
+    /// Sets how many hops what this socket sends next lives, for IPv4 and for IPv6.
+    fn set_ttl(&self, ttl: u32) {
+        let _ = self.socket.set_ttl(ttl);
+        if self.v6 {
+            let _ = socket2::SockRef::from(&self.socket).set_unicast_hops_v6(ttl);
+        }
+    }
+
+    /// Sends `data` to `to` with `ttl` hops to live; a target that can't be sent to (no route)
+    /// is left, the others go on.
+    fn send(&self, data: &[u8], to: SocketAddr, ttl: u32) {
+        self.set_ttl(ttl);
+        let _ = self.socket.send_to(data, wire(to, self.v6));
+    }
+
     /// Probe the other end at `targets` from this socket, answering every probe of its,
     /// until `until` passes or `stop` is set; the guest (`keep` false) stops at the first
     /// answer, the host keeps answering until it is told to stop.
@@ -187,7 +213,8 @@ impl Socket {
         let their_answer = packet(key, ACK_KIND, other(role), session);
         let targets: Vec<SocketAddr> = targets.iter().map(|t| canonical(*t)).collect();
         let mut found = Punched::default();
-        let mut next = Instant::now();
+        let started = Instant::now();
+        let mut next = started;
         let mut buf = [0u8; 1500];
         while !stop.load(Ordering::Relaxed) {
             let now = Instant::now();
@@ -195,9 +222,16 @@ impl Socket {
                 break;
             }
             if now >= next {
+                let openers = now.duration_since(started) < OPENERS;
                 for t in &targets {
                     // One that can't be sent to (no route) is skipped; the others go on.
-                    let _ = self.socket.send_to(&mine, wire(*t, self.v6));
+                    if openers {
+                        for ttl in OPENER_TTLS {
+                            self.send(&mine, *t, ttl);
+                        }
+                    } else {
+                        self.send(&mine, *t, NORMAL_TTL);
+                    }
                 }
                 next = now + PROBE_EVERY;
             }
@@ -211,7 +245,8 @@ impl Socket {
                     let from = canonical(from);
                     let got = &buf[..n];
                     if got == theirs {
-                        let _ = self.socket.send_to(&my_answer, wire(from, self.v6));
+                        // An answer goes all the way: the other end's NAT let its probe out.
+                        self.send(&my_answer, from, NORMAL_TTL);
                         if !found.heard.contains(&from) {
                             found.heard.push(from);
                         }
@@ -232,6 +267,7 @@ impl Socket {
             }
         }
         self.socket.set_read_timeout(None)?;
+        self.set_ttl(NORMAL_TTL);
         crate::trace!(
             "udp: {role:?} probed {targets:?}: answered by {:?}, heard from {:?}",
             found.confirmed,
