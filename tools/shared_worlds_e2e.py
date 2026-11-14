@@ -12,6 +12,9 @@
              block is there) and hosts it.
 6. close:    Alex leaves: the last copy uploads and the world is closed; every chunk of every
              region file reads back.
+7. restart:  Alex hosts again and Alex's game is killed; started again on the same device, it
+             lists the world as nobody playing and takes it straight back (the same epoch, no
+             wait for a host that is gone).
 
     python3 tools/shared_worlds_e2e.py --client target/fast/horizon-client --resources R --xvfb --offscreen
 
@@ -210,6 +213,25 @@ def run(client, resources, work):
         assert task.startswith('Done'), task
         chunks = compat.check_regions(alex.home / 'saves' / WORLD)
         print(f'close: the last copy uploaded; {chunks} chunks read back', flush=True)
+
+        # 7. Alex's game dies while hosting; the same device's next game takes it back at once.
+        alex(f'shared play {world}')
+        hosting = alex.wait_hosting(180, 'Alex hosting again')
+        epoch = hosting['epoch']
+        alex.kill()
+        alex = player('Alex')
+        alex.wait('shared list', lambda v: 'playing: 0' in v['worlds'][0]['status'], 60,
+                  'the list showing nobody in the world its own game left')
+        started = time.monotonic()
+        alex(f'shared play {world}')
+        hosting = alex.wait_hosting(60, 'Alex taking its own world back')
+        took = time.monotonic() - started
+        assert hosting['epoch'] == epoch, (hosting['epoch'], epoch)
+        assert took < 45, took
+        print(f'restart: the same device took its world back after {took:.0f} s (epoch {epoch})', flush=True)
+        alex('disconnect')
+        task = alex.wait_task(lambda t: t.startswith('Done') or t.startswith('Failed'), 300, 'the last upload again')['task']
+        assert task.startswith('Done'), task
     except BaseException:
         for p in made:
             print(f'--- {p.name} log tail ---')
@@ -231,7 +253,7 @@ def main():
     Player.extra = ['--offscreen'] if args.offscreen else []
     with tempfile.TemporaryDirectory(prefix='hse-', dir='/tmp') as directory:
         run(args.client.resolve(), args.resources.resolve(), Path(directory))
-    print('Shared worlds end to end passed: create, host, join, give, takeover, close')
+    print('Shared worlds end to end passed: create, host, join, give, takeover, close, restart')
 
 
 if __name__ == '__main__':

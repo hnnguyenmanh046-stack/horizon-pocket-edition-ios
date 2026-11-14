@@ -12,7 +12,7 @@
 use horizon_shared_worlds::{
     codec::{hex, random},
     invite::WorldInvite,
-    lease::{Member, State as LeaseState},
+    lease::{Member, State as LeaseState, Timing, Watch},
     manifest::WORK,
     s3::{Bucket, S3Store},
     session::{self, Context, Marker},
@@ -53,6 +53,10 @@ pub enum Status {
         /// Open to join now.
         open: bool,
         tunnel: bool,
+        /// The host's game stopped writing its lease a while ago (closed, crashed, out of
+        /// signal): nobody can be sure it plays, and Start may take the world once it is
+        /// surely gone.
+        silent: bool,
     },
     /// Its storage couldn't be read; the message says why.
     Failed(String),
@@ -97,6 +101,11 @@ struct State {
     cancel: Option<Arc<AtomicBool>>,
     refreshing: bool,
     refreshed: Option<Instant>,
+    /// How long each world's lease has stood still, on this device's clock.
+    watches: std::collections::HashMap<String, Watch>,
+    /// The world this game hosts now (getting it ready, playing, or uploading it), whose
+    /// lease names this device for a reason.
+    hosting_here: Option<String>,
 }
 
 static STATE: Mutex<Option<State>> = Mutex::new(None);
@@ -293,6 +302,22 @@ pub fn context(id: &str) -> Result<Context, String> {
     ))
 }
 
+/// The game says which world it hosts now (None: none).
+pub fn set_hosting(world: Option<&str>) {
+    with(|state| {
+        if state.hosting_here.as_deref() != world {
+            state.hosting_here = world.map(str::to_owned);
+            // The list shows it as it is at once.
+            state.refreshed = None;
+        }
+    });
+}
+
+/// What the list saw of `world`'s lease, for a watcher to go on from.
+pub fn watch_of(world: &str) -> Option<Watch> {
+    with(|state| state.watches.get(world).cloned())
+}
+
 /// Reads every world's lease again, in the background, at most every [`REFRESH`] unless `now`.
 pub fn refresh(now: bool) {
     load();
@@ -302,11 +327,17 @@ pub fn refresh(now: bool) {
             return None;
         }
         state.refreshing = true;
-        Some(state.invites.clone())
+        Some((
+            state.invites.clone(),
+            state.watches.clone(),
+            state.hosting_here.clone(),
+        ))
     });
-    let Some(worlds) = worlds else {
+    let Some((worlds, mut watches, hosting_here)) = worlds else {
         return;
     };
+    let me = me().ok().map(|m| m.uuid);
+    let here = device();
     let spawned = std::thread::Builder::new()
         .name("shared-worlds-list".into())
         .spawn(move || {
@@ -321,8 +352,18 @@ pub fn refresh(now: bool) {
                 }) {
                     Ok(Some(seen)) => {
                         let lease = seen.lease;
+                        let quiet = watches
+                            .entry(id.clone())
+                            .or_insert_with(|| Watch::new(Instant::now()))
+                            .observe(&lease, Instant::now());
+                        let ours = hosting_here.as_deref() == Some(id.as_str());
+                        // This device's own game held it and stopped (it was closed, or the
+                        // system ended it): nobody is in it, and Start takes it back at once.
+                        let left = !ours && me.as_deref().is_some_and(|m| lease.left_by(m, &here));
+                        let live = matches!(lease.state, LeaseState::Hosting | LeaseState::Starting);
                         Status::Known {
-                            playing: lease.playing(),
+                            playing: if left { 0 } else { lease.playing() },
+                            silent: live && !left && !ours && Timing::REAL.silent(quiet),
                             host: lease
                                 .host
                                 .filter(|_| {
@@ -351,6 +392,7 @@ pub fn refresh(now: bool) {
             with(|state| {
                 state.refreshing = false;
                 state.refreshed = Some(Instant::now());
+                state.watches = watches;
             });
         });
     if spawned.is_err() {

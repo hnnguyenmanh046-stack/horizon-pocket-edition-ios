@@ -83,6 +83,10 @@ pub struct Lease {
     /// when nothing else answers, and still tries for a direct connection over it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tunnel_at: Option<String>,
+    /// The host left the world and uploads its last copy: nobody is in it, though it is still
+    /// the host's until the handoff (an older game leaves it out).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub closing: bool,
     /// Who is in the world, the host first.
     pub players: Vec<Member>,
     /// The newest copy of the save. A copy counts only once it is named here.
@@ -90,9 +94,19 @@ pub struct Lease {
 }
 
 impl Lease {
+    /// Whether this device's own game held the world and stopped without letting it go (it
+    /// was closed, or the system ended it). Only a game that isn't hosting it may ask: then
+    /// nobody hosts it, and that game takes it straight back, its own progress with it.
+    pub fn left_by(&self, me: &str, device: &str) -> bool {
+        matches!(self.state, State::Hosting | State::Starting)
+            && self.host.as_ref().is_some_and(|h| h.uuid == me)
+            && self.device == device
+    }
+
     /// How many are playing, as the world list shows it.
     pub fn playing(&self) -> usize {
         match self.state {
+            State::Hosting | State::Starting if self.closing => 0,
             State::Hosting | State::Starting => self.players.len().max(1),
             State::Handoff | State::Closed => 0,
         }
@@ -192,6 +206,7 @@ impl Leases {
             code: None,
             tunnel: false,
             tunnel_at: None,
+            closing: false,
             players: vec![me.clone()],
             generation,
         };
@@ -224,6 +239,7 @@ impl Leases {
             lease.code = None;
             lease.tunnel = false;
             lease.tunnel_at = None;
+            lease.closing = false;
             lease.players = vec![me.clone()];
         })?;
         Ok(held)
@@ -320,6 +336,19 @@ impl Held {
             lease.code = Some(code.to_owned());
             lease.tunnel = tunnel.is_some();
             lease.tunnel_at = tunnel.map(str::to_owned);
+            lease.closing = false;
+        })
+    }
+
+    /// The host left the world and starts uploading its last copy: nobody can join it, and the
+    /// list shows nobody in it, while it stays the host's until [`Self::hand_off`].
+    pub fn closing(&mut self, host: &Member) -> Result<()> {
+        self.update(|lease| {
+            lease.code = None;
+            lease.tunnel = false;
+            lease.tunnel_at = None;
+            lease.closing = true;
+            lease.players = vec![host.clone()];
         })
     }
 
@@ -395,6 +424,21 @@ impl Timing {
             && self.handoff_wait < self.dead
     }
 
+    /// Whether a host whose lease stood still for `quiet` has missed its heartbeats (two, and
+    /// two reads late): others may not take the world yet, but it is shown as not answering.
+    pub fn silent(&self, quiet: Duration) -> bool {
+        quiet >= self.heartbeat * 2 + self.poll * 2
+    }
+
+    /// How long the watcher whose turn is `turn` still waits before it may take a lease that
+    /// stood still for `quiet`.
+    pub fn left_to_wait(&self, quiet: Duration, turn: usize) -> Duration {
+        let turn = u32::try_from(turn).unwrap_or(u32::MAX);
+        self.dead
+            .saturating_add(self.turn.saturating_mul(turn))
+            .saturating_sub(quiet)
+    }
+
     /// Whether a lease quiet for `quiet` may be taken, after `base`, by the watcher whose turn
     /// is `turn`.
     pub fn after(&self, base: Duration, quiet: Duration, turn: usize) -> bool {
@@ -406,6 +450,7 @@ impl Timing {
 /// A watcher's view of a lease it doesn't hold: how long its heartbeat has stood still, on the
 /// watcher's own timer.
 #[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Watch {
     mark: Option<(u64, u64, String)>,
     since: Instant,
@@ -482,6 +527,29 @@ impl Pulse {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn a_closing_lease_has_nobody_playing_and_opening_again_clears_it() {
+        let store = Arc::new(MemoryStore::new());
+        let leases = Leases::new(store, KEY);
+        let mut held = leases
+            .claim(None, &member(1), "phone", Claim::Free)
+            .unwrap();
+        held.open("C", Some("203.0.113.9:4000")).unwrap();
+        held.heartbeat(&[member(1), member(2)]).unwrap();
+        assert_eq!(held.lease().playing(), 2);
+        held.closing(&member(1)).unwrap();
+        let seen = leases.read().unwrap().unwrap().lease;
+        assert!(seen.closing && seen.code.is_none() && !seen.tunnel && seen.tunnel_at.is_none());
+        assert_eq!(seen.playing(), 0);
+        assert_eq!(seen.state, State::Hosting);
+        held.open("D", None).unwrap();
+        assert!(!held.lease().closing);
+        assert_eq!(held.lease().playing(), 1);
+        // A closing lease's text names the field; an older game ignores it.
+        let text = serde_json::to_string(&seen).unwrap();
+        assert!(text.contains(r#""closing":true"#), "{text}");
+    }
+
+    #[test]
     fn a_lease_without_the_tunnel_address_reads_and_writes_as_before() {
         // As a game from before `tunnel_at` writes it.
         let old = r#"{"version":1,"epoch":3,"state":"hosting","host":null,"device":"d","successor":null,"beat":7,"token":"t","code":"C","tunnel":true,"players":[],"generation":null}"#;
@@ -490,7 +558,8 @@ mod tests {
         assert_eq!(lease.tunnel_at, None);
         // Written back, it has no new field for an older game to stumble on.
         let back = serde_json::to_string(&lease).unwrap();
-        assert!(!back.contains("tunnel_at"), "{back}");
+        assert!(!back.contains("tunnel_at") && !back.contains("closing"), "{back}");
+        assert!(!lease.closing);
         let with = Lease {
             tunnel_at: Some("203.0.113.9:4000".into()),
             ..lease

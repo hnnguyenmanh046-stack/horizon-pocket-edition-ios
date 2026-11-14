@@ -170,11 +170,23 @@ pub enum Next {
     Gone,
 }
 
-/// `quiet` is how long this exact lease has stood still on this device's timer ([`Watch`]).
-pub fn next_step(lease: Option<&Lease>, quiet: Duration, me: &str, timing: &Timing) -> Next {
+/// `quiet` is how long this exact lease has stood still on this device's timer ([`Watch`]);
+/// `device` is this one's (a game that isn't hosting the world asks).
+pub fn next_step(
+    lease: Option<&Lease>,
+    quiet: Duration,
+    me: &str,
+    device: &str,
+    timing: &Timing,
+) -> Next {
     let Some(lease) = lease else {
         return Next::Gone;
     };
+    // This device's own game held it and stopped: nobody else can be hosting it, so there is
+    // nothing to wait for. It is picked up again as it was (`Leases::resume`).
+    if lease.left_by(me, device) {
+        return Next::Host(Claim::Free);
+    }
     let turn = turn(lease, me);
     let host_is_me = lease.host.as_ref().is_some_and(|h| h.uuid == me);
     let dead = timing.after(timing.dead, quiet, turn);
@@ -814,6 +826,14 @@ impl Hosting {
             day: today(),
         };
         let lease = self.lease.clone();
+        // Nobody is in the world from now on: the list says so and nobody dials it while the
+        // last copy goes up. Not reaching the storage for this changes nothing else.
+        let host = ctx.me.clone();
+        // A code that came just before isn't written after it.
+        *locked(&lease.open) = None;
+        if let Err(e) = lease.write(|held| held.closing(&host)) {
+            log::info!("Shared worlds: the lease doesn't say the world is closing yet: {e}");
+        }
         let outcome: Result<Manifest> = (|| {
             let layout = ctx.layout();
             rescan(&ctx.folder, &mut index)?;
@@ -931,6 +951,12 @@ pub struct Watcher {
 
 impl Watcher {
     pub fn start(ctx: Arc<Context>) -> Result<Self> {
+        Self::start_with(ctx, Watch::new(Instant::now()))
+    }
+
+    /// As [`Self::start`], going on from `watch` (what the world list saw of the lease on this
+    /// device's clock), so a host that already stood still isn't waited for from the start.
+    pub fn start_with(ctx: Arc<Context>, watch: Watch) -> Result<Self> {
         let latest = Arc::new(Mutex::new(None));
         let stop = Arc::new(AtomicBool::new(false));
         let thread = {
@@ -938,7 +964,7 @@ impl Watcher {
             std::thread::Builder::new()
                 .name("shared-worlds-watch".into())
                 .spawn(move || {
-                    let mut watch = Watch::new(Instant::now());
+                    let mut watch = watch;
                     let step = Duration::from_millis(50).min(ctx.timing.poll);
                     let mut next = Instant::now();
                     while !stop.load(Ordering::SeqCst) {
@@ -1149,7 +1175,7 @@ mod tests {
         let lease = alex.ctx.status().unwrap().unwrap().lease;
         assert_eq!(lease.playing(), 2);
         assert_eq!(
-            next_step(Some(&lease), Duration::ZERO, &member(1, false).uuid, &FAST),
+            next_step(Some(&lease), Duration::ZERO, &member(1, false).uuid, "elsewhere", &FAST),
             Next::Join {
                 code: "CODE-STEVE".into(),
                 tunnel: None
@@ -1178,11 +1204,11 @@ mod tests {
             (State::Handoff, Some(last))
         );
         assert_eq!(
-            next_step(Some(&lease), Duration::ZERO, &member(1, false).uuid, &FAST),
+            next_step(Some(&lease), Duration::ZERO, &member(1, false).uuid, "elsewhere", &FAST),
             Next::Host(Claim::Free)
         );
         assert_eq!(
-            next_step(Some(&lease), Duration::ZERO, &member(3, false).uuid, &FAST),
+            next_step(Some(&lease), Duration::ZERO, &member(3, false).uuid, "elsewhere", &FAST),
             Next::Wait
         );
         drop(hosting);
@@ -1321,7 +1347,7 @@ mod tests {
         let mut taken = None;
         wait_for("the takeover", || {
             if let Some((Ok(Some(seen)), quiet)) = watcher.latest()
-                && next_step(Some(&seen.lease), quiet, &steve.ctx.me.uuid, &FAST)
+                && next_step(Some(&seen.lease), quiet, &steve.ctx.me.uuid, &steve.ctx.device, &FAST)
                     == Next::Host(Claim::Takeover)
             {
                 taken = Some(seen);
@@ -1491,10 +1517,13 @@ mod tests {
             code: code.map(str::to_owned),
             tunnel: false,
             tunnel_at: None,
+            closing: false,
             players: vec![member(1, true), member(2, true), member(3, false)],
             generation: None,
         };
-        let at = |l: &Lease, ms: u64| next_step(Some(l), Duration::from_millis(ms), &me, &FAST);
+        let at = |l: &Lease, ms: u64| {
+            next_step(Some(l), Duration::from_millis(ms), &me, "elsewhere", &FAST)
+        };
         let hosting = lease(State::Hosting, Some("C"), None);
         assert_eq!(
             at(&hosting, 0),
@@ -1529,6 +1558,7 @@ mod tests {
         let older = Lease {
             tunnel: true,
             tunnel_at: None,
+            closing: false,
             ..hosting.clone()
         };
         assert_eq!(
@@ -1550,8 +1580,33 @@ mod tests {
             at(&lease(State::Closed, None, None), 0),
             Next::Host(Claim::Free)
         );
-        assert_eq!(next_step(None, Duration::ZERO, &me, &FAST), Next::Gone);
+        assert_eq!(next_step(None, Duration::ZERO, &me, "elsewhere", &FAST), Next::Gone);
         assert!(FAST.consistent());
+        // The host's own game on its own device, after it stopped (closed, or ended by the
+        // system): it takes the world back at once, Hosting or Starting, whatever the code.
+        let host = member(1, true).uuid;
+        for state in [State::Hosting, State::Starting] {
+            assert_eq!(
+                next_step(Some(&lease(state, Some("C"), None)), Duration::ZERO, &host, "d", &FAST),
+                Next::Host(Claim::Free)
+            );
+            // The same player on another device waits as anyone does: that one may be playing.
+            assert_eq!(
+                next_step(Some(&lease(state, None, None)), Duration::ZERO, &host, "other", &FAST),
+                Next::Wait
+            );
+        }
+        // A world it handed off or closed isn't its own leftover.
+        assert_eq!(
+            next_step(Some(&lease(State::Handoff, None, Some(2))), Duration::ZERO, &host, "d", &FAST),
+            Next::Wait
+        );
+        // Silence: shown after two heartbeats and two reads; taken only at `dead`.
+        assert!(!FAST.silent(FAST.heartbeat * 2));
+        assert!(FAST.silent(FAST.heartbeat * 2 + FAST.poll * 2));
+        assert_eq!(FAST.left_to_wait(Duration::ZERO, 0), FAST.dead);
+        assert_eq!(FAST.left_to_wait(FAST.dead, 1), FAST.turn);
+        assert_eq!(FAST.left_to_wait(FAST.dead * 2, 0), Duration::ZERO);
     }
 
     #[test]

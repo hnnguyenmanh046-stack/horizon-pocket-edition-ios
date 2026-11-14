@@ -16,7 +16,7 @@ use horizon_client::{
 };
 use horizon_shared_worlds::{
     Error,
-    lease::{Claim, Member},
+    lease::{Claim, Member, Watch, turn},
     session::{self, Context, Hosting, Next, Start, Watcher, next_step},
 };
 use std::{
@@ -74,6 +74,8 @@ fn uuid_text(uuid: u128) -> String {
 
 /// A shared world this game is playing, hosting, or waiting on.
 pub(super) struct Shared {
+    /// The world's id in the list.
+    id: String,
     name: String,
     ctx: Arc<Context>,
     phase: Phase,
@@ -144,9 +146,14 @@ struct Guest {
     path_sent: bool,
 }
 
-fn watch(ctx: &Arc<Context>) -> Result<Box<Guest>> {
+/// Watch the world's lease, going on from what was already seen of it (`from`).
+fn watch(ctx: &Arc<Context>, from: Option<Watch>) -> Result<Box<Guest>> {
+    let watcher = match from {
+        Some(seen) => Watcher::start_with(ctx.clone(), seen),
+        None => Watcher::start(ctx.clone()),
+    };
     Ok(Box::new(Guest {
-        watcher: Watcher::start(ctx.clone()).map_err(|e| e.to_string())?,
+        watcher: watcher.map_err(|e| e.to_string())?,
         joined: None,
         lost: false,
         next_try: Instant::now(),
@@ -279,8 +286,11 @@ impl Game<'_> {
             .find(|e| e.id == world)
             .map_or_else(|| world.to_owned(), |e| e.name);
         working(tr("connecting", "Reading the world's storage..."));
-        let guest = watch(&ctx)?;
+        // The list has been watching the lease: a host that stood still there isn't waited for
+        // from the start again.
+        let guest = watch(&ctx, list::watch_of(world))?;
         self.shared = Some(Shared {
+            id: world.to_owned(),
             name,
             ctx,
             copied: None,
@@ -302,6 +312,14 @@ impl Game<'_> {
                 false
             }
         };
+        // The list must know which world this game hosts: that lease names this device
+        // for a reason, and isn't a leftover.
+        list::set_hosting(match (&shared.phase, keep) {
+            (Phase::Preparing(_) | Phase::Hosting(_) | Phase::Leaving(_), true) => {
+                Some(shared.id.as_str())
+            }
+            _ => None,
+        });
         if keep {
             self.shared = Some(shared);
         }
@@ -320,7 +338,7 @@ impl Game<'_> {
                 Ok(Err(Error::Refused | Error::Busy)) => {
                     // Another player took it first (follow them), or this device's copy was
                     // still being brought up to date (look again).
-                    shared.phase = Phase::Watching(watch(&shared.ctx)?);
+                    shared.phase = Phase::Watching(watch(&shared.ctx, None)?);
                     Ok(true)
                 }
                 Ok(Err(Error::Cancelled)) => {
@@ -665,7 +683,7 @@ impl Game<'_> {
                     "waiting_new_host",
                     "Waiting for the new host to open the world...",
                 ));
-                shared.phase = Phase::Watching(watch(&shared.ctx)?);
+                shared.phase = Phase::Watching(watch(&shared.ctx, None)?);
                 Ok(true)
             }
             Ok(Ok(())) => {
@@ -795,9 +813,38 @@ impl Game<'_> {
             }
         }
         let me = shared.ctx.me.uuid.clone();
-        match next_step(Some(&seen.lease), quiet, &me, &shared.ctx.timing) {
+        let timing = shared.ctx.timing;
+        // The host stopped writing its lease: say so, and how long until this game may take
+        // the world, rather than wait (or dial a game that is gone) without a word.
+        let silent = timing.silent(quiet);
+        let host_name = seen
+            .lease
+            .host
+            .as_ref()
+            .map(|h| h.name.clone())
+            .unwrap_or_default();
+        let countdown = || {
+            let left = timing.left_to_wait(quiet, turn(&seen.lease, &me));
+            tr(
+                "host_silent",
+                "%s's game isn't answering. If it doesn't come back, you take the world in %d s, from its last copy.",
+            )
+            .replacen("%s", &host_name, 1)
+            .replacen("%d", &left.as_secs().max(1).to_string(), 1)
+        };
+        match next_step(
+            Some(&seen.lease),
+            quiet,
+            &me,
+            &shared.ctx.device,
+            &timing,
+        ) {
             Next::Join { code, tunnel } => {
                 if connected && guest.joined.as_ref() == Some(&code) {
+                    return Ok(true);
+                }
+                if silent && !connected {
+                    working(countdown());
                     return Ok(true);
                 }
                 if connected {
@@ -851,11 +898,19 @@ impl Game<'_> {
             }
             Next::Wait => {
                 if !connected {
-                    let host = seen.lease.host.map(|h| h.name).unwrap_or_default();
-                    working(
+                    let handing = seen.lease.state == horizon_shared_worlds::lease::State::Handoff;
+                    working(if silent && !handing {
+                        countdown()
+                    } else if seen.lease.closing {
+                        tr(
+                            "host_closing",
+                            "%s left the world and is uploading it. It opens for you once that's done.",
+                        )
+                        .replacen("%s", &host_name, 1)
+                    } else {
                         tr("waiting_host", "Waiting for %s to open the world...")
-                            .replacen("%s", &host, 1),
-                    );
+                            .replacen("%s", &host_name, 1)
+                    });
                 }
                 Ok(true)
             }
@@ -1239,6 +1294,8 @@ impl Game<'_> {
         }
         match words.get(1).copied() {
             Some("list") => {
+                // Read the leases again (in the background, every few seconds at most).
+                list::refresh(false);
                 let worlds: Vec<serde_json::Value> = list::entries()
                     .into_iter()
                     .map(|e| {

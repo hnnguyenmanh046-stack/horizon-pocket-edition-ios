@@ -117,6 +117,10 @@ fn status_line(status: &Status) -> String {
         Status::Failed(_) => tr("unreachable", "Storage unreachable"),
         Status::Known { playing: 0, .. } => tr("nobody", "Nobody playing"),
         Status::Known {
+            silent: true, host, ..
+        } => tr("silent", "%s's game isn't answering")
+            .replacen("%s", host.as_deref().unwrap_or(""), 1),
+        Status::Known {
             playing,
             host,
             open,
@@ -332,12 +336,23 @@ impl Screen {
                     Status::Failed(e) => {
                         lines(batch, e, y + 4.0, grey());
                     }
+                    Status::Known { silent: true, .. } => {
+                        lines(
+                            batch,
+                            &tr(
+                                "silent_note",
+                                "If it doesn't come back, Start takes the world from its last copy (at most 5 minutes old) once it has been silent for a minute and a half.",
+                            ),
+                            y + 4.0,
+                            grey(),
+                        );
+                    }
                     Status::Known { tunnel: true, .. } => {
                         lines(
                             batch,
                             &tr(
                                 "tunnel_note",
-                                "Friends join this host through a free public tunnel (bore.pub): it may be slower.",
+                                "Friends who can't connect to this host directly go through a free public tunnel (bore.pub): it may be slower.",
                             ),
                             y + 4.0,
                             grey(),
@@ -485,6 +500,9 @@ impl Screen {
                 let status = self.entry(id).map(|e| e.status);
                 let (label, enabled) = match &status {
                     Some(Status::Known { playing: 0, .. }) => (tr("start", "Start"), true),
+                    // Its host stopped answering: Start waits until it is surely gone, then
+                    // takes the world from its last copy (or joins it, if it comes back).
+                    Some(Status::Known { silent: true, .. }) => (tr("start", "Start"), true),
                     Some(Status::Known {
                         open: true, host, ..
                     }) => (
@@ -787,7 +805,8 @@ mod tests {
                 playing: 0,
                 host: None,
                 open: false,
-                tunnel: false
+                tunnel: false,
+                silent: false,
             }),
             "Nobody playing"
         );
@@ -796,7 +815,8 @@ mod tests {
                 playing: 3,
                 host: Some("Alex".into()),
                 open: true,
-                tunnel: false
+                tunnel: false,
+                silent: false,
             }),
             "3 playing, hosted by Alex"
         );
@@ -805,10 +825,24 @@ mod tests {
                 playing: 1,
                 host: Some("Alex".into()),
                 open: false,
-                tunnel: false
+                tunnel: false,
+                silent: false,
             }),
             "Alex is opening it"
         );
+        // A host that stopped answering isn't shown as playing, open or opening.
+        for open in [true, false] {
+            assert_eq!(
+                status_line(&Status::Known {
+                    playing: 1,
+                    host: Some("Alex".into()),
+                    open,
+                    tunnel: false,
+                    silent: true,
+                }),
+                "Alex's game isn't answering"
+            );
+        }
     }
 
     #[test]
