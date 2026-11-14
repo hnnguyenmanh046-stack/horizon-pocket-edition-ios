@@ -37,7 +37,8 @@ pub struct View {
     pub world: String,
     /// What is true now, a line each: who hosts, what the host's storage is doing.
     pub lines: Vec<String>,
-    /// Buttons above the footer, at most six.
+    /// Buttons above the footer: the others a row each, then Give Host's (labelled with the
+    /// player's name) two to a row under "Give Host to:".
     pub buttons: Vec<(String, Action, bool)>,
     /// The invite code that joins the host now (Play with Friends' code), once it is known.
     pub code: Option<String>,
@@ -95,8 +96,13 @@ fn layout(
         }
     }
     y += 6.0;
-    for (label, action, active) in view.buttons.iter().take(6) {
-        if y + 20.0 > h - 33.0 {
+    let fits = |y: f32| y + 20.0 <= h - 33.0;
+    let (give, rows): (Vec<_>, Vec<_>) = view
+        .buttons
+        .iter()
+        .partition(|(_, action, _)| matches!(action, Action::GiveHost(_)));
+    for (label, action, active) in rows.into_iter().take(6) {
+        if !fits(y) {
             break;
         }
         buttons.push(Button {
@@ -108,6 +114,26 @@ fn layout(
             active: *active,
         });
         y += 24.0;
+    }
+    if !give.is_empty() && fits(y + 12.0) {
+        lines.push((tr("give_host_to", "Give Host to:"), WHITE, y));
+        y += 12.0;
+        for pair in give.chunks(2) {
+            if !fits(y) {
+                break;
+            }
+            for (i, (label, action, active)) in pair.iter().enumerate() {
+                buttons.push(Button {
+                    x: cx - 100.0 + i as f32 * 102.0,
+                    y,
+                    w: 98.0,
+                    label: label.clone(),
+                    action: action.clone(),
+                    active: *active,
+                });
+            }
+            y += 24.0;
+        }
     }
     let done = if view.code.is_some() {
         buttons.push(Button {
@@ -194,26 +220,33 @@ mod tests {
     fn every_button_fits_above_the_footer_and_done_is_always_there() {
         let atlas =
             HudAtlas::build(std::path::Path::new("/nonexistent/horizon-test-assets")).unwrap();
-        let view = View {
+        let mut view = View {
             world: "Island".into(),
             lines: vec!["You host this world.".into()],
             buttons: (0..9)
-                .map(|i| {
-                    (
-                        format!("Give Host to P{i}"),
-                        Action::GiveHost(i.to_string()),
-                        true,
-                    )
-                })
+                .map(|i| (format!("P{i}"), Action::GiveHost(i.to_string()), true))
                 .collect(),
             ..View::default()
         };
+        // Answers to players who asked come first, a row each.
+        view.buttons.insert(
+            0,
+            ("Let P1 Host".into(), Action::Accept("1".into()), true),
+        );
         let (_, buttons) = layout(&atlas, (427.0, 240.0), &view);
         assert_eq!(buttons.last().unwrap().action, Action::Done);
-        assert!(buttons.len() <= 7);
+        assert_eq!(buttons[0].action, Action::Accept("1".into()));
         for b in &buttons[..buttons.len() - 1] {
             assert!(b.y + 20.0 <= 240.0 - 33.0);
         }
+        // Give Host's two to a row, side by side.
+        let give: Vec<&Button> = buttons
+            .iter()
+            .filter(|b| matches!(b.action, Action::GiveHost(_)))
+            .collect();
+        assert!(give.len() >= 4, "{}", give.len());
+        assert_eq!(give[0].y, give[1].y);
+        assert!(give[0].x + give[0].w <= give[1].x);
         let done = buttons.last().unwrap();
         assert_eq!(
             click(&atlas, (427.0, 240.0), (done.x + 5.0, done.y + 5.0), &view),
@@ -229,13 +262,13 @@ mod tests {
         let view = View {
             world: "Island".into(),
             lines: vec![
-                "You host this world. Here: Steve (direct), Alex (bore.pub), Sam (direct)".into(),
-                "Friends on other networks may play through bore.pub (slower): your router didn't open a port. Turning on UPnP in its settings fixes that. Now: 2 direct, 1 through bore.pub.".into(),
+                "You host this world. Here: Steve (direct), Alex (bore.pub), Sam (direct, UDP)".into(),
+                "Friends elsewhere may go through bore.pub (slower): your router didn't open a port (turn on UPnP). Now: 2 direct, 1 bore.pub.".into(),
             ],
             buttons: (0..7)
                 .map(|i| {
                     (
-                        format!("Give Host to P{i}"),
+                        format!("Player{i}"),
                         Action::GiveHost(i.to_string()),
                         true,
                     )
@@ -244,7 +277,8 @@ mod tests {
             code: Some(code.into()),
             copied: false,
         };
-        for size in [(427.0, 240.0), (320.0, 240.0), (640.0, 360.0)] {
+        // Phones (the smallest GUI is 240 high), an iPad's, a large one.
+        for size in [(427.0, 240.0), (520.0, 240.0), (341.0, 256.0), (640.0, 360.0)] {
             let (lines, buttons) = layout(&atlas, size, &view);
             // Every group of the code is on screen, in order.
             let shown: Vec<&str> = lines
@@ -275,7 +309,7 @@ mod tests {
                 .iter()
                 .filter(|b| matches!(b.action, Action::GiveHost(_)))
                 .collect();
-            assert!(give.len() >= 3, "{size:?}: {}", give.len());
+            assert!(give.len() >= 4, "{size:?}: {}", give.len());
             let bottom = lines.iter().map(|(_, _, y)| *y + 10.0).fold(0.0, f32::max);
             assert!(
                 give.iter()

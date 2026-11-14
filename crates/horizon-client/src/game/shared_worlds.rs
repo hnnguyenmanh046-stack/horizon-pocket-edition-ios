@@ -223,18 +223,18 @@ impl Game<'_> {
         let mut line = match self.friends_verdict() {
             Some(horizon_friends::reach::Verdict::LocalOnly { cgnat: true }) => tr(
                 "why_shared_address",
-                "Friends on other networks may play through bore.pub (slower): your connection shares its address (mobile data, or a second router).",
+                "Friends elsewhere may go through bore.pub (slower): mobile data shares your address.",
             ),
             _ => tr(
                 "why_router",
-                "Friends on other networks may play through bore.pub (slower): your router didn't open a port. Turning on UPnP in its settings fixes that.",
+                "Friends elsewhere may go through bore.pub (slower): your router didn't open a port (turn on UPnP).",
             ),
         };
         let (direct, tunneled) = self.friends_live();
         if direct + tunneled > 0 {
             line.push(' ');
             line.push_str(
-                &tr("paths", "Now: %d direct, %d through bore.pub.")
+                &tr("paths", "Now: %d direct, %d bore.pub.")
                     .replacen("%d", &direct.to_string(), 1)
                     .replacen("%d", &tunneled.to_string(), 1),
             );
@@ -975,10 +975,11 @@ impl Game<'_> {
                     {
                         continue;
                     }
+                    // Under "Give Host to:", the name alone (a half-width button).
                     let label = if tunneled && player.reachable {
-                        tr("give_host_direct", "Give Host to %s (faster)")
+                        tr("give_host_direct", "%s (faster)")
                     } else {
-                        tr("give_host", "Give Host to %s")
+                        "%s".to_owned()
                     };
                     view.buttons.push((
                         label.replacen("%s", &player.name, 1),
