@@ -229,10 +229,8 @@ mod tests {
             ..View::default()
         };
         // Answers to players who asked come first, a row each.
-        view.buttons.insert(
-            0,
-            ("Let P1 Host".into(), Action::Accept("1".into()), true),
-        );
+        view.buttons
+            .insert(0, ("Let P1 Host".into(), Action::Accept("1".into()), true));
         let (_, buttons) = layout(&atlas, (427.0, 240.0), &view);
         assert_eq!(buttons.last().unwrap().action, Action::Done);
         assert_eq!(buttons[0].action, Action::Accept("1".into()));
@@ -278,7 +276,12 @@ mod tests {
             copied: false,
         };
         // Phones (the smallest GUI is 240 high), an iPad's, a large one.
-        for size in [(427.0, 240.0), (520.0, 240.0), (341.0, 256.0), (640.0, 360.0)] {
+        for size in [
+            (427.0, 240.0),
+            (520.0, 240.0),
+            (341.0, 256.0),
+            (640.0, 360.0),
+        ] {
             let (lines, buttons) = layout(&atlas, size, &view);
             // Every group of the code is on screen, in order.
             let shown: Vec<&str> = lines

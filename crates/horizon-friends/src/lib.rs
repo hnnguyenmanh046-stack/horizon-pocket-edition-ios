@@ -18,6 +18,7 @@ pub mod portmap;
 pub mod reach;
 mod session;
 pub mod stun;
+pub mod udp;
 pub mod wire;
 
 pub use code::Code;

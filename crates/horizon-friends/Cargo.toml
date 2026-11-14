@@ -18,6 +18,13 @@ socket2 = { version = "0.5", features = ["all"] }
 if-addrs = "0.13"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1.0.151"
+# The UDP step (src/udp.rs), only when TCP found no direct way: QUIC over the punched sockets,
+# TLS 1.3 on ring with a certificate made per session (rustls, ring and rcgen are already in
+# the lockfile through ureq and the server), on a one-thread tokio runtime of its own.
+quinn = { version = "0.11", default-features = false, features = ["runtime-tokio", "rustls-ring"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring"] }
+tokio = { version = "1", default-features = false, features = ["rt", "net", "io-util", "time", "macros"] }
 
 [lints]
 workspace = true

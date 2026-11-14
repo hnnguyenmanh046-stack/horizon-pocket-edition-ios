@@ -213,6 +213,7 @@ impl Game<'_> {
                     session,
                     direct,
                     tunnel,
+                    ..
                 } => {
                     sharing.live.insert(session, tunnel);
                     if tunnel {

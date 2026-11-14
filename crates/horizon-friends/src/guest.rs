@@ -8,6 +8,7 @@ use crate::{
     invite::{Invite, Parsed},
     resolve_relay,
     session::{self, Secure},
+    udp,
     wire::{self, ErrorCode, FromRelay, ToRelay},
 };
 use std::{
@@ -38,7 +39,8 @@ pub struct GuestConfig {
     /// over them the two ends still race for a direct stream. Empty: every endpoint is dialled
     /// at once, as for any code.
     pub tunnels: Vec<SocketAddr>,
-    /// STUN servers for this end's public address, offered to the host for that race.
+    /// STUN servers for this end's public address, offered to the host for the direct races
+    /// over the relay or the tunnel (TCP, then UDP).
     pub stun: Vec<String>,
 }
 
@@ -122,6 +124,8 @@ pub struct Tunnel {
     pub direct: bool,
     /// Whether it goes through the host's public tunnel.
     pub tunneled: bool,
+    /// Whether the direct stream is UDP (QUIC), found only after TCP found none.
+    pub udp: bool,
 }
 
 /// Join with what the player pasted: a full invite is dialled directly
@@ -239,6 +243,7 @@ fn join_direct(invite: &Invite, config: &GuestConfig) -> Result<Option<Tunnel>, 
             secure,
             direct: true,
             tunneled: false,
+            udp: false,
         }));
     }
     // Through the tunnel: race for a direct stream over it, from a port of this end's own.
@@ -263,12 +268,17 @@ fn join_direct(invite: &Invite, config: &GuestConfig) -> Result<Option<Tunnel>, 
         port,
         candidates,
         Box::new(move |tx, deadline, stop| direct::accept(listeners, session, deadline, stop, tx)),
+        (!matches!(config.path, PathMode::RelayOnly)).then(|| udp::Options {
+            stun: config.stun.clone(),
+            loopback: endpoint.ip().is_loopback(),
+        }),
     )
     .map_err(|e| JoinError::Failed(e.to_string()))?;
     Ok(Some(Tunnel {
         secure: settled.secure,
         direct: settled.direct,
         tunneled: !settled.direct,
+        udp: settled.udp,
     }))
 }
 
@@ -350,12 +360,17 @@ fn join_relay(config: &GuestConfig, relay_url: &str, code: &Code) -> Result<Tunn
         port,
         candidates,
         Box::new(move |tx, deadline, stop| direct::accept(listeners, session, deadline, stop, tx)),
+        (!matches!(config.path, PathMode::RelayOnly)).then(|| udp::Options {
+            stun: config.stun.clone(),
+            loopback: relay.ip().is_loopback(),
+        }),
     )
     .map_err(|e| JoinError::Failed(e.to_string()))?;
     Ok(Tunnel {
         secure: settled.secure,
         direct: settled.direct,
         tunneled: false,
+        udp: settled.udp,
     })
 }
 

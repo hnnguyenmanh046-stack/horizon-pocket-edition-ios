@@ -69,7 +69,7 @@ jobs:
         run: |
           cargo test -p horizon-shared-worlds
           cargo test -p horizon-friends
-          cargo test -p horizon-relay --test tunnel
+          cargo test -p horizon-relay --test tunnel --test udp
           cargo test -p horizon-client-lib --lib -- title:: shared_screen:: friends_screen:: shared_worlds:: lan::conn:: save::writes::
 
   android:

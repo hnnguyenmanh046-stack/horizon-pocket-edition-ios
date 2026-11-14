@@ -12,7 +12,7 @@ use crate::{
     direct,
     invite::{Invite, RelayRef},
     reach::{self, Reach, Verdict},
-    resolve_relay, session,
+    resolve_relay, session, udp,
     wire::{self, FromRelay, ToRelay},
 };
 use std::{
@@ -86,11 +86,13 @@ pub enum HostEvent {
     /// A new invite code (the first, or after the relay's short code changed).
     Code(String),
     /// A guest's session is carried directly or through the relay; `tunnel` when it goes
-    /// through the host's public tunnel (no direct stream was found over it).
+    /// through the host's public tunnel (no direct stream was found over it); `udp` when the
+    /// direct stream is UDP (found only after TCP found none).
     Connected {
         session: u64,
         direct: bool,
         tunnel: bool,
+        udp: bool,
     },
     Disconnected {
         session: u64,
@@ -380,7 +382,16 @@ fn serve_code(shared: &Arc<Shared>, mut s: TcpStream, session: u64, deadline: cr
     drop(deadline);
     shared.handshakes.fetch_sub(1, Ordering::Relaxed);
     match secured {
-        Ok(secure) => carry(shared, session, secure, true, false),
+        Ok(secure) => carry(
+            shared,
+            session,
+            secure,
+            Path {
+                direct: true,
+                tunnel: false,
+                udp: false,
+            },
+        ),
         Err(e) if crypto::is_wrong_code(&e) => {
             let count = shared.wrong.fetch_add(1, Ordering::Relaxed) + 1;
             shared.emit(HostEvent::WrongCode { count });
@@ -439,21 +450,31 @@ fn serve_tunneled(shared: &Arc<Shared>, mut s: TcpStream, session: u64, deadline
                 .unwrap()
                 .insert(session, (tx, deadline + Duration::from_millis(500)));
         }),
+        Some(udp::Options {
+            stun: shared.config.reach.stun.clone(),
+            loopback: shared.config.reach.loopback,
+        }),
     );
     shared.routes.lock().unwrap().remove(&session);
     if let Ok(settled) = settled {
-        carry(
-            shared,
-            session,
-            settled.secure,
-            settled.direct,
-            !settled.direct,
-        );
+        let path = Path {
+            direct: settled.direct,
+            tunnel: !settled.direct,
+            udp: settled.udp,
+        };
+        carry(shared, session, settled.secure, path);
     }
 }
 
+/// How a settled session is carried, for [`HostEvent::Connected`].
+struct Path {
+    direct: bool,
+    tunnel: bool,
+    udp: bool,
+}
+
 /// Connect a settled session to the integrated server and carry it.
-fn carry(shared: &Arc<Shared>, session: u64, (r, w): session::Secure, direct: bool, tunnel: bool) {
+fn carry(shared: &Arc<Shared>, session: u64, (r, w): session::Secure, path: Path) {
     if shared.sessions.fetch_add(1, Ordering::Relaxed) >= MAX_SESSIONS {
         shared.sessions.fetch_sub(1, Ordering::Relaxed);
         let _ = r.get_ref().shutdown(Shutdown::Both);
@@ -466,8 +487,9 @@ fn carry(shared: &Arc<Shared>, session: u64, (r, w): session::Secure, direct: bo
     };
     shared.emit(HostEvent::Connected {
         session,
-        direct,
-        tunnel,
+        direct: path.direct,
+        tunnel: path.tunnel,
+        udp: path.udp,
     });
     if let Ok(t) = crate::pump(server, r, w) {
         let _ = t.join();
@@ -682,9 +704,18 @@ fn serve_relayed(
                 .unwrap()
                 .insert(session, (tx, deadline + Duration::from_millis(500)));
         }),
+        Some(udp::Options {
+            stun: shared.config.reach.stun.clone(),
+            loopback: shared.config.reach.loopback,
+        }),
     );
     shared.routes.lock().unwrap().remove(&session);
     if let Ok(settled) = settled {
-        carry(shared, session, settled.secure, settled.direct, false);
+        let path = Path {
+            direct: settled.direct,
+            tunnel: false,
+            udp: settled.udp,
+        };
+        carry(shared, session, settled.secure, path);
     }
 }

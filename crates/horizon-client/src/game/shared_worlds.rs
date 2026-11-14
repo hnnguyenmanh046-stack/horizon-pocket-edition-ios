@@ -38,7 +38,27 @@ const REACHABLE: &[u8] = b"reach:1";
 const UNREACHABLE: &[u8] = b"reach:0";
 /// A guest tells the host how its connection goes, for the host's Friends screen.
 const PATH_DIRECT: &[u8] = b"path:direct";
+const PATH_UDP: &[u8] = b"path:udp";
 const PATH_TUNNEL: &[u8] = b"path:tunnel";
+
+/// How a guest said its connection goes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Route {
+    Direct,
+    /// Direct over UDP: TCP found no direct way.
+    Udp,
+    /// Through the host's public tunnel.
+    Tunnel,
+}
+impl Route {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Direct => "direct",
+            Self::Udp => "udp",
+            Self::Tunnel => "bore.pub",
+        }
+    }
+}
 /// How long a world may take to open after its copy is ready.
 const OPEN_LIMIT: Duration = Duration::from_secs(180);
 /// Messages from guests, from the server thread to the window.
@@ -90,7 +110,7 @@ struct Host {
     /// Sessions through the public tunnel the player was told about.
     tunneled_told: u32,
     /// How each player's connection goes, as they said: true through the public tunnel.
-    paths: HashMap<u128, bool>,
+    paths: HashMap<u128, Route>,
 }
 
 struct Leaving {
@@ -523,10 +543,13 @@ impl Game<'_> {
                     host.reachable.insert(player, false);
                 }
                 PATH_DIRECT => {
-                    host.paths.insert(player, false);
+                    host.paths.insert(player, Route::Direct);
+                }
+                PATH_UDP => {
+                    host.paths.insert(player, Route::Udp);
                 }
                 PATH_TUNNEL => {
-                    host.paths.insert(player, true);
+                    host.paths.insert(player, Route::Tunnel);
                 }
                 _ => {}
             }
@@ -695,7 +718,10 @@ impl Game<'_> {
             self.shared_report_reach(guest);
             let path = horizon_client::net::last_friend_path();
             if path != horizon_client::net::FriendPath::Unknown {
-                let direct = path == horizon_client::net::FriendPath::Direct;
+                let direct = matches!(
+                    path,
+                    horizon_client::net::FriendPath::Direct | horizon_client::net::FriendPath::Udp
+                );
                 if guest.tunnel_note && self.title.is_none() {
                     guest.tunnel_note = false;
                     if !direct {
@@ -707,7 +733,11 @@ impl Game<'_> {
                 }
                 // Not joined yet when this fails: tried again next frame.
                 if !guest.path_sent {
-                    let message = if direct { PATH_DIRECT } else { PATH_TUNNEL };
+                    let message = match path {
+                        horizon_client::net::FriendPath::Direct => PATH_DIRECT,
+                        horizon_client::net::FriendPath::Udp => PATH_UDP,
+                        _ => PATH_TUNNEL,
+                    };
                     guest.path_sent = self.native_net_send_to_server(CHANNEL, message).is_ok();
                 }
             }
@@ -928,8 +958,9 @@ impl Game<'_> {
                                 .ok()
                                 .and_then(|u| host.paths.get(&u));
                             match path {
-                                Some(false) => tr("named_direct", "%s (direct)"),
-                                Some(true) => tr("named_tunnel", "%s (bore.pub)"),
+                                Some(Route::Direct) => tr("named_direct", "%s (direct)"),
+                                Some(Route::Udp) => tr("named_udp", "%s (direct, UDP)"),
+                                Some(Route::Tunnel) => tr("named_tunnel", "%s (bore.pub)"),
                                 None => "%s".to_owned(),
                             }
                             .replacen("%s", &p.name, 1)
@@ -1001,6 +1032,10 @@ impl Game<'_> {
                 if connected {
                     view.code = guest.joined.clone();
                     view.lines.push(match horizon_client::net::last_friend_path() {
+                        horizon_client::net::FriendPath::Udp => tr(
+                            "via_udp",
+                            "Your connection: direct to the host over UDP (no bore.pub).",
+                        ),
                         horizon_client::net::FriendPath::Direct => tr(
                             "via_direct",
                             "Your connection: direct to the host (no bore.pub).",
@@ -1283,7 +1318,7 @@ impl Game<'_> {
                         // How each guest said it connects, and the sessions open now.
                         "routes": host.players.iter().filter_map(|p| {
                             let u = u128::from_str_radix(&p.uuid, 16).ok()?;
-                            host.paths.get(&u).map(|t| (p.name.clone(), if *t { "bore.pub" } else { "direct" }))
+                            host.paths.get(&u).map(|r| (p.name.clone(), r.name()))
                         }).collect::<HashMap<_, _>>(),
                         "connected": { "direct": live.0, "tunnel": live.1 },
                     }),

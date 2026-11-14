@@ -16,5 +16,9 @@ ureq = { version = "2", default-features = false, features = ["tls"] }
 chrono = { version = "0.4.42", default-features = false, features = ["clock", "std"] }
 log = "0.4"
 
+[dev-dependencies]
+# The NAT lab's ends (examples/natlab.rs, tools/ci/natlab.sh): Play with Friends through bore.
+horizon-friends = { path = "../horizon-friends" }
+
 [lints]
 workspace = true

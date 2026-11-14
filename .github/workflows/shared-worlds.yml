@@ -7,7 +7,10 @@ on:
     paths:
       - .github/workflows/shared-worlds.yml
       - crates/horizon-shared-worlds/**
+      - crates/horizon-friends/**
       - tools/ci/s3_server.sh
+      - tools/ci/natlab.sh
+      - tools/ci/stun_server.py
       - Cargo.toml
       - Cargo.lock
   workflow_dispatch:
@@ -63,6 +66,38 @@ jobs:
         run: |
           test -n "$SHARED_WORLDS_S3_ENDPOINT"
           cargo test -p horizon-shared-worlds --test s3_live -- --nocapture
+      # The lockfile as cargo resolved it here, to commit when a dependency was added.
+      - name: Keep the lockfile
+        if: ${{ !cancelled() }}
+        run: mkdir -p lock && cp Cargo.lock lock/
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: cargo-lock
+          path: lock/Cargo.lock
       - name: The layout must be right too
         if: steps.format.outcome == 'failure'
         run: exit 1
+
+  # A host and a guest behind simulated home routers (network namespaces) with a real bore
+  # server and a STUN server between them: direct first, UDP only when TCP finds nothing, the
+  # tunnel only when neither does (tools/ci/natlab.sh).
+  natlab:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: natlab
+          cache-on-failure: true
+      - name: Build the lab's two ends and a bore server
+        run: |
+          cargo build --release -p horizon-shared-worlds --example natlab
+          cargo install bore-cli --locked --root "$RUNNER_TEMP/bore"
+      - name: The NAT lab
+        run: sudo -E bash tools/ci/natlab.sh target/release/examples/natlab "$RUNNER_TEMP/bore/bin/bore"

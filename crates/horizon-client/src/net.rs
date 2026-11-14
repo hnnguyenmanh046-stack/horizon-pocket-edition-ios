@@ -421,6 +421,8 @@ pub enum FriendPath {
     /// Still joining, or the join failed.
     Unknown,
     Direct,
+    /// Direct over UDP (QUIC): TCP found no direct way.
+    Udp,
     /// Through the host's public tunnel.
     Tunnel,
     Relay,
@@ -435,6 +437,7 @@ pub fn last_friend_path() -> FriendPath {
         1 => FriendPath::Direct,
         2 => FriendPath::Tunnel,
         3 => FriendPath::Relay,
+        4 => FriendPath::Udp,
         _ => FriendPath::Unknown,
     }
 }
@@ -456,16 +459,14 @@ fn join_friend(code: &str, lang: &Language, send: &Sender<Event>) -> Result<(Str
         protocol: PROTOCOL_VERSION,
         game: horizon_protocol::GAME_VERSION.to_owned(),
         path: PathMode::from_env(),
-        stun: if tunnels.is_empty() {
-            Vec::new()
-        } else {
-            horizon_friends::stun::servers_from_env()
-        },
+        stun: horizon_friends::stun::servers_from_env(),
         tunnels,
     })
     .map_err(|e| Reason::plain(e.to_string()))?;
     let path = if tunnel.tunneled {
         2
+    } else if tunnel.udp {
+        4
     } else if tunnel.direct {
         1
     } else {

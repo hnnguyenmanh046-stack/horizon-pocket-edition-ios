@@ -123,6 +123,45 @@ pub fn query(server: &str, timeout: Duration) -> io::Result<SocketAddr> {
     Err(io::Error::new(io::ErrorKind::TimedOut, "no STUN answer"))
 }
 
+/// What the first server that answers sees of `socket` (an IPv6 socket with IPv4 mapped into
+/// it when `v6`): the address and port its NAT shows outside. Asked from the socket itself,
+/// so the port is the one the other end of a UDP session must aim at.
+pub fn mapped_on(
+    socket: &UdpSocket,
+    v6: bool,
+    servers: &[String],
+    timeout: Duration,
+) -> Option<SocketAddr> {
+    let mut id = [0u8; 12];
+    crate::fill_random(&mut id).ok()?;
+    let mut buf = [0u8; 576];
+    let found = servers.iter().find_map(|server| {
+        let target = server.to_socket_addrs().ok()?.find(SocketAddr::is_ipv4)?;
+        let wire = match target {
+            SocketAddr::V4(a) if v6 => SocketAddr::new(IpAddr::V6(a.ip().to_ipv6_mapped()), a.port()),
+            other => other,
+        };
+        socket.set_read_timeout(Some(timeout / 3)).ok()?;
+        for _ in 0..3 {
+            socket.send_to(&request(&id), wire).ok()?;
+            loop {
+                match socket.recv_from(&mut buf) {
+                    Ok((n, from)) if from.ip().to_canonical() == target.ip() && from.port() == target.port() => {
+                        if let Some(a) = parse_response(&buf[..n], &id) {
+                            return Some(a);
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(_) => break,
+                }
+            }
+        }
+        None
+    });
+    let _ = socket.set_read_timeout(None);
+    found
+}
+
 /// The public IPv4 address from the first server that answers.
 pub fn public_ip(servers: &[String], timeout: Duration) -> Option<IpAddr> {
     servers

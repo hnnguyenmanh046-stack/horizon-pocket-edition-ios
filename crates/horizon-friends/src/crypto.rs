@@ -32,6 +32,21 @@ pub enum Role {
 #[derive(Clone)]
 pub struct Key([u8; 32]);
 
+impl Key {
+    /// A key of its own for `label`, from this one (the UDP probes' tags).
+    pub(crate) fn derive(&self, label: &[u8]) -> [u8; 32] {
+        let mut out = [0u8; 32];
+        // 32 bytes is far below HKDF-SHA256's limit: expanding cannot fail.
+        let _ = Hkdf::<Sha256>::new(None, &self.0).expand(label, &mut out);
+        out
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_tests(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+}
+
 /// The error a mismatched code produces: the peer's confirmation does not
 /// open with our key.
 pub fn wrong_code() -> io::Error {
