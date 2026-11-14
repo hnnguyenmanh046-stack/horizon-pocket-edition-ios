@@ -229,8 +229,8 @@ mod tests {
         let view = View {
             world: "Island".into(),
             lines: vec![
-                "You host this world. Here: Steve, Alex, Sam".into(),
-                "Friends on other networks may play through bore.pub (slower): your router didn't open a port. Turning on UPnP in its settings fixes that. Direct: 1, bore.pub: 1.".into(),
+                "You host this world. Here: Steve (direct), Alex (bore.pub), Sam (direct)".into(),
+                "Friends on other networks may play through bore.pub (slower): your router didn't open a port. Turning on UPnP in its settings fixes that. Now: 2 direct, 1 through bore.pub.".into(),
             ],
             buttons: (0..7)
                 .map(|i| {

@@ -174,6 +174,10 @@ def run(client, resources, work):
         steve(f'shared play {world}')
         steve.wait_joined(180, 'Steve joined Alex')
         alex.wait('shared status', lambda v: 'Steve' in v['session']['players'], 60, 'Steve in the lease')
+        # Each side's Friends screen can tell the route: Steve's own, and Steve's on Alex's.
+        assert steve.session()['path'] == 'direct', steve.session()
+        alex.wait('shared status', lambda v: v['session']['routes'].get('Steve') == 'direct'
+                  and v['session']['connected'] == {'direct': 1, 'tunnel': 0}, 60, 'Steve\'s route on Alex')
         first = spot(alex, 6)
         alex(f'command setblock {first[0]} {first[1]} {first[2]} minecraft:diamond_block')
         steve.block(first, 'minecraft:diamond_block', 'the block of Alex on Steve')

@@ -31,6 +31,8 @@ pub(super) struct Sharing {
     paths: (u32, u32),
     /// Of those not direct, the sessions carried through the public tunnel.
     tunneled: u32,
+    /// The sessions open now, and whether each goes through the public tunnel.
+    live: std::collections::HashMap<u64, bool>,
 }
 
 pub const HELP: &[&str] = &[
@@ -71,6 +73,14 @@ impl Game<'_> {
         self.friends
             .as_ref()
             .map_or((0, 0), |s| (s.paths.0, s.tunneled))
+    }
+
+    /// The friends connected now: (directly, through the public tunnel).
+    pub(super) fn friends_live(&self) -> (usize, usize) {
+        self.friends.as_ref().map_or((0, 0), |s| {
+            let tunneled = s.live.values().filter(|t| **t).count();
+            (s.live.len() - tunneled, tunneled)
+        })
     }
 
     /// What the sharing found about how this device is reached.
@@ -144,6 +154,7 @@ impl Game<'_> {
             copied: None,
             paths: (0, 0),
             tunneled: 0,
+            live: std::collections::HashMap::new(),
         });
         Ok(())
     }
@@ -198,13 +209,24 @@ impl Game<'_> {
                         "Someone tried a wrong code.",
                     ));
                 }
-                HostEvent::Connected { tunnel: true, .. } => {
-                    sharing.paths.1 += 1;
-                    sharing.tunneled += 1;
+                HostEvent::Connected {
+                    session,
+                    direct,
+                    tunnel,
+                } => {
+                    sharing.live.insert(session, tunnel);
+                    if tunnel {
+                        sharing.paths.1 += 1;
+                        sharing.tunneled += 1;
+                    } else if direct {
+                        sharing.paths.0 += 1;
+                    } else {
+                        sharing.paths.1 += 1;
+                    }
                 }
-                HostEvent::Connected { direct: true, .. } => sharing.paths.0 += 1,
-                HostEvent::Connected { direct: false, .. } => sharing.paths.1 += 1,
-                HostEvent::Disconnected { .. } => {}
+                HostEvent::Disconnected { session } => {
+                    sharing.live.remove(&session);
+                }
             }
         }
         // A shared world's code goes to its lease, not to the player (game/shared_worlds.rs).

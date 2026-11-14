@@ -36,6 +36,9 @@ const REQUEST: &[u8] = b"request";
 const DENY: &[u8] = b"deny";
 const REACHABLE: &[u8] = b"reach:1";
 const UNREACHABLE: &[u8] = b"reach:0";
+/// A guest tells the host how its connection goes, for the host's Friends screen.
+const PATH_DIRECT: &[u8] = b"path:direct";
+const PATH_TUNNEL: &[u8] = b"path:tunnel";
 /// How long a world may take to open after its copy is ready.
 const OPEN_LIMIT: Duration = Duration::from_secs(180);
 /// Messages from guests, from the server thread to the window.
@@ -86,6 +89,8 @@ struct Host {
     fenced: bool,
     /// Sessions through the public tunnel the player was told about.
     tunneled_told: u32,
+    /// How each player's connection goes, as they said: true through the public tunnel.
+    paths: HashMap<u128, bool>,
 }
 
 struct Leaving {
@@ -115,6 +120,8 @@ struct Guest {
     /// The last join's path isn't known yet: the player is told once it is, if it is the
     /// public tunnel.
     tunnel_note: bool,
+    /// The host was told how this connection goes.
+    path_sent: bool,
 }
 
 fn watch(ctx: &Arc<Context>) -> Result<Box<Guest>> {
@@ -130,6 +137,7 @@ fn watch(ctx: &Arc<Context>) -> Result<Box<Guest>> {
         fetched: None,
         prefetch: None,
         tunnel_note: false,
+        path_sent: false,
     }))
 }
 
@@ -200,10 +208,18 @@ fn probe_reach() -> Receiver<bool> {
 }
 
 impl Game<'_> {
-    /// How friends reach this host, for the Friends screen: nothing when every friend can
-    /// connect directly.
+    /// How friends reach this host, for the Friends screen.
     fn shared_route_line(&self) -> Option<String> {
-        self.friends_tunnel()?;
+        if self.friends_tunnel().is_none() {
+            // No tunnel is open: whoever is here connects directly.
+            let (direct, _) = self.friends_live();
+            return (direct > 0).then(|| {
+                tr(
+                    "all_direct",
+                    "Every friend connects to your game directly (no bore.pub).",
+                )
+            });
+        }
         let mut line = match self.friends_verdict() {
             Some(horizon_friends::reach::Verdict::LocalOnly { cgnat: true }) => tr(
                 "why_shared_address",
@@ -214,11 +230,11 @@ impl Game<'_> {
                 "Friends on other networks may play through bore.pub (slower): your router didn't open a port. Turning on UPnP in its settings fixes that.",
             ),
         };
-        let (direct, tunneled) = self.friends_paths();
+        let (direct, tunneled) = self.friends_live();
         if direct + tunneled > 0 {
             line.push(' ');
             line.push_str(
-                &tr("paths", "Direct: %d, bore.pub: %d.")
+                &tr("paths", "Now: %d direct, %d through bore.pub.")
                     .replacen("%d", &direct.to_string(), 1)
                     .replacen("%d", &tunneled.to_string(), 1),
             );
@@ -379,6 +395,7 @@ impl Game<'_> {
             frozen_told: false,
             fenced: false,
             tunneled_told: 0,
+            paths: HashMap::new(),
         }));
         Ok(true)
     }
@@ -505,6 +522,12 @@ impl Game<'_> {
                 UNREACHABLE => {
                     host.reachable.insert(player, false);
                 }
+                PATH_DIRECT => {
+                    host.paths.insert(player, false);
+                }
+                PATH_TUNNEL => {
+                    host.paths.insert(player, true);
+                }
                 _ => {}
             }
         }
@@ -531,6 +554,8 @@ impl Game<'_> {
             }
             host.requests
                 .retain(|(uuid, _)| players.iter().any(|p| p.uuid == uuid_text(*uuid)));
+            host.paths
+                .retain(|uuid, _| players.iter().any(|p| p.uuid == uuid_text(*uuid)));
             host.hosting.set_players(players.clone());
             host.players = players;
         }
@@ -669,16 +694,21 @@ impl Game<'_> {
         if connected {
             self.shared_report_reach(guest);
             let path = horizon_client::net::last_friend_path();
-            if guest.tunnel_note
-                && self.title.is_none()
-                && path != horizon_client::net::FriendPath::Unknown
-            {
-                guest.tunnel_note = false;
-                if path == horizon_client::net::FriendPath::Tunnel {
-                    self.system_message(Text::literal(tr(
-                        "tunnel_guest",
-                        "Your game couldn't connect to the host's directly, so you play through bore.pub, a free public tunnel: it can be slower. The world stays encrypted between you and the host.",
-                    )));
+            if path != horizon_client::net::FriendPath::Unknown {
+                let direct = path == horizon_client::net::FriendPath::Direct;
+                if guest.tunnel_note && self.title.is_none() {
+                    guest.tunnel_note = false;
+                    if !direct {
+                        self.system_message(Text::literal(tr(
+                            "tunnel_guest",
+                            "Your game couldn't connect to the host's directly, so you play through bore.pub, a free public tunnel: it can be slower. The world stays encrypted between you and the host.",
+                        )));
+                    }
+                }
+                // Not joined yet when this fails: tried again next frame.
+                if !guest.path_sent {
+                    let message = if direct { PATH_DIRECT } else { PATH_TUNNEL };
+                    guest.path_sent = self.native_net_send_to_server(CHANNEL, message).is_ok();
                 }
             }
         }
@@ -750,6 +780,7 @@ impl Game<'_> {
                     guest.lost = false;
                     guest.asked = false;
                     guest.reach_sent = false;
+                    guest.path_sent = false;
                     guest.tunnel_note = true;
                     list::set_task(Task::Idle);
                     let name = shared.ctx.me.name.clone();
@@ -890,15 +921,21 @@ impl Game<'_> {
                 let here = if others.is_empty() {
                     tr("alone", "Nobody else is here yet.")
                 } else {
-                    tr("here", "Here: %s").replacen(
-                        "%s",
-                        &others
-                            .iter()
-                            .map(|p| p.name.as_str())
-                            .collect::<Vec<_>>()
-                            .join(", "),
-                        1,
-                    )
+                    let named: Vec<String> = others
+                        .iter()
+                        .map(|p| {
+                            let path = u128::from_str_radix(&p.uuid, 16)
+                                .ok()
+                                .and_then(|u| host.paths.get(&u));
+                            match path {
+                                Some(false) => tr("named_direct", "%s (direct)"),
+                                Some(true) => tr("named_tunnel", "%s (bore.pub)"),
+                                None => "%s".to_owned(),
+                            }
+                            .replacen("%s", &p.name, 1)
+                        })
+                        .collect();
+                    tr("here", "Here: %s").replacen("%s", &named.join(", "), 1)
                 };
                 view.lines
                     .push(format!("{} {here}", tr("you_host", "You host this world.")));
@@ -962,16 +999,19 @@ impl Game<'_> {
                 let connected = self.remote.is_some() && self.integrated.is_none();
                 if connected {
                     view.code = guest.joined.clone();
-                    let path = horizon_client::net::last_friend_path();
-                    if path == horizon_client::net::FriendPath::Tunnel {
-                        view.lines.push(tr(
+                    view.lines.push(match horizon_client::net::last_friend_path() {
+                        horizon_client::net::FriendPath::Direct => tr(
+                            "via_direct",
+                            "Your connection: direct to the host (no bore.pub).",
+                        ),
+                        horizon_client::net::FriendPath::Unknown => {
+                            tr("via_unknown", "Your connection: connecting...")
+                        }
+                        _ => tr(
                             "via_tunnel",
-                            "You play through bore.pub: your game couldn't connect to the host's directly.",
-                        ));
-                    } else if path == horizon_client::net::FriendPath::Direct {
-                        view.lines
-                            .push(tr("via_direct", "Connected to the host directly."));
-                    }
+                            "Your connection: through bore.pub (slower). Your game couldn't connect to the host's directly.",
+                        ),
+                    });
                 }
                 let label = if guest.asked {
                     tr("asked", "Asked to Host")
@@ -1225,6 +1265,8 @@ impl Game<'_> {
             }
             Some("status") => {
                 let task = format!("{:?}", list::task());
+                let live = self.friends_live();
+                let path = format!("{:?}", horizon_client::net::last_friend_path()).to_lowercase();
                 let state = self.shared.as_ref().map(|s| match &s.phase {
                     Phase::Preparing(_) => json!({ "phase": "preparing" }),
                     Phase::Hosting(host) => json!({
@@ -1237,12 +1279,20 @@ impl Game<'_> {
                         "uploading": host.hosting.uploading(),
                         "frozen": host.hosting.must_freeze(),
                         "epoch": host.hosting.epoch(),
+                        // How each guest said it connects, and the sessions open now.
+                        "routes": host.players.iter().filter_map(|p| {
+                            let u = u128::from_str_radix(&p.uuid, 16).ok()?;
+                            host.paths.get(&u).map(|t| (p.name.clone(), if *t { "bore.pub" } else { "direct" }))
+                        }).collect::<HashMap<_, _>>(),
+                        "connected": { "direct": live.0, "tunnel": live.1 },
                     }),
                     Phase::Leaving(_) => json!({ "phase": "leaving" }),
                     Phase::Watching(guest) => json!({
                         "phase": "watching",
                         "joined": guest.joined,
                         "lost": guest.lost,
+                        "path": path,
+                        "path_sent": guest.path_sent,
                     }),
                 });
                 Ok(Some(json!({ "task": task, "session": state })))
