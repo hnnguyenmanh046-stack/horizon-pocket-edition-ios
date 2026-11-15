@@ -136,7 +136,8 @@ pub struct Extras {
     /// Splitscreen: each player's name in the corner of their view (`splitscreenNames`).
     pub splitscreen_names: bool,
     /// The wheel over a cycle button in the settings changes it (`CycleButton.mouseScrolled`,
-    /// on by default as vanilla); off, the wheel only scrolls the list.
+    /// on by default as vanilla); off, the wheel only scrolls the list. Off by default on iOS,
+    /// where scrolling a settings list with a finger is the wheel.
     pub wheel_cycles_settings: bool,
     /// The built-in music tracks the Music page turned off (sound ids): they
     /// leave every pool they play in (`musicOff`, empty by default: vanilla's
@@ -192,7 +193,7 @@ impl Default for Extras {
             splitscreen_two: 0,
             splitscreen_three: 0,
             splitscreen_names: true,
-            wheel_cycles_settings: true,
+            wheel_cycles_settings: !cfg!(target_os = "ios"),
             music_off: Vec::new(),
             music_page: false,
             cosmetics_mine: true,
@@ -203,6 +204,9 @@ impl Default for Extras {
 fn bool_text(v: bool) -> &'static str {
     if v { "true" } else { "false" }
 }
+/// The phones' own defaults a file written now has had (see [`Extras::parse`]).
+const PHONE_DEFAULTS: u32 = 1;
+
 impl Extras {
     pub fn load(dir: &Path) -> Self {
         fs::read_to_string(dir.join(FILE))
@@ -211,6 +215,8 @@ impl Extras {
     }
     pub fn parse(text: &str) -> Self {
         let mut e = Self::default();
+        // Which of the phones' own defaults the file has had (`phoneDefaults`).
+        let mut phone_defaults = 0u32;
         for line in text.lines() {
             let Some((key, value)) = line.split_once(':') else {
                 continue;
@@ -282,6 +288,7 @@ impl Extras {
                 "splitscreenThree" => e.splitscreen_three = value.parse().unwrap_or(0).min(2),
                 "splitscreenNames" => e.splitscreen_names = flag(e.splitscreen_names),
                 "wheelCyclesSettings" => e.wheel_cycles_settings = flag(e.wheel_cycles_settings),
+                "phoneDefaults" => phone_defaults = value.parse().unwrap_or(0),
                 "musicOff" => {
                     e.music_off = value
                         .split(',')
@@ -295,6 +302,11 @@ impl Extras {
                 "cosmeticsOthers" => e.cosmetics_others = flag(e.cosmetics_others),
                 _ => {}
             }
+        }
+        // iOS: a file from before the wheel was off there by default turns it off once;
+        // turned on afterwards, it stays on.
+        if cfg!(target_os = "ios") && phone_defaults < PHONE_DEFAULTS {
+            e.wheel_cycles_settings = false;
         }
         e
     }
@@ -349,7 +361,7 @@ impl Extras {
             bool_text(self.music_page),
             bool_text(self.cosmetics_mine),
             bool_text(self.cosmetics_others),
-        )
+        ) + &format!("phoneDefaults:{PHONE_DEFAULTS}\n")
     }
     /// Binds the extra key `name` (`SORT_KEY`); false for
     /// another name (a vanilla mapping).
@@ -807,7 +819,23 @@ mod tests {
         assert!(!d.mouse_tweaks && !d.sort && !d.own_name_tag && !d.ui_sound_reserve);
         assert!(!d.hide_block_particles);
         assert!(!d.music_page && d.music_off.is_empty());
-        assert!(d.discord_presence && d.wheel_cycles_settings);
+        assert!(d.discord_presence);
+        assert_eq!(d.wheel_cycles_settings, !cfg!(target_os = "ios"));
+        // A file from before the phones' defaults: as it says, except the wheel on iOS.
+        let old = d.serialize().replace("phoneDefaults:1\n", "").replace(
+            "wheelCyclesSettings:false",
+            "wheelCyclesSettings:true",
+        );
+        assert_eq!(
+            Extras::parse(&old).wheel_cycles_settings,
+            !cfg!(target_os = "ios")
+        );
+        // Turned on after, it stays on.
+        let on = Extras {
+            wheel_cycles_settings: true,
+            ..d.clone()
+        };
+        assert!(Extras::parse(&on.serialize()).wheel_cycles_settings);
         assert_eq!(Extras::parse(""), d);
         assert_eq!(Extras::parse(&d.serialize()), d);
         let mut e = d.clone();
