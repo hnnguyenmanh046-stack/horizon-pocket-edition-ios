@@ -1443,6 +1443,17 @@ impl Game<'_> {
         }
     }
 
+    /// The app is leaving the screen: a host's lease says so at once.
+    pub(super) fn shared_away(&self) {
+        if let Some(Shared {
+            phase: Phase::Hosting(host),
+            ..
+        }) = &self.shared
+        {
+            host.hosting.set_away(true);
+        }
+    }
+
     pub(super) fn shared_checkpoint_for_background(&mut self) -> bool {
         let Some(Shared {
             phase: Phase::Hosting(host),

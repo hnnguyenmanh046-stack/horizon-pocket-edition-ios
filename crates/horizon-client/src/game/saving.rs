@@ -100,6 +100,9 @@ impl Game<'_> {
                 self.saved_for_background = false;
                 self.shared_back_in_front();
             } else {
+                // Whether or not a save can start now: a host's lease says it is away at once
+                // (its frames may stop from here on).
+                self.shared_away();
                 self.save_for_background();
             }
         }
