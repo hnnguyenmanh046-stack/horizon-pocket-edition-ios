@@ -98,6 +98,7 @@ impl Game<'_> {
         if let winit::event::WindowEvent::Focused(focused) = event {
             if *focused {
                 self.saved_for_background = false;
+                self.shared_back_in_front();
             } else {
                 self.save_for_background();
             }

@@ -804,10 +804,9 @@ impl Game<'_> {
                 Ok(true)
             }
             Ok(Ok(())) => {
-                list::set_task(Task::Done(tr(
-                    "uploaded",
-                    "The world is saved for your friends.",
-                )));
+                // Nothing to answer: a line on the list says it, for a few seconds.
+                list::set_task(Task::Idle);
+                list::flash(tr("uploaded", "The world is saved for your friends."));
                 Ok(false)
             }
             Ok(Err(Error::Fenced)) => {
@@ -933,7 +932,7 @@ impl Game<'_> {
         let timing = shared.ctx.timing;
         // The host stopped writing its lease: say so, and how long until this game may take
         // the world, rather than wait (or dial a game that is gone) without a word.
-        let silent = timing.silent(quiet);
+        let silent = timing.silent(&seen.lease, quiet);
         let host_name = seen
             .lease
             .host
@@ -941,7 +940,7 @@ impl Game<'_> {
             .map(|h| h.name.clone())
             .unwrap_or_default();
         let countdown = || {
-            let left = timing.left_to_wait(quiet, turn(&seen.lease, &me));
+            let left = timing.left_to_wait(&seen.lease, quiet, turn(&seen.lease, &me));
             tr(
                 "host_silent",
                 "%s's game isn't answering. If it doesn't come back, you take the world in %d s, from its last copy.",
@@ -958,12 +957,25 @@ impl Game<'_> {
                     working(countdown());
                     return Ok(true);
                 }
+                // Its app is out of sight: it can't take anyone in until it is back.
+                if seen.lease.away && !connected {
+                    working(
+                        tr(
+                            "host_away",
+                            "%s's game is in the background: the world opens again when it is back.",
+                        )
+                        .replacen("%s", &host_name, 1),
+                    );
+                    return Ok(true);
+                }
                 if connected {
                     // A new host: leave the old one first.
                     self.leave_server(None)?;
                 }
-                if Instant::now() >= guest.next_try {
-                    guest.next_try = Instant::now() + Duration::from_secs(15);
+                // A new code (the next host's) is joined at once; the same one is tried again
+                // every few seconds.
+                if guest.joined.as_ref() != Some(&code) || Instant::now() >= guest.next_try {
+                    guest.next_try = Instant::now() + Duration::from_secs(5);
                     guest.joined = Some(code.clone());
                     guest.lost = false;
                     guest.asked = false;
@@ -1111,8 +1123,10 @@ impl Game<'_> {
         let Some(shared) = &self.shared else {
             return View::default();
         };
+        let me = &shared.ctx.me;
         let mut view = View {
             world: shared.name.clone(),
+            invite: list::invite_text(&shared.id).is_some(),
             copied: shared
                 .copied
                 .is_some_and(|t| t.elapsed() < Duration::from_secs(2)),
@@ -1120,44 +1134,39 @@ impl Game<'_> {
         };
         match &shared.phase {
             Phase::Hosting(host) => {
-                view.code = host.code.clone();
-                let others: Vec<&Member> = host
-                    .players
-                    .iter()
-                    .filter(|p| p.uuid != shared.ctx.me.uuid)
-                    .collect();
-                let here = if others.is_empty() {
+                view.status = tr("you_host", "You host this world.");
+                let others: Vec<&Member> =
+                    host.players.iter().filter(|p| p.uuid != me.uuid).collect();
+                let mut named = vec![tr("you_hosting", "You (host)")];
+                for p in &others {
+                    let path = u128::from_str_radix(&p.uuid, 16)
+                        .ok()
+                        .and_then(|u| host.paths.get(&u));
+                    named.push(
+                        match path {
+                            Some(Route::Direct) => tr("named_direct", "%s (direct)"),
+                            Some(Route::Udp) => tr("named_udp", "%s (direct, UDP)"),
+                            Some(Route::Tunnel) => tr("named_tunnel", "%s (bore.pub)"),
+                            None => "%s".to_owned(),
+                        }
+                        .replacen("%s", &p.name, 1),
+                    );
+                }
+                view.players = if others.is_empty() {
                     tr("alone", "Nobody else is here yet.")
                 } else {
-                    let named: Vec<String> = others
-                        .iter()
-                        .map(|p| {
-                            let path = u128::from_str_radix(&p.uuid, 16)
-                                .ok()
-                                .and_then(|u| host.paths.get(&u));
-                            match path {
-                                Some(Route::Direct) => tr("named_direct", "%s (direct)"),
-                                Some(Route::Udp) => tr("named_udp", "%s (direct, UDP)"),
-                                Some(Route::Tunnel) => tr("named_tunnel", "%s (bore.pub)"),
-                                None => "%s".to_owned(),
-                            }
-                            .replacen("%s", &p.name, 1)
-                        })
-                        .collect();
-                    tr("here", "Here: %s").replacen("%s", &named.join(", "), 1)
+                    named.join(", ")
                 };
-                view.lines
-                    .push(format!("{} {here}", tr("you_host", "You host this world.")));
                 if host.code.is_none() {
-                    view.lines.push(tr(
+                    view.notes.push(tr(
                         "not_open_yet",
-                        "Friends can join once the invite code is ready.",
+                        "Getting ready for friends to join...",
                     ));
                 } else if let Some(line) = self.shared_route_line() {
-                    view.lines.push(line);
+                    view.notes.push(line);
                 }
                 if host.hosting.must_freeze() {
-                    view.lines.push(tr(
+                    view.notes.push(tr(
                         "frozen",
                         "Your game can't reach the world's storage: the world waits until it can.",
                     ));
@@ -1198,34 +1207,56 @@ impl Game<'_> {
                 }
             }
             Phase::Watching(guest) => {
-                let host = guest
+                let lease = guest
                     .watcher
                     .latest()
                     .and_then(|(read, _)| read.ok().flatten())
-                    .and_then(|seen| seen.lease.host.map(|h| h.name))
-                    .unwrap_or_default();
-                view.lines
-                    .push(tr("hosted_by", "Hosted by %s.").replacen("%s", &host, 1));
+                    .map(|seen| seen.lease);
+                let host = lease.as_ref().and_then(|l| l.host.clone());
+                view.status = match &host {
+                    Some(h) => tr("hosted_by", "Hosted by %s.").replacen("%s", &h.name, 1),
+                    None => tr("no_host", "Nobody hosts it right now."),
+                };
                 let connected = self.remote.is_some() && self.integrated.is_none();
-                if connected {
-                    view.code = guest.joined.clone();
-                    view.lines.push(match horizon_client::net::last_friend_path() {
-                        horizon_client::net::FriendPath::Udp => tr(
-                            "via_udp",
-                            "Your connection: direct to the host over UDP (no bore.pub).",
-                        ),
-                        horizon_client::net::FriendPath::Direct => tr(
-                            "via_direct",
-                            "Your connection: direct to the host (no bore.pub).",
-                        ),
-                        horizon_client::net::FriendPath::Unknown => {
-                            tr("via_unknown", "Your connection: connecting...")
+                let path = horizon_client::net::last_friend_path();
+                // Who the lease lists: the host, this player (with how it connects), the others.
+                if let Some(lease) = &lease {
+                    let mine = if connected {
+                        match path {
+                            horizon_client::net::FriendPath::Udp => {
+                                tr("you_udp", "You (direct, UDP)")
+                            }
+                            horizon_client::net::FriendPath::Direct => {
+                                tr("you_direct", "You (direct)")
+                            }
+                            horizon_client::net::FriendPath::Unknown => tr("you", "You"),
+                            _ => tr("you_tunnel", "You (bore.pub)"),
                         }
-                        _ => tr(
-                            "via_tunnel",
-                            "Your connection: through bore.pub (slower). Your game couldn't connect to the host's directly.",
-                        ),
-                    });
+                    } else {
+                        tr("you", "You")
+                    };
+                    let mut named = Vec::new();
+                    for p in &lease.players {
+                        if host.as_ref().is_some_and(|h| h.uuid == p.uuid) {
+                            named.insert(0, tr("named_host", "%s (host)").replacen("%s", &p.name, 1));
+                        } else if p.uuid == me.uuid {
+                            named.push(mine.clone());
+                        } else {
+                            named.push(p.name.clone());
+                        }
+                    }
+                    if !lease.players.iter().any(|p| p.uuid == me.uuid) && connected {
+                        named.push(mine);
+                    }
+                    view.players = named.join(", ");
+                }
+                if connected && path == horizon_client::net::FriendPath::Tunnel {
+                    view.notes.push(tr(
+                        "via_tunnel",
+                        "You play through bore.pub (slower): your game couldn't connect to the host's directly.",
+                    ));
+                } else if !connected {
+                    view.notes.push(tr("joining", "Joining the host..."));
                 }
                 let label = if guest.asked {
                     tr("asked", "Asked to Host")
@@ -1234,19 +1265,21 @@ impl Game<'_> {
                 };
                 view.buttons.push((label, Action::AskHost, !guest.asked));
             }
-            Phase::Preparing(_) | Phase::Leaving(_) => {}
+            Phase::Preparing(_) => view.status = tr("getting_ready", "Getting the world ready..."),
+            Phase::Leaving(_) => view.status = tr("uploading", "Uploading the world..."),
         }
-        if let Some((Some(seen), owner)) = shared.requests.as_ref().and_then(RequestWatch::latest) {
+        if let Some((Some(seen), owner)) = shared.requests.as_ref().and_then(RequestWatch::latest)
+        {
             let r = seen.request;
             let when = list::when_id(&list::details(&shared.id), r.backup);
             match r.state {
                 backups::State::Asked => {
-                    view.lines.push(
+                    view.notes.push(
                         tr("load_asked_line", "%a asks to load the backup from %t.")
                             .replacen("%a", &r.by.name, 1)
                             .replacen("%t", &when, 1),
                     );
-                    if owner.is(&shared.ctx.me) {
+                    if owner.is(me) {
                         view.buttons.insert(
                             0,
                             (tr("approve_load", "Approve Load"), Action::ApproveLoad, true),
@@ -1257,7 +1290,7 @@ impl Game<'_> {
                         );
                     }
                 }
-                backups::State::Approved => view.lines.push(
+                backups::State::Approved => view.notes.push(
                     tr(
                         "load_approved_line",
                         "Loading the backup from %t: the world closes for a moment and opens again from it.",
@@ -1312,9 +1345,11 @@ impl Game<'_> {
                         });
                 }
             }
-            Action::CopyCode => {
-                if let Some(code) = view.code {
-                    self.copy_text(&code);
+            Action::CopyInvite => {
+                // The world's invite: what a friend adds the world with (the host's join code
+                // changes with every host, and a member never needs it).
+                if let Some(text) = self.shared.as_ref().and_then(|s| list::invite_text(&s.id)) {
+                    self.copy_text(&text);
                     if let Some(shared) = self.shared.as_mut() {
                         shared.copied = Some(Instant::now());
                     }
@@ -1380,6 +1415,17 @@ impl Game<'_> {
 
     /// The app leaves the screen while this game hosts: a checkpoint now, so that what was just
     /// done is in the storage if the system stops the game before it comes back.
+    /// The app came back on the screen: a host's lease says it is back.
+    pub(super) fn shared_back_in_front(&mut self) {
+        if let Some(Shared {
+            phase: Phase::Hosting(host),
+            ..
+        }) = &self.shared
+        {
+            host.hosting.set_away(false);
+        }
+    }
+
     pub(super) fn shared_checkpoint_for_background(&mut self) -> bool {
         let Some(Shared {
             phase: Phase::Hosting(host),
@@ -1388,6 +1434,9 @@ impl Game<'_> {
         else {
             return false;
         };
+        // First, while the system still lets it: nobody is shown playing a world whose host may
+        // be suspended from now on.
+        host.hosting.set_away(true);
         let (Some(server), true) = (&self.integrated, host.opened) else {
             return false;
         };

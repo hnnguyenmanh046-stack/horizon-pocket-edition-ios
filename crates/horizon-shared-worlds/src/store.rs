@@ -48,6 +48,26 @@ pub trait Store: Send + Sync {
     /// Writes the object and returns its new tag. [`Error::Refused`] when `condition` doesn't
     /// hold; nothing is written then.
     fn put(&self, key: &str, data: &[u8], condition: &Condition) -> Result<Etag>;
+    /// As [`Self::put`], telling `sent` how many bytes have gone so far as they go (false
+    /// back stops it: [`Error::Cancelled`]). A store that can't tell says all of them once
+    /// they are written.
+    fn put_reporting(
+        &self,
+        key: &str,
+        data: &[u8],
+        condition: &Condition,
+        sent: &dyn Fn(u64) -> bool,
+    ) -> Result<Etag> {
+        if !sent(0) {
+            return Err(Error::Cancelled);
+        }
+        let etag = self.put(key, data, condition)?;
+        // Written, and then called off: what follows it isn't made.
+        if !sent(data.len() as u64) {
+            return Err(Error::Cancelled);
+        }
+        Ok(etag)
+    }
     /// Every object whose key starts with `prefix`, in key order.
     fn list(&self, prefix: &str) -> Result<Vec<Listed>>;
     /// Removes the object; a key without one is not an error.

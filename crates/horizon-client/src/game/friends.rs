@@ -314,7 +314,8 @@ impl Game<'_> {
         };
         let Some(s) = &self.friends else {
             return FriendsView {
-                shown: self.remote.is_none() || self.integrated.is_some(),
+                // A shared world's Friends screen is every player's, its guests' too.
+                shown: self.shared_active() || self.remote.is_none() || self.integrated.is_some(),
                 ..FriendsView::default()
             };
         };

@@ -66,7 +66,12 @@ impl Remote<'_> {
     /// Writes an object that is written once. If it is already there with the same bytes (a
     /// write whose answer was lost), that is the write.
     fn put_once(&self, key: &str, data: &[u8]) -> Result<()> {
-        match self.store.put(key, data, &Condition::Absent) {
+        self.put_once_reporting(key, data, &|_| true)
+    }
+
+    /// As [`Self::put_once`], telling `sent` the bytes sent so far.
+    fn put_once_reporting(&self, key: &str, data: &[u8], sent: &dyn Fn(u64) -> bool) -> Result<()> {
+        match self.store.put_reporting(key, data, &Condition::Absent, sent) {
             Ok(_) => Ok(()),
             Err(Error::Refused) => match self.store.get(key)? {
                 Some(object) if object.data == data => Ok(()),
@@ -110,7 +115,14 @@ pub fn publish(
     progress: Progress<'_>,
 ) -> Result<Manifest> {
     let (total, _) = upload_size(previous, index);
-    let mut done = 0u64;
+    // What the player sees is what has gone up: packs sent, and the bytes of the one going now
+    // (reading the blocks into it takes a moment only).
+    let progress = std::cell::RefCell::new(progress);
+    let uploaded = std::cell::Cell::new(0u64);
+    let report = |now: u64| -> bool {
+        let mut progress = progress.borrow_mut();
+        (**progress)(now.min(total), total)
+    };
     let mut pack: Vec<u8> = Vec::new();
     let mut pack_number = 0u32;
     let mut pack_names: Vec<String> = Vec::new();
@@ -121,7 +133,9 @@ pub fn publish(
             return Ok(());
         }
         let name = id.pack_name(*number);
-        remote.put_once(&remote.key(&name), pack)?;
+        let before = uploaded.get();
+        remote.put_once_reporting(&remote.key(&name), pack, &|sent| report(before + sent))?;
+        uploaded.set(before + pack.len() as u64);
         names.push(name);
         *number += 1;
         pack.clear();
@@ -160,8 +174,8 @@ pub fn publish(
                 )));
             }
             places.push(Place::New(pack_number, start as u64));
-            done += length;
-            if !progress(done, total) {
+            // Cancelling is heard between blocks too.
+            if !report(uploaded.get()) {
                 return Err(Error::Cancelled);
             }
         }

@@ -1,6 +1,9 @@
-//! The pause menu's Friends button in a shared world (`game/shared_worlds.rs` fills it): who is
-//! playing and who hosts, the host's Give Host and the answers to players who ask to host, and a
-//! guest's Ask to Host. Drawn as Play with Friends is (`friends_screen.rs`).
+//! The pause menu's Friends button in a shared world (`game/shared_worlds.rs` fills it), every
+//! player's, host or guest. Top to bottom: the world and who hosts it; who is in it and how each
+//! one's connection goes; what is going on (a slow route and why, a backup to load, the storage);
+//! what can be done (answers to requests, Give Host to a player, Ask to Host); and at the foot
+//! Copy Invite (the world's invite, for a friend to add it) beside Done. Drawn as Play with
+//! Friends is (`friends_screen.rs`).
 use crate::{
     hud::{HudAtlas, HudBatch, rgba},
     multiplayer::wrap,
@@ -26,8 +29,8 @@ pub enum Action {
     Deny(String),
     /// A guest asks the host for the world.
     AskHost,
-    /// The invite code that joins the host now, to the clipboard.
-    CopyCode,
+    /// The world's invite to the clipboard, for a friend to add the world.
+    CopyInvite,
     /// The owner's answers to a request to load a backup.
     ApproveLoad,
     DeclineLoad,
@@ -38,20 +41,27 @@ pub enum Action {
 #[derive(Clone, Debug, Default)]
 pub struct View {
     pub world: String,
-    /// What is true now, a line each: who hosts, what the host's storage is doing.
-    pub lines: Vec<String>,
+    /// Who hosts ("You host this world.", "Hosted by Alex.").
+    pub status: String,
+    /// Who is in it, with how each connects ("You (host), Steve (direct)").
+    pub players: String,
+    /// What is going on, a note each: a slow route and why, a request, the storage.
+    pub notes: Vec<String>,
     /// Buttons above the footer: the others a row each, then Give Host's (labelled with the
     /// player's name) two to a row under "Give Host to:".
     pub buttons: Vec<(String, Action, bool)>,
-    /// The invite code that joins the host now (Play with Friends' code), once it is known.
-    pub code: Option<String>,
-    /// The code was just copied.
+    /// The world's invite can be copied.
+    pub invite: bool,
+    /// It was just copied.
     pub copied: bool,
 }
 
 const WHITE: u32 = u32::MAX;
 fn grey() -> u32 {
     rgba(170, 170, 170, 255)
+}
+fn soft() -> u32 {
+    rgba(255, 255, 160, 255)
 }
 
 struct Button {
@@ -71,34 +81,27 @@ fn layout(
     let width = (w - 40.0).min(310.0);
     let cx = (w / 2.0).floor();
     let mut lines = Vec::new();
-    let mut y = 36.0;
-    for line in wrap(&view.world, width, atlas) {
-        lines.push((line, WHITE, y));
-        y += 10.0;
-    }
-    y += 4.0;
-    for text in &view.lines {
-        for line in wrap(text, width, atlas) {
-            lines.push((line, grey(), y));
-            y += 10.0;
+    let mut y = 32.0;
+    let text = |lines: &mut Vec<(String, u32, f32)>, y: &mut f32, what: &str, color: u32| {
+        for line in wrap(what, width, atlas) {
+            lines.push((line, color, *y));
+            *y += 10.0;
         }
+    };
+    text(&mut lines, &mut y, &view.world, WHITE);
+    text(&mut lines, &mut y, &view.status, grey());
+    if !view.players.is_empty() {
+        y += 3.0;
+        text(&mut lines, &mut y, &view.players, WHITE);
     }
-    let mut buttons = Vec::new();
-    // The code (Copy Code is beside Done, so that it always fits).
-    if let Some(code) = &view.code {
-        y += 4.0;
-        lines.push((
-            crate::lang::get_or("horizon.multiplayer.invite_code", "Invite Code"),
-            WHITE,
-            y,
-        ));
-        y += 10.0;
-        for line in crate::friends_screen::code_lines(atlas, code, width) {
-            lines.push((line, WHITE, y));
-            y += 10.0;
+    if !view.notes.is_empty() {
+        y += 3.0;
+        for note in &view.notes {
+            text(&mut lines, &mut y, note, soft());
         }
     }
     y += 6.0;
+    let mut buttons = Vec::new();
     let fits = |y: f32| y + 20.0 <= h - 33.0;
     let (give, rows): (Vec<_>, Vec<_>) = view
         .buttons
@@ -138,17 +141,17 @@ fn layout(
             y += 24.0;
         }
     }
-    let done = if view.code.is_some() {
+    let done = if view.invite {
         buttons.push(Button {
             x: cx - 100.0,
             y: h - 27.0,
             w: 98.0,
             label: if view.copied {
-                crate::lang::get_or("horizon.friends.copied", "Copied")
+                tr("copied", "Copied")
             } else {
-                crate::lang::get_or("horizon.friends.copy_code", "Copy Code")
+                tr("copy_invite_short", "Copy Invite")
             },
-            action: Action::CopyCode,
+            action: Action::CopyInvite,
             active: true,
         });
         (cx + 2.0, 98.0)
@@ -219,25 +222,38 @@ pub fn click(
 mod tests {
     use super::*;
 
+    fn atlas() -> HudAtlas {
+        HudAtlas::build(std::path::Path::new("/nonexistent/horizon-test-assets")).unwrap()
+    }
+
+    /// A host's screen with as much on it as there can be.
+    fn busy() -> View {
+        View {
+            world: "Island".into(),
+            status: "You host this world.".into(),
+            players: "You (host), Steve (direct), Alex (bore.pub), Sam (direct, UDP)".into(),
+            notes: vec![
+                "Friends elsewhere may go through bore.pub (slower): your router didn't open a port (turn on UPnP). Now: 2 direct, 1 bore.pub.".into(),
+            ],
+            buttons: (0..7)
+                .map(|i| (format!("Player{i}"), Action::GiveHost(i.to_string()), true))
+                .collect(),
+            invite: true,
+            copied: false,
+        }
+    }
+
     #[test]
     fn every_button_fits_above_the_footer_and_done_is_always_there() {
-        let atlas =
-            HudAtlas::build(std::path::Path::new("/nonexistent/horizon-test-assets")).unwrap();
-        let mut view = View {
-            world: "Island".into(),
-            lines: vec!["You host this world.".into()],
-            buttons: (0..9)
-                .map(|i| (format!("P{i}"), Action::GiveHost(i.to_string()), true))
-                .collect(),
-            ..View::default()
-        };
+        let atlas = atlas();
+        let mut view = busy();
         // Answers to players who asked come first, a row each.
         view.buttons
             .insert(0, ("Let P1 Host".into(), Action::Accept("1".into()), true));
         let (_, buttons) = layout(&atlas, (427.0, 240.0), &view);
         assert_eq!(buttons.last().unwrap().action, Action::Done);
         assert_eq!(buttons[0].action, Action::Accept("1".into()));
-        for b in &buttons[..buttons.len() - 1] {
+        for b in &buttons[..buttons.len() - 2] {
             assert!(b.y + 20.0 <= 240.0 - 33.0);
         }
         // Give Host's two to a row, side by side.
@@ -245,77 +261,44 @@ mod tests {
             .iter()
             .filter(|b| matches!(b.action, Action::GiveHost(_)))
             .collect();
-        assert!(give.len() >= 4, "{}", give.len());
+        assert!(give.len() >= 2, "{}", give.len());
         assert_eq!(give[0].y, give[1].y);
         assert!(give[0].x + give[0].w <= give[1].x);
-        let done = buttons.last().unwrap();
-        assert_eq!(
-            click(&atlas, (427.0, 240.0), (done.x + 5.0, done.y + 5.0), &view),
-            Some(Action::Done)
-        );
     }
 
     #[test]
-    fn the_code_shows_with_copy_code_first_whatever_else_is_there() {
-        let atlas =
-            HudAtlas::build(std::path::Path::new("/nonexistent/horizon-test-assets")).unwrap();
-        let code = "0B33K-Q405Q-1Z5CV-X6NHY-R12N0-VK8T1-60N00-RA134-952PE-1HA08-910P0-K5M01-ST1NB-JDTB6-K4W1P-0";
-        let view = View {
-            world: "Island".into(),
-            lines: vec![
-                "You host this world. Here: Steve (direct), Alex (bore.pub), Sam (direct, UDP)".into(),
-                "Friends elsewhere may go through bore.pub (slower): your router didn't open a port (turn on UPnP). Now: 2 direct, 1 bore.pub.".into(),
-            ],
-            buttons: (0..7)
-                .map(|i| {
-                    (
-                        format!("Player{i}"),
-                        Action::GiveHost(i.to_string()),
-                        true,
-                    )
-                })
-                .collect(),
-            code: Some(code.into()),
-            copied: false,
-        };
+    fn the_sections_come_in_order_and_copy_invite_sits_beside_done() {
+        let atlas = atlas();
+        let view = busy();
         // Phones (the smallest GUI is 240 high), an iPad's, a large one.
-        for size in [
-            (427.0, 240.0),
-            (520.0, 240.0),
-            (341.0, 256.0),
-            (640.0, 360.0),
-        ] {
+        for size in [(427.0, 240.0), (520.0, 240.0), (341.0, 256.0), (640.0, 360.0)] {
             let (lines, buttons) = layout(&atlas, size, &view);
-            // Every group of the code is on screen, in order.
-            let shown: Vec<&str> = lines
-                .iter()
-                .map(|(l, _, _)| l.as_str())
-                .skip_while(|l| *l != "Invite Code")
-                .skip(1)
-                .take_while(|l| l.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'))
-                .collect();
-            assert_eq!(shown.join("-"), code, "{size:?}");
+            let at = |text: &str| {
+                lines
+                    .iter()
+                    .find(|(l, _, _)| l.contains(text))
+                    .map(|(_, _, y)| *y)
+                    .unwrap_or_else(|| panic!("{size:?}: no line with {text}"))
+            };
+            assert!(at("Island") < at("You host") && at("You host") < at("Steve"));
+            assert!(at("Steve") < at("bore.pub (slower)"));
             let copy = &buttons[buttons.len() - 2];
             let done = &buttons[buttons.len() - 1];
             assert_eq!(
                 (&copy.action, &done.action),
-                (&Action::CopyCode, &Action::Done)
+                (&Action::CopyInvite, &Action::Done)
             );
             assert!(copy.active && copy.x + copy.w <= done.x, "{size:?}");
             assert_eq!(
                 click(&atlas, size, (copy.x + 5.0, copy.y + 5.0), &view),
-                Some(Action::CopyCode)
+                Some(Action::CopyInvite)
             );
-            assert_eq!(
-                click(&atlas, size, (done.x + 5.0, done.y + 5.0), &view),
-                Some(Action::Done)
-            );
-            // Above the footer: the text, then at least three Give Host buttons.
+            // Under the text: at least two Give Host buttons, above the footer.
             let give: Vec<&Button> = buttons
                 .iter()
                 .filter(|b| matches!(b.action, Action::GiveHost(_)))
                 .collect();
-            assert!(give.len() >= 4, "{size:?}: {}", give.len());
+            assert!(give.len() >= 2, "{size:?}: {}", give.len());
             let bottom = lines.iter().map(|(_, _, y)| *y + 10.0).fold(0.0, f32::max);
             assert!(
                 give.iter()
@@ -323,8 +306,27 @@ mod tests {
                 "{size:?}"
             );
         }
-        // Before the code is known there is nothing to copy.
-        let (_, buttons) = layout(&atlas, (427.0, 240.0), &View { code: None, ..view });
-        assert!(buttons.iter().all(|b| b.action != Action::CopyCode));
+        // Without an invite to copy, Done alone, full width.
+        let (_, buttons) = layout(&atlas, (427.0, 240.0), &View { invite: false, ..view });
+        assert!(buttons.iter().all(|b| b.action != Action::CopyInvite));
+        assert_eq!(buttons.last().unwrap().w, 200.0);
+    }
+
+    #[test]
+    fn a_guests_screen_has_ask_to_host_and_its_own_route() {
+        let atlas = atlas();
+        let view = View {
+            world: "Island".into(),
+            status: "Hosted by Alex.".into(),
+            players: "Alex (host), You (direct)".into(),
+            notes: vec!["Your connection: direct to the host (no bore.pub).".into()],
+            buttons: vec![("Ask to Host".into(), Action::AskHost, true)],
+            invite: true,
+            copied: false,
+        };
+        let (lines, buttons) = layout(&atlas, (427.0, 240.0), &view);
+        assert!(lines.iter().any(|(l, _, _)| l.contains("Hosted by Alex")));
+        assert!(buttons.iter().any(|b| b.action == Action::AskHost));
+        assert!(buttons.iter().any(|b| b.action == Action::CopyInvite));
     }
 }

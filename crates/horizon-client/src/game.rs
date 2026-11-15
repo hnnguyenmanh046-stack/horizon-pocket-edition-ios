@@ -17135,6 +17135,7 @@ impl ApplicationHandler for Game<'_> {
             window.request_redraw();
             // The next time it goes, it saves again.
             self.saved_for_background = false;
+            self.shared_back_in_front();
             return;
         }
         // The Window constructor: created fullscreen when options.txt or --fullscreen says so.

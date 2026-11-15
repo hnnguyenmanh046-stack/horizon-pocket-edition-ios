@@ -255,6 +255,7 @@ impl S3Store {
         query: &[(&str, &str)],
         extra: &[(&str, String)],
         body: &[u8],
+        sent: Option<&Sending<'_>>,
     ) -> std::result::Result<ureq::Response, Failure> {
         let mut path = format!("/{}", encode(&self.bucket, false));
         if let Some(key) = key {
@@ -295,10 +296,17 @@ impl S3Store {
         for (name, value) in extra {
             request = request.set(name, value);
         }
-        let answer = if method == "PUT" {
-            request.send_bytes(body)
-        } else {
-            request.call()
+        let answer = match (method, sent) {
+            // Streamed, so the bytes are counted as they go.
+            ("PUT", Some(sending)) => request
+                .set("Content-Length", &body.len().to_string())
+                .send(Counted {
+                    data: body,
+                    at: 0,
+                    sending,
+                }),
+            ("PUT", None) => request.send_bytes(body),
+            _ => request.call(),
         };
         match answer {
             Ok(response) => Ok(response),
@@ -337,12 +345,30 @@ impl S3Store {
         body: &[u8],
         expected: &[u16],
     ) -> Result<std::result::Result<ureq::Response, u16>> {
+        self.send_counted(method, key, query, extra, body, expected, None)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn send_counted(
+        &self,
+        method: &str,
+        key: Option<&str>,
+        query: &[(&str, &str)],
+        extra: &[(&str, String)],
+        body: &[u8],
+        expected: &[u16],
+        sent: Option<&Sending<'_>>,
+    ) -> Result<std::result::Result<ureq::Response, u16>> {
         let mut last = String::new();
         for attempt in 0..TRIES {
             if attempt > 0 {
                 std::thread::sleep(Duration::from_millis(250 << (2 * (attempt - 1))));
             }
-            match self.send_once(method, key, query, extra, body) {
+            let outcome = self.send_once(method, key, query, extra, body, sent);
+            if sent.is_some_and(|s| s.stopped.get()) {
+                return Err(Error::Cancelled);
+            }
+            match outcome {
                 Ok(response) => return Ok(Ok(response)),
                 Err(Failure::Status(status, _)) if expected.contains(&status) => {
                     return Ok(Err(status));
@@ -358,6 +384,33 @@ impl S3Store {
             }
         }
         Err(Error::Store(last))
+    }
+}
+
+/// Who hears of a streamed upload's bytes, and whether it said stop.
+struct Sending<'a> {
+    report: &'a dyn Fn(u64) -> bool,
+    stopped: std::cell::Cell<bool>,
+}
+
+/// A body read out as it is sent, counted.
+struct Counted<'a> {
+    data: &'a [u8],
+    at: usize,
+    sending: &'a Sending<'a>,
+}
+
+impl std::io::Read for Counted<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if !(self.sending.report)(self.at as u64) {
+            self.sending.stopped.set(true);
+            return Err(std::io::Error::other("cancelled"));
+        }
+        // 64 KiB at a time: the count moves often enough to show.
+        let n = buf.len().min(self.data.len() - self.at).min(64 * 1024);
+        buf[..n].copy_from_slice(&self.data[self.at..self.at + n]);
+        self.at += n;
+        Ok(n)
     }
 }
 
@@ -449,6 +502,34 @@ impl Store for S3Store {
         // way, which for this caller is the same answer: read it again.
         match self.send("PUT", Some(key), &[], &extra, data, &[412, 409])? {
             Ok(response) => etag_of(&response),
+            Err(_) => Err(Error::Refused),
+        }
+    }
+
+    fn put_reporting(
+        &self,
+        key: &str,
+        data: &[u8],
+        condition: &Condition,
+        sent: &dyn Fn(u64) -> bool,
+    ) -> Result<Etag> {
+        let extra = match condition {
+            Condition::Always => vec![],
+            Condition::Absent => vec![("If-None-Match", "*".to_owned())],
+            Condition::Unchanged(etag) => vec![("If-Match", etag.0.clone())],
+        };
+        let sending = Sending {
+            report: sent,
+            stopped: std::cell::Cell::new(false),
+        };
+        match self.send_counted("PUT", Some(key), &[], &extra, data, &[412, 409], Some(&sending))? {
+            Ok(response) => {
+                let etag = etag_of(&response)?;
+                if !sent(data.len() as u64) {
+                    return Err(Error::Cancelled);
+                }
+                Ok(etag)
+            }
             Err(_) => Err(Error::Refused),
         }
     }

@@ -159,16 +159,18 @@ to the friends you play with. A second world can go in the same bucket: the game
 - **Start** when nobody is playing: you host. **Join** when someone is: you join them.
 - **Leaving as the host:** Save and Quit. The world uploads (a moment; keep the app open until it
   says so) and passes to a player who is still in it. Their game takes it and the others follow.
-- **The invite code:** Game Menu, the Friends button shows the code that joins the host right now,
-  with **Copy Code**. Friends with the world in their list never need it; anyone else can join
-  with it as with Play with Friends, until the host changes.
-- **Give Host:** Game Menu, the Friends button, **Give Host to ...**. **Ask to Host** does the same
-  from a guest's side, and the host answers yes or no.
+- **The Friends button** (Game Menu), for everyone in the world: who hosts, who is in it and how
+  each one connects, anything going on (a slow route and why, a backup to load), the buttons to
+  answer, **Give Host to** a player (the host) or **Ask to Host** (a guest), and **Copy Invite**:
+  the world's invite, for a friend to add the world.
+- **Give Host / Ask to Host:** the host's world closes and opens on the other player's phone in a
+  few seconds, and everyone follows by themselves.
 - **While you host,** the world's copy updates every 5 minutes, and whenever your app goes to the
   background, without stopping play.
-- **If the host's phone dies or loses its connection,** the others wait up to about a minute and a
-  half in case it comes back, then one of them takes the world from its last copy (at most 5
-  minutes old). Nothing is damaged. What the old host did after that copy stays on their phone, as
+- **If the host's app goes to the background,** the list says so at once ("in the background"),
+  and nobody is shown playing.
+- **If the host's phone dies or loses its connection,** the others wait about half a minute in case
+  it comes back, then one of them takes the world from its last copy (at most 5 minutes old). Nothing is damaged. What the old host did after that copy stays on their phone, as
   a separate singleplayer world named "(my own progress)".
 - **If your phone can't reach the storage while you host,** the world pauses until it can, so
   nobody can take it over while you keep playing.

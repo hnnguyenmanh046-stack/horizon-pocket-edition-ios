@@ -281,6 +281,16 @@ fn status_line(status: &Status) -> String {
         Status::Failed(_) => tr("unreachable", "Storage unreachable"),
         Status::Known { playing: 0, .. } => tr("nobody", "Nobody playing"),
         Status::Known {
+            away: true,
+            silent: false,
+            host,
+            ..
+        } => tr("away", "%s's game is in the background").replacen(
+            "%s",
+            host.as_deref().unwrap_or(""),
+            1,
+        ),
+        Status::Known {
             silent: true, host, ..
         } => tr("silent", "%s's game isn't answering").replacen(
             "%s",
@@ -510,7 +520,7 @@ impl Screen {
                             batch,
                             &tr(
                                 "silent_note",
-                                "If it doesn't come back, Start takes the world from its last copy (at most 5 minutes old) once it has been silent for a minute and a half.",
+                                "If it doesn't come back, Start takes the world from its last copy (at most 5 minutes old) once it has been silent for about half a minute.",
                             ),
                             y + 4.0,
                             grey(),
@@ -692,8 +702,8 @@ impl Screen {
                 );
             }
         }
-        if let Some(notice) = &self.notice {
-            lines(batch, notice, h - 64.0, u32::MAX);
+        if let Some(notice) = self.notice.clone().or_else(shared_worlds::flashed) {
+            lines(batch, &notice, h - 64.0, u32::MAX);
         }
     }
 
@@ -771,7 +781,9 @@ impl Screen {
                     Some(Status::Known { playing: 0, .. }) => (tr("start", "Start"), true),
                     // Its host stopped answering: Start waits until it is surely gone, then
                     // takes the world from its last copy (or joins it, if it comes back).
-                    Some(Status::Known { silent: true, .. }) => (tr("start", "Start"), true),
+                    Some(Status::Known { silent: true, .. } | Status::Known { away: true, .. }) => {
+                        (tr("start", "Start"), true)
+                    }
                     Some(Status::Known {
                         open: true, host, ..
                     }) => (
@@ -1362,6 +1374,7 @@ mod tests {
                 open: false,
                 tunnel: false,
                 silent: false,
+                away: false,
             }),
             "Nobody playing"
         );
@@ -1372,6 +1385,7 @@ mod tests {
                 open: true,
                 tunnel: false,
                 silent: false,
+                away: false,
             }),
             "3 playing, hosted by Alex"
         );
@@ -1382,6 +1396,7 @@ mod tests {
                 open: false,
                 tunnel: false,
                 silent: false,
+                away: false,
             }),
             "Alex is opening it"
         );
@@ -1394,10 +1409,22 @@ mod tests {
                     open,
                     tunnel: false,
                     silent: true,
+                    away: false,
                 }),
                 "Alex's game isn't answering"
             );
         }
+        assert_eq!(
+            status_line(&Status::Known {
+                playing: 1,
+                host: Some("Alex".into()),
+                open: true,
+                tunnel: false,
+                silent: false,
+                away: true,
+            }),
+            "Alex's game is in the background"
+        );
     }
 
     #[test]

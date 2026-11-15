@@ -24,14 +24,18 @@ use std::{
 /// The record's format. A lease written by a newer format is never touched.
 pub const VERSION: u32 = 1;
 /// How often a host rewrites the lease.
-pub const HEARTBEAT: Duration = Duration::from_secs(15);
+pub const HEARTBEAT: Duration = Duration::from_secs(6);
 /// A host that hasn't managed to write the lease for this long freezes its world.
-pub const SELF_FENCE: Duration = Duration::from_secs(45);
+pub const SELF_FENCE: Duration = Duration::from_secs(20);
 /// A lease whose heartbeat hasn't moved for this long may be taken over.
-pub const DEAD: Duration = Duration::from_secs(90);
+pub const DEAD: Duration = Duration::from_secs(36);
 /// Players waiting to take over go one at a time, this far apart, in the order of the lease's
 /// player list.
-pub const TURN: Duration = Duration::from_secs(3);
+pub const TURN: Duration = Duration::from_secs(2);
+/// What a host whose lease doesn't say its own (a game from before it did) used: its
+/// heartbeat, and how long it may stand still. A watcher waits that long for it.
+pub const LEGACY_HEARTBEAT: Duration = Duration::from_secs(15);
+pub const LEGACY_DEAD: Duration = Duration::from_secs(90);
 
 // The margin the scheme rests on, checked when the crate is built: a host that can't write
 // the lease has frozen, with two more heartbeats to spare, before anyone may take over.
@@ -91,6 +95,17 @@ pub struct Lease {
     /// host to host.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub loaded: Option<Loaded>,
+    /// The host's game's heartbeat, and how long it may stand still before it may be taken
+    /// (milliseconds): a watcher waits at least that. A lease without them (an older game's)
+    /// is waited for as [`LEGACY_DEAD`] says.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub beat_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dead_ms: Option<u64>,
+    /// The host's app left the screen (its system may suspend it): nobody can play until it is
+    /// back, and the list says so.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub away: bool,
     /// Who is in the world, the host first.
     pub players: Vec<Member>,
     /// The newest copy of the save. A copy counts only once it is named here.
@@ -228,6 +243,9 @@ impl Leases {
             tunnel_at: None,
             closing: false,
             loaded,
+            beat_ms: None,
+            dead_ms: None,
+            away: false,
             players: vec![me.clone()],
             generation,
         };
@@ -261,6 +279,7 @@ impl Leases {
             lease.tunnel = false;
             lease.tunnel_at = None;
             lease.closing = false;
+            lease.away = false;
             lease.players = vec![me.clone()];
         })?;
         Ok(held)
@@ -274,6 +293,8 @@ pub struct Held {
     seen: Seen,
     /// Tokens of writes whose answer never came: any of them may still land.
     unanswered: Vec<String>,
+    /// This game's heartbeat and dead time (ms), written with every change from now on.
+    pace: Option<(u64, u64)>,
 }
 
 impl Held {
@@ -282,7 +303,20 @@ impl Held {
             leases,
             seen,
             unanswered: Vec::new(),
+            pace: None,
         }
+    }
+
+    /// Every write from now on says how this game keeps the lease, for watchers to wait as
+    /// long as it needs.
+    pub fn set_pace(&mut self, timing: &Timing) {
+        let ms = |d: Duration| u64::try_from(d.as_millis()).unwrap_or(u64::MAX);
+        self.pace = Some((ms(timing.heartbeat), ms(timing.dead)));
+    }
+
+    /// The host's app left the screen, or came back.
+    pub fn away(&mut self, away: bool) -> Result<()> {
+        self.update(|lease| lease.away = away)
     }
 
     pub fn lease(&self) -> &Lease {
@@ -298,6 +332,10 @@ impl Held {
         for _ in 0..2 {
             let mut next = self.seen.lease.clone();
             change(&mut next);
+            if let Some((beat, dead)) = self.pace {
+                next.beat_ms = Some(beat);
+                next.dead_ms = Some(dead);
+            }
             next.beat += 1;
             next.token = token()?;
             let data = serde_json::to_vec(&next)?;
@@ -431,8 +469,12 @@ pub struct Timing {
     pub turn: Duration,
     /// How long a handoff waits for its successor before the others may take the world.
     pub handoff_wait: Duration,
-    /// How often a watcher reads the lease.
+    /// How often a watcher reads the lease (three times as often while it changes hands).
     pub poll: Duration,
+    /// What a lease that doesn't say its host's pace is waited for as ([`LEGACY_HEARTBEAT`],
+    /// [`LEGACY_DEAD`]).
+    pub legacy_heartbeat: Duration,
+    pub legacy_dead: Duration,
 }
 
 impl Timing {
@@ -441,8 +483,10 @@ impl Timing {
         self_fence: SELF_FENCE,
         dead: DEAD,
         turn: TURN,
-        handoff_wait: Duration::from_secs(30),
-        poll: Duration::from_secs(5),
+        handoff_wait: Duration::from_secs(15),
+        poll: Duration::from_secs(3),
+        legacy_heartbeat: LEGACY_HEARTBEAT,
+        legacy_dead: LEGACY_DEAD,
     };
 
     /// Whether the rules hold together: a host that can't write freezes, with two heartbeats
@@ -455,15 +499,33 @@ impl Timing {
 
     /// Whether a host whose lease stood still for `quiet` has missed its heartbeats (two, and
     /// two reads late): others may not take the world yet, but it is shown as not answering.
-    pub fn silent(&self, quiet: Duration) -> bool {
-        quiet >= self.heartbeat * 2 + self.poll * 2
+    pub fn silent(&self, lease: &Lease, quiet: Duration) -> bool {
+        quiet >= self.heartbeat_of(lease) * 2 + self.poll * 2
+    }
+
+    /// How often `lease`'s host writes it: what it says (at least this game's own heartbeat),
+    /// or an older game's.
+    pub fn heartbeat_of(&self, lease: &Lease) -> Duration {
+        lease
+            .beat_ms
+            .map_or(self.legacy_heartbeat, Duration::from_millis)
+            .max(self.heartbeat)
+    }
+
+    /// How long `lease`'s host may stand still before it may be taken: what its lease says
+    /// (never less than this game's own), or an older game's [`LEGACY_DEAD`].
+    pub fn dead_for(&self, lease: &Lease) -> Duration {
+        lease
+            .dead_ms
+            .map_or(self.legacy_dead, Duration::from_millis)
+            .max(self.dead)
     }
 
     /// How long the watcher whose turn is `turn` still waits before it may take a lease that
     /// stood still for `quiet`.
-    pub fn left_to_wait(&self, quiet: Duration, turn: usize) -> Duration {
+    pub fn left_to_wait(&self, lease: &Lease, quiet: Duration, turn: usize) -> Duration {
         let turn = u32::try_from(turn).unwrap_or(u32::MAX);
-        self.dead
+        self.dead_for(lease)
             .saturating_add(self.turn.saturating_mul(turn))
             .saturating_sub(quiet)
     }

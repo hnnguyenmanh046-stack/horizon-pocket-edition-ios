@@ -101,6 +101,13 @@ class Player:
     def block(self, pos, name, what, timeout=30):
         self.wait(f'getblock {pos[0]} {pos[1]} {pos[2]}', lambda v: v['block'] == name, timeout, what)
 
+    def wait_uploaded(self, what, timeout=300):
+        """The world closed and its last copy went up: the session is over, and nothing failed
+        (a finished upload says so on the list for a moment, nothing to answer)."""
+        state = self.wait('shared status', lambda v: v['session'] is None
+                          and not v['task'].startswith('Working'), timeout, what)
+        assert not state['task'].startswith('Failed'), state
+
     def checkpoint(self, what):
         """A checkpoint, taken again while one is put off (a write came in between)."""
         for _ in range(10):
@@ -167,7 +174,7 @@ def run(client, resources, work):
         assert len(worlds) == 1, worlds
         world = worlds[0]['id']
         invite = alex(f'shared invite {world}')['invite']
-        assert invite and invite.startswith('HSW1.'), invite
+        assert invite and invite.startswith('HSW2.') and len(invite) <= 160, invite
         steve(f'shared add {invite}')
         assert [w['id'] for w in steve('shared list')['worlds']] == [world]
         print('create: shared into the bucket, and added from the invite', flush=True)
@@ -213,8 +220,7 @@ def run(client, resources, work):
 
         # 6. Alex leaves; the last copy goes up and the world closes.
         alex('disconnect')
-        task = alex.wait_task(lambda t: t.startswith('Done') or t.startswith('Failed'), 300, 'the last upload')['task']
-        assert task.startswith('Done'), task
+        alex.wait_uploaded('the last upload')
         chunks = compat.check_regions(alex.home / 'saves' / WORLD)
         print(f'close: the last copy uploaded; {chunks} chunks read back', flush=True)
 
@@ -279,8 +285,7 @@ def run(client, resources, work):
         alex.block(third, 'minecraft:gold_block', 'the gold block back with the undo', 60)
         print('backups: the load was undone; the gold block is back', flush=True)
         alex('disconnect')
-        task = alex.wait_task(lambda t: t.startswith('Done') or t.startswith('Failed'), 300, 'the last upload again')['task']
-        assert task.startswith('Done'), task
+        alex.wait_uploaded('the last upload again')
     except BaseException:
         for p in made:
             print(f'--- {p.name} log tail ---')

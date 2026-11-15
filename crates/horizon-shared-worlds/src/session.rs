@@ -190,7 +190,8 @@ pub fn next_step(
     }
     let turn = turn(lease, me);
     let host_is_me = lease.host.as_ref().is_some_and(|h| h.uuid == me);
-    let dead = timing.after(timing.dead, quiet, turn);
+    // As long as the host's own game needs (an older game's lease says nothing: its 90 s).
+    let dead = timing.after(timing.dead_for(lease), quiet, turn);
     match lease.state {
         State::Hosting | State::Starting if dead => Next::Host(Claim::Takeover),
         State::Hosting => match &lease.code {
@@ -401,6 +402,8 @@ struct HostLease {
     snapshot: Mutex<Lease>,
     players: Mutex<(Vec<Member>, bool)>,
     open: Mutex<Option<(String, Option<String>)>>,
+    /// The app is away from the screen, and whether that is yet to be written.
+    away: Mutex<(bool, bool)>,
     last_ok: Mutex<Instant>,
     fenced: AtomicBool,
     stop: AtomicBool,
@@ -442,8 +445,17 @@ impl HostLease {
         }
         let open = locked(&self.open).clone();
         let (players, changed) = locked(&self.players).clone();
+        let (away, away_changed) = *locked(&self.away);
         let due = self.quiet() >= self.timing.heartbeat;
-        let result = if let Some(asked) = open {
+        // The app leaving the screen first: the system may suspend it any moment after.
+        let result = if away_changed {
+            self.write(|held| held.away(away)).map(|()| {
+                let mut now = locked(&self.away);
+                if now.0 == away {
+                    now.1 = false;
+                }
+            })
+        } else if let Some(asked) = open {
             self.write(|held| held.open(&asked.0, asked.1.as_deref()))
                 .map(|()| {
                     let mut open = locked(&self.open);
@@ -534,6 +546,7 @@ pub fn host(
     };
     // A backup the owner approved loading: this game holds the world now, so it loads it,
     // before anything is brought onto this device (which then brings the backup).
+    held.set_pace(&ctx.timing);
     if carry_out(&ctx, &mut held).is_some() {
         // The backup replaces whatever this device had, its own unsent progress included,
         // which is kept apart as for any newer copy.
@@ -546,6 +559,7 @@ pub fn host(
         held: Mutex::new(held),
         players: Mutex::new((vec![ctx.me.clone()], false)),
         open: Mutex::new(None),
+        away: Mutex::new((false, false)),
         last_ok: Mutex::new(Instant::now()),
         fenced: AtomicBool::new(false),
         stop: AtomicBool::new(false),
@@ -673,6 +687,15 @@ impl Hosting {
     /// hold the world still until this turns false again.
     pub fn must_freeze(&self) -> bool {
         self.fenced() || self.lease.quiet() >= self.ctx.timing.self_fence
+    }
+
+    /// The app left the screen (`true`), or came back: the lease says so at once, so nobody is
+    /// shown playing a world its host's system may have suspended.
+    pub fn set_away(&self, away: bool) {
+        let mut now = locked(&self.lease.away);
+        if now.0 != away {
+            *now = (away, true);
+        }
     }
 
     /// The world is open and `code` joins it; `tunnel` is where its public tunnel is reached.
@@ -1027,6 +1050,7 @@ pub fn load_now(ctx: &Context) -> Result<GenId> {
         ));
     };
     let mut held = leases.claim(Some(&seen), &ctx.me, &ctx.device, Claim::Free)?;
+    held.set_pace(&ctx.timing);
     let loaded = carry_out(ctx, &mut held);
     let released = held.release();
     match loaded {
@@ -1191,8 +1215,26 @@ impl Watcher {
                                 Ok(Some(seen)) => watch.observe(&seen.lease, Instant::now()),
                                 _ => Duration::ZERO,
                             };
+                            // While the world changes hands (or its host is away, or quiet),
+                            // three times as often: the next host's code is up the moment it is.
+                            let changing = match &read {
+                                Ok(Some(seen)) => {
+                                    let l = &seen.lease;
+                                    matches!(l.state, State::Handoff | State::Starting)
+                                        || l.code.is_none()
+                                        || l.away
+                                        || l.closing
+                                        || quiet >= ctx.timing.heartbeat_of(l)
+                                }
+                                _ => true,
+                            };
                             *locked(&latest) = Some((read, quiet));
-                            next = Instant::now() + ctx.timing.poll;
+                            next = Instant::now()
+                                + if changing {
+                                    ctx.timing.poll / 3
+                                } else {
+                                    ctx.timing.poll
+                                };
                         }
                         std::thread::sleep(step);
                     }
@@ -1246,6 +1288,8 @@ mod tests {
         turn: Duration::from_millis(100),
         handoff_wait: Duration::from_millis(300),
         poll: Duration::from_millis(30),
+        legacy_heartbeat: Duration::from_millis(150),
+        legacy_dead: Duration::from_millis(900),
     };
 
     fn invite() -> WorldInvite {
@@ -1884,6 +1928,9 @@ mod tests {
             tunnel_at: None,
             closing: false,
             loaded: None,
+            beat_ms: None,
+            dead_ms: None,
+            away: false,
             players: vec![member(1, true), member(2, true), member(3, false)],
             generation: None,
         };
@@ -1990,11 +2037,41 @@ mod tests {
             Next::Wait
         );
         // Silence: shown after two heartbeats and two reads; taken only at `dead`.
-        assert!(!FAST.silent(FAST.heartbeat * 2));
-        assert!(FAST.silent(FAST.heartbeat * 2 + FAST.poll * 2));
-        assert_eq!(FAST.left_to_wait(Duration::ZERO, 0), FAST.dead);
-        assert_eq!(FAST.left_to_wait(FAST.dead, 1), FAST.turn);
-        assert_eq!(FAST.left_to_wait(FAST.dead * 2, 0), Duration::ZERO);
+        let paced = Lease {
+            beat_ms: Some(150),
+            dead_ms: Some(900),
+            ..lease(State::Hosting, Some("C"), None)
+        };
+        assert!(!FAST.silent(&paced, FAST.heartbeat * 2));
+        assert!(FAST.silent(&paced, FAST.heartbeat * 2 + FAST.poll * 2));
+        assert_eq!(FAST.left_to_wait(&paced, Duration::ZERO, 0), FAST.dead);
+        assert_eq!(FAST.left_to_wait(&paced, FAST.dead, 1), FAST.turn);
+        assert_eq!(FAST.left_to_wait(&paced, FAST.dead * 2, 0), Duration::ZERO);
+        // A lease that doesn't say its host's pace (an older game's) is waited for as long as
+        // that game needs, and a host that says it needs longer than this game gets it.
+        let older = Lease {
+            beat_ms: None,
+            dead_ms: None,
+            ..paced.clone()
+        };
+        assert_eq!(FAST.dead_for(&older), FAST.legacy_dead);
+        assert_eq!(FAST.heartbeat_of(&older), FAST.legacy_heartbeat);
+        let slow = Lease {
+            dead_ms: Some(5_000),
+            ..paced.clone()
+        };
+        assert_eq!(FAST.dead_for(&slow), Duration::from_secs(5));
+        assert_eq!(
+            next_step(Some(&slow), Duration::from_millis(1_000), &me, "elsewhere", &FAST),
+            Next::Join {
+                code: "C".into(),
+                tunnel: None
+            }
+        );
+        assert_eq!(
+            next_step(Some(&slow), Duration::from_millis(5_100), &me, "elsewhere", &FAST),
+            Next::Host(Claim::Takeover)
+        );
     }
 
     #[test]

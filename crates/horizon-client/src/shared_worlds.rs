@@ -58,6 +58,8 @@ pub enum Status {
         /// signal): nobody can be sure it plays, and Start may take the world once it is
         /// surely gone.
         silent: bool,
+        /// The host's app left the screen: nobody can play until it is back.
+        away: bool,
     },
     /// Its storage couldn't be read; the message says why.
     Failed(String),
@@ -107,6 +109,8 @@ struct State {
     /// The world this game hosts now (getting it ready, playing, or uploading it), whose
     /// lease names this device for a reason.
     hosting_here: Option<String>,
+    /// A line the list shows for a few seconds (the last upload went up, say).
+    flash: Option<(String, Instant)>,
     /// Each world's backups, as last read, and the worlds being read now.
     details: std::collections::HashMap<String, Details>,
     reading: std::collections::HashSet<String>,
@@ -313,6 +317,22 @@ pub fn context(id: &str) -> Result<Context, String> {
     ))
 }
 
+/// A line for the list to show for a few seconds.
+pub fn flash(text: String) {
+    with(|state| state.flash = Some((text, Instant::now())));
+}
+
+/// The list's line of the moment, while it lasts.
+pub fn flashed() -> Option<String> {
+    with(|state| {
+        state
+            .flash
+            .as_ref()
+            .filter(|(_, at)| at.elapsed() < Duration::from_secs(4))
+            .map(|(text, _)| text.clone())
+    })
+}
+
 /// Whether this game hosts a shared world now (it is getting it ready, playing it or uploading
 /// it): its server lets players without an account in.
 pub fn hosting_now() -> bool {
@@ -381,7 +401,8 @@ pub fn refresh(now: bool) {
                             matches!(lease.state, LeaseState::Hosting | LeaseState::Starting);
                         Status::Known {
                             playing: if left { 0 } else { lease.playing() },
-                            silent: live && !left && !ours && Timing::REAL.silent(quiet),
+                            silent: live && !left && !ours && Timing::REAL.silent(&lease, quiet),
+                            away: live && !left && !ours && lease.away,
                             host: lease
                                 .host
                                 .filter(|_| {
