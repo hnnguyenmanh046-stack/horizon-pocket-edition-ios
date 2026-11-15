@@ -48,7 +48,7 @@
 	<key>NSHumanReadableCopyright</key>
 	<string>Horizon Pocket Edition is an iOS port of Horizon, based on Starling; all MIT licensed. Not an official Minecraft product; not approved by or associated with Mojang or Microsoft.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>A native mod built into this app asked to use the microphone.</string>
+	<string>Voice chat with the players of your shared world uses the microphone, only while you turn it on. A native mod built into this app may ask for it too.</string>
 	<key>UIFileSharingEnabled</key>
 	<true/>
 	<!-- With UIFileSharingEnabled, this is what lists Documents under "On My iPhone" in the Files app:

@@ -224,6 +224,35 @@ as it is now, or the copy a load could be undone to).
   same way (asked, then approved).
 - What was played after a backup is never lost by loading it: it stays a backup itself.
 
+### Voice chat
+
+Talk to the players of a shared world from inside the game, without a call running beside it.
+
+- **Off until you turn it on.** Joining a world never plays anyone's voice and never touches
+  your microphone. When others are in the world, a gold line in chat says voice chat is there;
+  when one of them turns it on, another says who.
+- **Turn it on:** Game Menu, **Friends**, **Voice Chat**, **Voice Chat: On**. You hear everyone who
+  has it on, wherever they are in the world. Your microphone is still off.
+- **Your microphone:** the microphone button at the left of the top row of the touch controls
+  (red while muted), or **Microphone** on the Voice Chat page. The first time, iOS asks whether
+  the game may use the microphone. Move, resize or hide the button in the controls editor like
+  the others.
+- **Each player's volume:** on the Voice Chat page every player has a slider from 0 to 200 % and
+  a **Mute** button; **Voices** sets everyone together. What you choose is remembered for that
+  player in every world.
+- **Which microphone:** **Mic** on the same page. Automatic uses a wired headset's microphone when
+  one is plugged in, and otherwise the device's own, so Bluetooth headphones keep playing in
+  full quality. A Bluetooth headset's own microphone can be chosen, at a call's sound quality
+  for everything (that is how Bluetooth works).
+- **Who is talking** shows in the top left corner while voice chat is on.
+- **It turns itself off** when your headphones disconnect, so nobody is suddenly heard out loud;
+  your microphone goes off when a call or Siri takes the sound, and when the game leaves the
+  screen. It follows the world to its next host by itself.
+- **While your microphone is on,** the ring/silent switch doesn't silence the game: iOS treats a
+  live microphone like a call. It does again a few seconds after you mute.
+- **What it costs:** nothing while nobody talks, and about 60 kbit/s for each person talking.
+  Voices travel on the connection the game already has, encrypted like the world.
+
 ### Good to know
 
 - 8 players at most in a world.
