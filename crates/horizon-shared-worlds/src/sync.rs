@@ -71,7 +71,10 @@ impl Remote<'_> {
 
     /// As [`Self::put_once`], telling `sent` the bytes sent so far.
     fn put_once_reporting(&self, key: &str, data: &[u8], sent: &dyn Fn(u64) -> bool) -> Result<()> {
-        match self.store.put_reporting(key, data, &Condition::Absent, sent) {
+        match self
+            .store
+            .put_reporting(key, data, &Condition::Absent, sent)
+        {
             Ok(_) => Ok(()),
             Err(Error::Refused) => match self.store.get(key)? {
                 Some(object) if object.data == data => Ok(()),

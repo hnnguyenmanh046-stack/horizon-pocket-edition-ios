@@ -271,7 +271,12 @@ mod tests {
         let atlas = atlas();
         let view = busy();
         // Phones (the smallest GUI is 240 high), an iPad's, a large one.
-        for size in [(427.0, 240.0), (520.0, 240.0), (341.0, 256.0), (640.0, 360.0)] {
+        for size in [
+            (427.0, 240.0),
+            (520.0, 240.0),
+            (341.0, 256.0),
+            (640.0, 360.0),
+        ] {
             let (lines, buttons) = layout(&atlas, size, &view);
             let at = |text: &str| {
                 lines
@@ -307,7 +312,14 @@ mod tests {
             );
         }
         // Without an invite to copy, Done alone, full width.
-        let (_, buttons) = layout(&atlas, (427.0, 240.0), &View { invite: false, ..view });
+        let (_, buttons) = layout(
+            &atlas,
+            (427.0, 240.0),
+            &View {
+                invite: false,
+                ..view
+            },
+        );
         assert!(buttons.iter().all(|b| b.action != Action::CopyInvite));
         assert_eq!(buttons.last().unwrap().w, 200.0);
     }

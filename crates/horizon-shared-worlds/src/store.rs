@@ -30,6 +30,9 @@ pub struct Etag(pub String);
 pub struct Object {
     pub data: Vec<u8>,
     pub etag: Etag,
+    /// How long ago it was written, by the storage's own clock (its answer's date less the
+    /// object's last change), when the storage says both: no device's clock in it.
+    pub age: Option<std::time::Duration>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -78,6 +81,8 @@ pub trait Store: Send + Sync {
 #[derive(Default)]
 pub struct MemoryStore {
     objects: Mutex<BTreeMap<String, (Vec<u8>, u64)>>,
+    /// When each object was written, for its age (moved back by [`Self::backdate`]).
+    written: Mutex<BTreeMap<String, std::time::Instant>>,
     versions: AtomicU64,
     /// The next this many calls fail before doing anything.
     pub fail_before: AtomicU32,
@@ -117,6 +122,15 @@ impl MemoryStore {
         self.objects.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    /// Makes the object at `key` look written `by` earlier, as a storage whose writer went
+    /// quiet that long ago would answer (tests).
+    pub fn backdate(&self, key: &str, by: std::time::Duration) {
+        let mut written = self.written.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(at) = written.get_mut(key) {
+            *at = at.checked_sub(by).unwrap_or(*at);
+        }
+    }
+
     /// Every key held, for a test's assertions.
     pub fn keys(&self) -> Vec<String> {
         self.objects().keys().cloned().collect()
@@ -135,9 +149,16 @@ fn tag(version: u64) -> Etag {
 impl Store for MemoryStore {
     fn get(&self, key: &str) -> Result<Option<Object>> {
         self.enter()?;
+        let age = self
+            .written
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(key)
+            .map(std::time::Instant::elapsed);
         Ok(self.objects().get(key).map(|(data, version)| Object {
             data: data.clone(),
             etag: tag(*version),
+            age,
         }))
     }
 
@@ -167,6 +188,10 @@ impl Store for MemoryStore {
         }
         let version = self.versions.fetch_add(1, Ordering::SeqCst) + 1;
         objects.insert(key.to_owned(), (data.to_vec(), version));
+        self.written
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(key.to_owned(), std::time::Instant::now());
         if take(&self.fail_after_write) {
             return Err(Error::Store("the answer was lost (test)".into()));
         }
@@ -190,6 +215,10 @@ impl Store for MemoryStore {
     fn delete(&self, key: &str) -> Result<()> {
         self.enter()?;
         self.objects().remove(key);
+        self.written
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(key);
         Ok(())
     }
 }

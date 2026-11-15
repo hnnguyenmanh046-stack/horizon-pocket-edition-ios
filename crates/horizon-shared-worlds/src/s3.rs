@@ -296,18 +296,19 @@ impl S3Store {
         for (name, value) in extra {
             request = request.set(name, value);
         }
-        let answer = match (method, sent) {
-            // Streamed, so the bytes are counted as they go.
-            ("PUT", Some(sending)) => request
-                .set("Content-Length", &body.len().to_string())
-                .send(Counted {
-                    data: body,
-                    at: 0,
-                    sending,
-                }),
-            ("PUT", None) => request.send_bytes(body),
-            _ => request.call(),
-        };
+        let answer =
+            match (method, sent) {
+                // Streamed, so the bytes are counted as they go.
+                ("PUT", Some(sending)) => request
+                    .set("Content-Length", &body.len().to_string())
+                    .send(Counted {
+                        data: body,
+                        at: 0,
+                        sending,
+                    }),
+                ("PUT", None) => request.send_bytes(body),
+                _ => request.call(),
+            };
         match answer {
             Ok(response) => Ok(response),
             Err(ureq::Error::Status(status, response)) => {
@@ -440,6 +441,18 @@ fn read_body(response: ureq::Response) -> Result<Vec<u8>> {
     Ok(data)
 }
 
+/// How long ago the object was written, by the storage's clock alone: its answer's `Date`
+/// less the object's `Last-Modified` (whole seconds, both).
+fn age_of(response: &ureq::Response) -> Option<Duration> {
+    let at = |name: &str| {
+        response
+            .header(name)
+            .and_then(|d| chrono::DateTime::parse_from_rfc2822(d.trim()).ok())
+    };
+    let seconds = (at("Date")? - at("Last-Modified")?).num_seconds();
+    Some(Duration::from_secs(u64::try_from(seconds).unwrap_or(0)))
+}
+
 fn etag_of(response: &ureq::Response) -> Result<Etag> {
     response
         .header("ETag")
@@ -452,9 +465,11 @@ impl Store for S3Store {
         match self.send("GET", Some(key), &[], &[], &[], &[404])? {
             Ok(response) => {
                 let etag = etag_of(&response)?;
+                let age = age_of(&response);
                 Ok(Some(Object {
                     data: read_body(response)?,
                     etag,
+                    age,
                 }))
             }
             Err(_) => Ok(None),
@@ -522,7 +537,15 @@ impl Store for S3Store {
             report: sent,
             stopped: std::cell::Cell::new(false),
         };
-        match self.send_counted("PUT", Some(key), &[], &extra, data, &[412, 409], Some(&sending))? {
+        match self.send_counted(
+            "PUT",
+            Some(key),
+            &[],
+            &extra,
+            data,
+            &[412, 409],
+            Some(&sending),
+        )? {
             Ok(response) => {
                 let etag = etag_of(&response)?;
                 if !sent(data.len() as u64) {

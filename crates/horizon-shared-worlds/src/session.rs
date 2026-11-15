@@ -184,9 +184,14 @@ pub fn next_step(
         return Next::Gone;
     };
     // This device's own game held it and stopped: nobody else can be hosting it, so there is
-    // nothing to wait for. It is picked up again as it was (`Leases::resume`).
-    if lease.left_by(me, device) {
-        return Next::Host(Claim::Free);
+    // nothing to wait for. The same player picks it up again as it was (`Leases::resume`);
+    // another account on this device takes it over, the old progress kept apart.
+    if lease.left_here(device) {
+        return Next::Host(if lease.left_by(me, device) {
+            Claim::Free
+        } else {
+            Claim::Takeover
+        });
     }
     let turn = turn(lease, me);
     let host_is_me = lease.host.as_ref().is_some_and(|h| h.uuid == me);
@@ -408,6 +413,16 @@ struct HostLease {
     fenced: AtomicBool,
     stop: AtomicBool,
     timing: Timing,
+    /// When the game last said it still runs the world ([`Hosting::alive`]); None until it
+    /// first does. A game that stops saying so (it hangs, or lost the world without letting
+    /// it go) stops the heartbeat with it, so the others take the world rather than see it
+    /// played by nobody.
+    pulse: Mutex<Option<Instant>>,
+    /// The world is closed and its last copy goes up ([`Hosting::leave`]): the heartbeat
+    /// keeps the world until then without the game's word.
+    leaving: AtomicBool,
+    /// The heartbeat stands still for the want of the game's word (logged once each time).
+    stalled: AtomicBool,
 }
 
 impl HostLease {
@@ -446,6 +461,22 @@ impl HostLease {
         let open = locked(&self.open).clone();
         let (players, changed) = locked(&self.players).clone();
         let (away, away_changed) = *locked(&self.away);
+        // Out of sight, the system may hold the game's frames back: the away flag covers that.
+        let stalled = !away
+            && !self.leaving.load(Ordering::SeqCst)
+            && locked(&self.pulse).is_some_and(|p| p.elapsed() > self.timing.heartbeat * 2);
+        if stalled != self.stalled.swap(stalled, Ordering::SeqCst) {
+            if stalled {
+                log::warn!(
+                    "Shared worlds: the game stopped running the world: the lease's heartbeat waits for it"
+                );
+            } else {
+                log::info!("Shared worlds: the game runs the world again: the heartbeat goes on");
+            }
+        }
+        if stalled && !away_changed {
+            return;
+        }
         let due = self.quiet() >= self.timing.heartbeat;
         // The app leaving the screen first: the system may suspend it any moment after.
         let result = if away_changed {
@@ -564,6 +595,9 @@ pub fn host(
         fenced: AtomicBool::new(false),
         stop: AtomicBool::new(false),
         timing: ctx.timing,
+        pulse: Mutex::new(None),
+        leaving: AtomicBool::new(false),
+        stalled: AtomicBool::new(false),
     });
     // The heartbeat runs from now: bringing the copy over may take a while, and the world is
     // this game's meanwhile.
@@ -687,6 +721,13 @@ impl Hosting {
     /// hold the world still until this turns false again.
     pub fn must_freeze(&self) -> bool {
         self.fenced() || self.lease.quiet() >= self.ctx.timing.self_fence
+    }
+
+    /// The game still runs the world: call it every frame while hosting (and closing it). Once
+    /// called, the heartbeat goes on only while it keeps being called (or the app is away, or
+    /// leaving): a game that hangs or loses the world stops it, and the others take over.
+    pub fn alive(&self) {
+        *locked(&self.lease.pulse) = Some(Instant::now());
     }
 
     /// The app left the screen (`true`), or came back: the lease says so at once, so nobody is
@@ -839,6 +880,9 @@ impl Hosting {
     /// the lease is handed to `successor` (a UUID), or closed. On an error the world is still
     /// this game's; call again, or [`Self::abandon`] to leave it for this device's next start.
     pub fn leave(&self, successor: Option<&str>, progress: Progress<'_>) -> Result<GenId> {
+        // The upload may outlast the game's frames (in the background, say): the heartbeat
+        // keeps the world till the last copy is in.
+        self.lease.leaving.store(true, Ordering::SeqCst);
         self.wait_idle();
         if self.fenced() {
             return Err(Error::Fenced);
@@ -1212,7 +1256,7 @@ impl Watcher {
                         if Instant::now() >= next {
                             let read = ctx.status();
                             let quiet = match &read {
-                                Ok(Some(seen)) => watch.observe(&seen.lease, Instant::now()),
+                                Ok(Some(seen)) => watch.observe_seen(seen, Instant::now()),
                                 _ => Duration::ZERO,
                             };
                             // While the world changes hands (or its host is away, or quiet),
@@ -1393,6 +1437,148 @@ mod tests {
             outcome.is_some()
         });
         outcome.unwrap().unwrap()
+    }
+
+    /// The game said it ran the world, then stopped saying so (it hung, or lost the world
+    /// without letting it go): the heartbeat stops, the host freezes, and the next player may
+    /// take over; once the game is back, so is the heartbeat. Away, or leaving, it goes on.
+    #[test]
+    fn a_host_whose_game_stopped_running_the_world_stops_its_heartbeat() {
+        let store = Arc::new(MemoryStore::new());
+        let alex = new_world(&store);
+        let steve = Device::new(&store, 2);
+        let hosting = alex.host(Start::Free).unwrap();
+        hosting.open("CODE", None);
+        let leases = alex.ctx.leases();
+        let beat = || leases.read().unwrap().unwrap().lease.beat;
+        // No word from the game yet (getting the world ready): the heartbeat goes on.
+        let first = beat();
+        wait_for("a heartbeat without the game's word", || beat() > first);
+        // The game runs the world: every "frame", for a few heartbeats.
+        let start = Instant::now();
+        while start.elapsed() < FAST.heartbeat * 3 {
+            hosting.alive();
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(!hosting.must_freeze());
+        // It stops: the heartbeat stops (after the one already under way), the host freezes.
+        std::thread::sleep(FAST.heartbeat * 2 + FAST.heartbeat / 2);
+        let stood = beat();
+        std::thread::sleep(FAST.heartbeat * 3);
+        assert_eq!(beat(), stood, "the heartbeat went on without the game");
+        wait_for("the host to freeze", || hosting.must_freeze());
+        // Watched from the start by the next player, the world is theirs to take.
+        let mut watch = Watch::new(Instant::now());
+        wait_for("the next player to take over", || {
+            let seen = leases.read().unwrap().unwrap();
+            let quiet = watch.observe_seen(&seen, Instant::now());
+            next_step(
+                Some(&seen.lease),
+                quiet,
+                &steve.ctx.me.uuid,
+                &steve.ctx.device,
+                &FAST,
+            ) == Next::Host(Claim::Takeover)
+        });
+        // The game is back before anyone took it: so is the heartbeat, and the host unfreezes.
+        let back = Instant::now();
+        let before = beat();
+        while back.elapsed() < FAST.heartbeat * 3 {
+            hosting.alive();
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(beat() > before);
+        assert!(!hosting.must_freeze());
+        // Away from the screen, no frames: the heartbeat goes on (the away flag says it).
+        hosting.set_away(true);
+        let away = beat();
+        wait_for("a heartbeat while away", || beat() > away + 1);
+        hosting.set_away(false);
+        // Leaving with no frames at all: the last copy goes in.
+        std::thread::sleep(FAST.heartbeat * 3);
+        hosting.leave(None, &mut go).unwrap();
+        assert_eq!(leases.read().unwrap().unwrap().lease.state, State::Closed);
+    }
+
+    /// The storage's own clock says how long the lease has stood still: a player who looks
+    /// for the first time long after its host's game stopped isn't made to wait it out again.
+    #[test]
+    fn a_lease_long_still_by_the_storages_clock_is_seen_still_at_once() {
+        let store = Arc::new(MemoryStore::new());
+        let alex = new_world(&store);
+        let steve = Device::new(&store, 2);
+        let hosting = alex.host(Start::Free).unwrap();
+        hosting.open("CODE", None);
+        wait_for("the code in the lease", || {
+            alex.ctx.leases().read().unwrap().unwrap().lease.code.is_some()
+        });
+        // The game ends without a word (its heartbeat with it).
+        hosting.abandon();
+        drop(hosting);
+        store.backdate(&alex.ctx.lease_key, Duration::from_secs(3600));
+        let seen = alex.ctx.leases().read().unwrap().unwrap();
+        assert!(seen.age.unwrap() >= Duration::from_secs(3600));
+        // A first look: nobody is shown playing it, and it may be taken at once.
+        let mut watch = Watch::new(Instant::now());
+        let quiet = watch.observe_seen(&seen, Instant::now());
+        assert!(FAST.silent(&seen.lease, quiet));
+        assert_eq!(
+            next_step(
+                Some(&seen.lease),
+                quiet,
+                &steve.ctx.me.uuid,
+                &steve.ctx.device,
+                &FAST
+            ),
+            Next::Host(Claim::Takeover)
+        );
+        // Written again just now: as still as this device saw it, no more.
+        let mut held = alex
+            .ctx
+            .leases()
+            .claim(Some(&seen), &steve.ctx.me, "x", Claim::Takeover)
+            .unwrap();
+        held.heartbeat(&[steve.ctx.me.clone()]).unwrap();
+        let fresh = alex.ctx.leases().read().unwrap().unwrap();
+        assert!(fresh.age.unwrap() < Duration::from_secs(5));
+        let mut watch = Watch::new(Instant::now());
+        assert!(!FAST.silent(&fresh.lease, watch.observe_seen(&fresh, Instant::now())));
+    }
+
+    /// A game on this device held the world under another account (signed in then, offline
+    /// now) and stopped: nobody is playing it, and this game takes it over at once, the old
+    /// progress kept apart; the same account picks it up as it was.
+    #[test]
+    fn a_leftover_on_this_device_is_taken_under_any_account() {
+        let store = Arc::new(MemoryStore::new());
+        let alex = new_world(&store);
+        let hosting = alex.host(Start::Free).unwrap();
+        hosting.open("CODE", None);
+        wait_for("the code in the lease", || {
+            alex.ctx.leases().read().unwrap().unwrap().lease.code.is_some()
+        });
+        hosting.abandon();
+        drop(hosting);
+        let seen = alex.ctx.leases().read().unwrap().unwrap();
+        let device = &alex.ctx.device;
+        assert!(seen.lease.left_here(device));
+        assert!(!seen.lease.left_here("another device"));
+        let me = &alex.ctx.me.uuid;
+        let other = member(7, false).uuid;
+        assert_eq!(
+            next_step(Some(&seen.lease), Duration::ZERO, me, device, &FAST),
+            Next::Host(Claim::Free)
+        );
+        assert_eq!(
+            next_step(Some(&seen.lease), Duration::ZERO, &other, device, &FAST),
+            Next::Host(Claim::Takeover)
+        );
+        // On another device it is still the host's, until its heartbeat has been still long
+        // enough.
+        assert!(matches!(
+            next_step(Some(&seen.lease), Duration::ZERO, &other, "another", &FAST),
+            Next::Join { .. }
+        ));
     }
 
     #[test]
@@ -2062,14 +2248,26 @@ mod tests {
         };
         assert_eq!(FAST.dead_for(&slow), Duration::from_secs(5));
         assert_eq!(
-            next_step(Some(&slow), Duration::from_millis(1_000), &me, "elsewhere", &FAST),
+            next_step(
+                Some(&slow),
+                Duration::from_millis(1_000),
+                &me,
+                "elsewhere",
+                &FAST
+            ),
             Next::Join {
                 code: "C".into(),
                 tunnel: None
             }
         );
         assert_eq!(
-            next_step(Some(&slow), Duration::from_millis(5_100), &me, "elsewhere", &FAST),
+            next_step(
+                Some(&slow),
+                Duration::from_millis(5_100),
+                &me,
+                "elsewhere",
+                &FAST
+            ),
             Next::Host(Claim::Takeover)
         );
     }

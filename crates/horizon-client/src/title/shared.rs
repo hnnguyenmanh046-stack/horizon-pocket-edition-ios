@@ -777,24 +777,23 @@ impl Screen {
             }
             Page::World(id) => {
                 let status = self.entry(id).map(|e| e.status);
-                let (label, enabled) = match &status {
-                    Some(Status::Known { playing: 0, .. }) => (tr("start", "Start"), true),
+                // Never greyed out: what the button does is decided from the lease as it is
+                // when pressed (join the host, wait for it, or take the world once its host is
+                // surely gone), so a list that is behind never keeps anyone out.
+                let label = match &status {
+                    Some(Status::Known { playing: 0, .. }) => tr("start", "Start"),
                     // Its host stopped answering: Start waits until it is surely gone, then
                     // takes the world from its last copy (or joins it, if it comes back).
                     Some(Status::Known { silent: true, .. } | Status::Known { away: true, .. }) => {
-                        (tr("start", "Start"), true)
+                        tr("start", "Start")
                     }
+                    // Open, or opening (joined once it is).
                     Some(Status::Known {
-                        open: true, host, ..
-                    }) => (
-                        tr("join", "Join %s").replacen("%s", host.as_deref().unwrap_or(""), 1),
-                        true,
-                    ),
-                    Some(Status::Known { .. }) => (tr("wait", "Opening..."), false),
-                    Some(Status::Failed(_)) => (tr("play", "Play"), false),
-                    _ => (tr("play", "Play"), false),
+                        host: Some(host), ..
+                    }) => tr("join", "Join %s").replacen("%s", host, 1),
+                    _ => tr("play", "Play"),
                 };
-                push(cx - 100.0, 110.0, 200.0, label, enabled, PLAY);
+                push(cx - 100.0, 110.0, 200.0, label, true, PLAY);
                 let copied = self.copied.is_some_and(|t| t.elapsed().as_secs() < 2);
                 let copy = if copied {
                     tr("copied", "Copied")

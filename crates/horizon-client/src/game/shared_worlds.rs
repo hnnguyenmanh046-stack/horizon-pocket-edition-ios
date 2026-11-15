@@ -278,7 +278,17 @@ impl Game<'_> {
 
     /// The Shared Worlds screen's Start or Join: watch the world's lease, which says what to do.
     pub(super) fn shared_play(&mut self, world: &str) -> Result<()> {
-        if self.shared.is_some() {
+        if let Some(shared) = &self.shared {
+            // Already under way (its line says how far): another world waits for it, and says so.
+            if shared.id != world {
+                list::flash(
+                    tr(
+                        "busy",
+                        "%s is still being closed or uploaded: try again once it is done.",
+                    )
+                    .replacen("%s", &shared.name, 1),
+                );
+            }
             return Ok(());
         }
         let ctx = match list::context(world) {
@@ -321,6 +331,13 @@ impl Game<'_> {
         let Some(mut shared) = self.shared.take() else {
             return;
         };
+        // Every frame this game still runs the world it hosts: its lease's heartbeat goes on
+        // only while it does (a game that hangs, or loses the world, stops it).
+        match &shared.phase {
+            Phase::Hosting(host) => host.hosting.alive(),
+            Phase::Leaving(leaving) => leaving.hosting.alive(),
+            Phase::Preparing(_) | Phase::Watching(_) => {}
+        }
         let keep = match self.step_shared(&mut shared) {
             Ok(keep) => keep,
             Err(e) => {
@@ -1158,10 +1175,8 @@ impl Game<'_> {
                     named.join(", ")
                 };
                 if host.code.is_none() {
-                    view.notes.push(tr(
-                        "not_open_yet",
-                        "Getting ready for friends to join...",
-                    ));
+                    view.notes
+                        .push(tr("not_open_yet", "Getting ready for friends to join..."));
                 } else if let Some(line) = self.shared_route_line() {
                     view.notes.push(line);
                 }
@@ -1238,7 +1253,10 @@ impl Game<'_> {
                     let mut named = Vec::new();
                     for p in &lease.players {
                         if host.as_ref().is_some_and(|h| h.uuid == p.uuid) {
-                            named.insert(0, tr("named_host", "%s (host)").replacen("%s", &p.name, 1));
+                            named.insert(
+                                0,
+                                tr("named_host", "%s (host)").replacen("%s", &p.name, 1),
+                            );
                         } else if p.uuid == me.uuid {
                             named.push(mine.clone());
                         } else {
@@ -1268,8 +1286,7 @@ impl Game<'_> {
             Phase::Preparing(_) => view.status = tr("getting_ready", "Getting the world ready..."),
             Phase::Leaving(_) => view.status = tr("uploading", "Uploading the world..."),
         }
-        if let Some((Some(seen), owner)) = shared.requests.as_ref().and_then(RequestWatch::latest)
-        {
+        if let Some((Some(seen), owner)) = shared.requests.as_ref().and_then(RequestWatch::latest) {
             let r = seen.request;
             let when = list::when_id(&list::details(&shared.id), r.backup);
             match r.state {

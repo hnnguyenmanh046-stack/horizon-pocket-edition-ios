@@ -117,8 +117,16 @@ impl Lease {
     /// was closed, or the system ended it). Only a game that isn't hosting it may ask: then
     /// nobody hosts it, and that game takes it straight back, its own progress with it.
     pub fn left_by(&self, me: &str, device: &str) -> bool {
+        self.left_here(device) && self.host.as_ref().is_some_and(|h| h.uuid == me)
+    }
+
+    /// Whether a game on this device held the world and stopped without letting it go, under
+    /// any account (one signed in then, another now). A device runs one game at a time, so a
+    /// game here that isn't hosting it knows nobody is: no waiting for a heartbeat that can't
+    /// come.
+    pub fn left_here(&self, device: &str) -> bool {
         matches!(self.state, State::Hosting | State::Starting)
-            && self.host.as_ref().is_some_and(|h| h.uuid == me)
+            && !self.device.is_empty()
             && self.device == device
     }
 
@@ -152,6 +160,9 @@ pub struct Loaded {
 pub struct Seen {
     pub lease: Lease,
     pub etag: Etag,
+    /// How long ago it was written, by the storage's clock (None: just written, or a storage
+    /// that doesn't say).
+    pub age: Option<Duration>,
 }
 
 /// Why a game asks for the world.
@@ -197,6 +208,7 @@ impl Leases {
         Ok(Some(Seen {
             lease,
             etag: object.etag,
+            age: object.age,
         }))
     }
 
@@ -251,7 +263,14 @@ impl Leases {
         };
         let data = serde_json::to_vec(&lease)?;
         match self.store.put(&self.key, &data, &condition) {
-            Ok(etag) => Ok(Held::new(self.clone(), Seen { lease, etag })),
+            Ok(etag) => Ok(Held::new(
+                self.clone(),
+                Seen {
+                    lease,
+                    etag,
+                    age: None,
+                },
+            )),
             // The write may have landed although its answer was lost.
             Err(error) => match self.read() {
                 Ok(Some(found)) if found.lease.token == lease.token => {
@@ -342,7 +361,11 @@ impl Held {
             let condition = Condition::Unchanged(self.seen.etag.clone());
             let error = match self.leases.store.put(&self.leases.key, &data, &condition) {
                 Ok(etag) => {
-                    self.seen = Seen { lease: next, etag };
+                    self.seen = Seen {
+                        lease: next,
+                        etag,
+                        age: None,
+                    };
                     self.unanswered.clear();
                     return Ok(());
                 }
@@ -544,14 +567,56 @@ impl Timing {
 pub struct Watch {
     mark: Option<(u64, u64, String)>,
     since: Instant,
+    /// When the lease was last read ([`Self::observe_seen`]).
+    looked: Option<Instant>,
+    /// The storage once called a write older than it could be (one this watcher saw happen
+    /// since its last look): its ages aren't used from then on.
+    doubted: bool,
 }
+
+/// What the storage's own age of a lease is shaved by before it counts: whole seconds, and
+/// the storage's front and back ends' clocks, are never held against a live host.
+pub const AGE_MARGIN: Duration = Duration::from_secs(10);
 
 impl Watch {
     pub fn new(now: Instant) -> Self {
         Self {
             mark: None,
             since: now,
+            looked: None,
+            doubted: false,
         }
+    }
+
+    /// As [`Self::observe`], and at least as old as the storage says the lease is: a host that
+    /// stopped long before this watcher first looked is seen to have stopped long ago, not
+    /// just now. Both are the storage's clock or this device's alone, never one against the
+    /// other.
+    pub fn observe_seen(&mut self, seen: &Seen, now: Instant) -> Duration {
+        let lease = &seen.lease;
+        let changed = self.mark.as_ref().is_some_and(|(epoch, beat, token)| {
+            (*epoch, *beat, token.as_str()) != (lease.epoch, lease.beat, lease.token.as_str())
+        });
+        let last_look = self.looked.replace(now);
+        let here = self.observe(lease, now);
+        // A write seen to happen since the last look is no older than that look: a storage that
+        // says otherwise isn't believed again.
+        if changed
+            && let (Some(age), Some(then)) = (seen.age, last_look)
+            && age > now.saturating_duration_since(then) + AGE_MARGIN
+        {
+            if !self.doubted {
+                log::warn!(
+                    "Shared worlds: the storage's clock called a new write {} s old: only this device's is used",
+                    age.as_secs()
+                );
+            }
+            self.doubted = true;
+        }
+        if self.doubted {
+            return here;
+        }
+        here.max(seen.age.map_or(Duration::ZERO, |a| a.saturating_sub(AGE_MARGIN)))
     }
 
     /// Notes the lease as read at `now`, and returns how long it has been the same write.
@@ -900,6 +965,46 @@ mod tests {
         assert!(!Watch::may_take(DEAD - Duration::from_millis(1), 0));
     }
 
+    /// The storage's age counts (less its margin) from the first look; a storage that calls a
+    /// write this watcher saw happen older than it can be isn't believed again.
+    #[test]
+    fn the_storages_age_counts_unless_it_is_seen_wrong() {
+        let store = Arc::new(MemoryStore::new());
+        let leases = Leases::new(store.clone(), KEY);
+        let mut host = leases.claim(None, &member(1), "a", Claim::Free).unwrap();
+        let start = Instant::now();
+        let mut watch = Watch::new(start);
+        let mut seen = leases.read().unwrap().unwrap();
+        seen.age = Some(Duration::from_secs(100));
+        assert_eq!(
+            watch.observe_seen(&seen, start),
+            Duration::from_secs(100) - AGE_MARGIN
+        );
+        // Within the margin, nothing: a live host is never aged by a few seconds' rounding.
+        let mut near = Watch::new(start);
+        seen.age = Some(AGE_MARGIN);
+        assert_eq!(near.observe_seen(&seen, start), Duration::ZERO);
+        // A new write a second after the last look, called 100 s old: doubted, for good.
+        host.heartbeat(&[member(1)]).unwrap();
+        let mut fresh = leases.read().unwrap().unwrap();
+        fresh.age = Some(Duration::from_secs(100));
+        let later = start + Duration::from_secs(1);
+        assert_eq!(watch.observe_seen(&fresh, later), Duration::ZERO);
+        let again = later + Duration::from_secs(5);
+        assert_eq!(
+            watch.observe_seen(&fresh, again),
+            Duration::from_secs(5)
+        );
+        // Believed, a new write called as old as the time since the last look allows.
+        let mut fair = Watch::new(start);
+        fair.observe_seen(&seen, start);
+        host.heartbeat(&[member(1)]).unwrap();
+        let mut next = leases.read().unwrap().unwrap();
+        next.age = Some(Duration::from_secs(12));
+        let soon = start + Duration::from_secs(3);
+        assert_eq!(fair.observe_seen(&next, soon), Duration::from_secs(2));
+    }
+
     #[test]
     fn the_real_timing_holds_together() {
         assert!(Timing::REAL.consistent());
@@ -936,15 +1041,17 @@ mod tests {
     fn a_host_freezes_before_anyone_may_take_over() {
         let start = Instant::now();
         let mut pulse = Pulse::new(start);
-        assert!(!pulse.due(start + Duration::from_secs(14)));
+        let ms = Duration::from_millis(1);
+        assert!(!pulse.due(start + HEARTBEAT - ms));
         assert!(pulse.due(start + HEARTBEAT));
-        assert!(!pulse.must_freeze(start + Duration::from_secs(44)));
+        assert!(!pulse.must_freeze(start + SELF_FENCE - ms));
         assert!(pulse.must_freeze(start + SELF_FENCE));
-        pulse.succeeded(start + Duration::from_secs(40));
-        assert!(!pulse.must_freeze(start + Duration::from_secs(80)));
+        let later = start + SELF_FENCE * 2;
+        pulse.succeeded(later);
+        assert!(!pulse.must_freeze(later + SELF_FENCE - ms));
         // An answer that comes back out of order doesn't move the timer backwards.
-        pulse.succeeded(start + Duration::from_secs(10));
-        assert!(!pulse.must_freeze(start + Duration::from_secs(80)));
+        pulse.succeeded(start + HEARTBEAT);
+        assert!(!pulse.must_freeze(later + SELF_FENCE - ms));
     }
 
     /// A small deterministic generator, so a failing run can be repeated.

@@ -40,7 +40,8 @@ const KEY_HEX: u8 = 8;
 const SECRET_HEX: u8 = 16;
 
 fn put_text(out: &mut Vec<u8>, text: &str) -> Result<()> {
-    let len = u16::try_from(text.len()).map_err(|_| Error::Format("too long for an invite".into()))?;
+    let len =
+        u16::try_from(text.len()).map_err(|_| Error::Format("too long for an invite".into()))?;
     out.extend_from_slice(&len.to_be_bytes());
     out.extend_from_slice(text.as_bytes());
     Ok(())
@@ -51,7 +52,9 @@ struct Reader<'a>(&'a [u8]);
 impl Reader<'_> {
     fn take(&mut self, n: usize) -> Result<&[u8]> {
         if self.0.len() < n {
-            return Err(Error::Format("the invite is incomplete: copy the whole line".into()));
+            return Err(Error::Format(
+                "the invite is incomplete: copy the whole line".into(),
+            ));
         }
         let (head, rest) = self.0.split_at(n);
         self.0 = rest;
@@ -251,23 +254,37 @@ mod tests {
         let text = invite.encode().unwrap();
         let old = encode_v1(&invite);
         assert!(text.len() <= 150, "{} characters: {text}", text.len());
-        assert!(text.len() * 2 < old.len(), "{} against {}", text.len(), old.len());
+        assert!(
+            text.len() * 2 < old.len(),
+            "{} against {}",
+            text.len(),
+            old.len()
+        );
         assert_eq!(WorldInvite::decode(&old).unwrap(), invite);
         // A bucket elsewhere (a jurisdiction, another S3 storage, keys that aren't hex, a
         // region) reads back the same too.
         let mut other = invite.clone();
         other.bucket.endpoint =
             "https://0123456789abcdef0123456789abcdef.eu.r2.cloudflarestorage.com".into();
-        assert_eq!(WorldInvite::decode(&other.encode().unwrap()).unwrap(), other);
+        assert_eq!(
+            WorldInvite::decode(&other.encode().unwrap()).unwrap(),
+            other
+        );
         other.bucket.endpoint = "https://s3.eu-central-1.wasabisys.com".into();
         other.bucket.region = "eu-central-1".into();
         other.bucket.access_key = "AKIAIOSFODNN7EXAMPLE".into();
         other.bucket.secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".into();
         other.name = "Île ☀ à deux".into();
-        assert_eq!(WorldInvite::decode(&other.encode().unwrap()).unwrap(), other);
+        assert_eq!(
+            WorldInvite::decode(&other.encode().unwrap()).unwrap(),
+            other
+        );
         // Uppercase hex isn't packed (it would read back lowercase).
         other.bucket.access_key = "0123456789ABCDEF0123456789ABCDEF".into();
-        assert_eq!(WorldInvite::decode(&other.encode().unwrap()).unwrap(), other);
+        assert_eq!(
+            WorldInvite::decode(&other.encode().unwrap()).unwrap(),
+            other
+        );
     }
 
     #[test]

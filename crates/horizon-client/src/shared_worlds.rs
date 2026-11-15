@@ -169,6 +169,26 @@ pub fn me() -> Result<Member, String> {
         });
     }
     let Some(session) = crate::auth::current() else {
+        // A sign-in still on its way (the saved one being renewed at launch, say) is waited
+        // for: playing as the offline profile meanwhile would be another player in the world,
+        // and a lease left under one name looked at as the other.
+        use crate::accounts::State as Account;
+        match crate::accounts::state() {
+            Account::Offline | Account::OfflineProfile(_) => {}
+            Account::Failed(why) => {
+                return Err(tr(
+                    "horizon.shared.sign_in_failed",
+                    "Signing in didn't work (%s): sign in again, or choose to play offline.",
+                )
+                .replacen("%s", &why, 1));
+            }
+            _ => {
+                return Err(tr(
+                    "horizon.shared.signing_in",
+                    "Signing in... the shared world opens once it is done.",
+                ));
+            }
+        }
         // As the game names itself without an account (`Options::player_name`): what its logins
         // name, and so the profile a shared world's host lets in.
         let name = crate::accounts::player_name()
@@ -373,7 +393,6 @@ pub fn refresh(now: bool) {
     let Some((worlds, mut watches, hosting_here)) = worlds else {
         return;
     };
-    let me = me().ok().map(|m| m.uuid);
     let here = device();
     let spawned = std::thread::Builder::new()
         .name("shared-worlds-list".into())
@@ -388,15 +407,17 @@ pub fn refresh(now: bool) {
                     .map_err(|e| e.to_string())
                 }) {
                     Ok(Some(seen)) => {
-                        let lease = seen.lease;
+                        // As old as the storage says it is, on the first look already.
                         let quiet = watches
                             .entry(id.clone())
                             .or_insert_with(|| Watch::new(Instant::now()))
-                            .observe(&lease, Instant::now());
+                            .observe_seen(&seen, Instant::now());
+                        let lease = seen.lease;
                         let ours = hosting_here.as_deref() == Some(id.as_str());
                         // This device's own game held it and stopped (it was closed, or the
                         // system ended it): nobody is in it, and Start takes it back at once.
-                        let left = !ours && me.as_deref().is_some_and(|m| lease.left_by(m, &here));
+                        // Under any account: a device runs one game, and this one isn't hosting.
+                        let left = !ours && lease.left_here(&here);
                         let live =
                             matches!(lease.state, LeaseState::Hosting | LeaseState::Starting);
                         Status::Known {

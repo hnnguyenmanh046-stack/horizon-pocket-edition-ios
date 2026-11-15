@@ -95,6 +95,14 @@ fn objects_ranges_and_listings() {
     let key = format!("{prefix}pack/one two+three.pack");
     let etag = store.put(&key, &data, &Condition::Absent).unwrap();
     let object = store.get(&key).unwrap().unwrap();
+    // How long ago it was written, by the storage's clock alone: just now.
+    assert!(
+        object
+            .age
+            .is_some_and(|age| age < std::time::Duration::from_secs(30)),
+        "{:?}",
+        object.age
+    );
     assert_eq!(object.etag, etag);
     assert_eq!(object.data, data);
     assert_eq!(
