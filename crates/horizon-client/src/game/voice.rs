@@ -668,7 +668,8 @@ impl Game<'_> {
             Err(e) => {
                 self.voice.mic_wanted = false;
                 self.voice_line(
-                    tr("mic_failed", "The microphone couldn't be started: %s").replacen("%s", &e, 1),
+                    tr("mic_failed", "The microphone couldn't be started: %s")
+                        .replacen("%s", &e, 1),
                 );
             }
         }
@@ -1005,8 +1006,7 @@ impl Game<'_> {
                 mics.push(("wired".to_owned(), tr("mic_wired", "Wired Headset")));
             }
             // A Bluetooth headset's own microphone makes everything heard a call's quality.
-            if output == Some(phone::Output::Bluetooth) || self.voice.mic_choice() == "bluetooth"
-            {
+            if output == Some(phone::Output::Bluetooth) || self.voice.mic_choice() == "bluetooth" {
                 mics.push((
                     "bluetooth".to_owned(),
                     tr("mic_bluetooth", "Bluetooth (worse)"),

@@ -322,7 +322,11 @@ mod ios {
         let answered = block2::RcBlock::new(|granted: objc2::runtime::Bool| {
             log::info!(
                 "Horizon: the microphone is {}",
-                if granted.as_bool() { "allowed" } else { "refused" }
+                if granted.as_bool() {
+                    "allowed"
+                } else {
+                    "refused"
+                }
             );
         });
         // SAFETY: the session copies the block and calls it once, on any thread.
