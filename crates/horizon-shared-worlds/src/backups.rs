@@ -216,9 +216,19 @@ pub struct Backup {
     pub kind: Option<Kind>,
 }
 
-/// Every copy the storage keeps, the newest first.
+/// Every copy the storage keeps, the newest first. A copy without a stamp (made before stamps
+/// were kept) has the time its manifest was written, as the storage lists it.
 pub fn list(remote: Remote<'_>) -> Result<Vec<Backup>> {
     let prefix = remote.key("");
+    let written: BTreeMap<GenId, i64> = remote
+        .store
+        .list(&remote.key("gen/"))?
+        .into_iter()
+        .filter_map(|o| {
+            let id = GenId::from_manifest_key(o.key.strip_prefix(&prefix)?)?;
+            Some((id, o.modified?))
+        })
+        .collect();
     let mut stamps: BTreeMap<(u64, u32), (i64, Kind, String)> = BTreeMap::new();
     for object in remote.store.list(&remote.key(STAMPS))? {
         if let Some((of, at, kind, by)) = object.key.strip_prefix(&prefix).and_then(parse_stamp) {
@@ -231,7 +241,7 @@ pub fn list(remote: Remote<'_>) -> Result<Vec<Backup>> {
             let stamp = stamps.get(&(id.epoch, id.seq));
             Backup {
                 id,
-                at: stamp.map(|s| s.0),
+                at: stamp.map(|s| s.0).or_else(|| written.get(&id).copied()),
                 kind: stamp.map(|s| s.1),
                 by: stamp.map(|s| s.2.clone()),
             }

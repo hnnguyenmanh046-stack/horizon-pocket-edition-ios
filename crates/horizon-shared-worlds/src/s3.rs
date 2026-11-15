@@ -160,8 +160,18 @@ fn parse_listing(xml: &str) -> Result<(Vec<Listed>, Option<String>)> {
     while let Some((contents, next)) = element(xml, "Contents", at) {
         let key = element(contents, "Key", 0).map(|(key, _)| unescape(key));
         let size = element(contents, "Size", 0).and_then(|(size, _)| size.trim().parse().ok());
+        // RFC 3339 (`2026-11-14T10:00:00.000Z`); one that doesn't read is left out.
+        let modified = element(contents, "LastModified", 0).and_then(|(at, _)| {
+            chrono::DateTime::parse_from_rfc3339(at.trim())
+                .ok()
+                .map(|t| t.timestamp())
+        });
         match (key, size) {
-            (Some(key), Some(size)) => listed.push(Listed { key, size }),
+            (Some(key), Some(size)) => listed.push(Listed {
+                key,
+                size,
+                modified,
+            }),
             _ => {
                 return Err(Error::Format(
                     "a listing entry without a key or size".into(),
@@ -612,6 +622,7 @@ mod tests {
         let page = "<?xml version=\"1.0\"?><ListBucketResult><IsTruncated>true</IsTruncated>\
             <Contents><Key>w/a/gen/1.json</Key><LastModified>x</LastModified><Size>120</Size></Contents>\
             <Contents><Key>w/a/p&amp;q</Key><Size>7</Size></Contents>\
+            <Contents><Key>w/a/gen/2.json</Key><LastModified>2026-11-14T10:00:00.000Z</LastModified><Size>9</Size></Contents>\
             <NextContinuationToken>tok&lt;1</NextContinuationToken></ListBucketResult>";
         let (listed, next) = parse_listing(page).unwrap();
         assert_eq!(
@@ -619,11 +630,18 @@ mod tests {
             [
                 Listed {
                     key: "w/a/gen/1.json".into(),
-                    size: 120
+                    size: 120,
+                    modified: None
                 },
                 Listed {
                     key: "w/a/p&q".into(),
-                    size: 7
+                    size: 7,
+                    modified: None
+                },
+                Listed {
+                    key: "w/a/gen/2.json".into(),
+                    size: 9,
+                    modified: Some(1_794_650_400)
                 }
             ]
         );

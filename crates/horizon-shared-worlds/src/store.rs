@@ -36,6 +36,8 @@ pub struct Object {
 pub struct Listed {
     pub key: String,
     pub size: u64,
+    /// When the storage says it was written (seconds since 1970), if it says.
+    pub modified: Option<i64>,
 }
 
 pub trait Store: Send + Sync {
@@ -160,6 +162,7 @@ impl Store for MemoryStore {
             .map(|(key, (data, _))| Listed {
                 key: key.clone(),
                 size: data.len() as u64,
+                modified: None,
             })
             .collect())
     }
@@ -218,11 +221,13 @@ mod tests {
             [
                 Listed {
                     key: "a/1".into(),
-                    size: 10
+                    size: 10,
+                    modified: None
                 },
                 Listed {
                     key: "a/2".into(),
-                    size: 2
+                    size: 2,
+                    modified: None
                 }
             ]
         );

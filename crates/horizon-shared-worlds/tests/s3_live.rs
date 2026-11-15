@@ -115,6 +115,15 @@ fn objects_ranges_and_listings() {
     let listed = store.list(&format!("{prefix}gen/")).unwrap();
     assert_eq!(listed.len(), 5);
     assert!(listed.iter().all(|o| o.size == 1));
+    // When each was written, for a backup made before stamps were kept: within a minute of now
+    // on this machine's clock.
+    let now = horizon_shared_worlds::backups::now();
+    assert!(
+        listed
+            .iter()
+            .all(|o| o.modified.is_some_and(|at| (at - now).abs() < 60)),
+        "{listed:?}"
+    );
     assert_eq!(store.list(&prefix).unwrap().len(), 6);
     for object in store.list(&prefix).unwrap() {
         store.delete(&object.key).unwrap();
@@ -237,6 +246,10 @@ fn a_world_goes_up_and_comes_down_the_same() {
     .unwrap();
     assert_eq!(fetched.downloaded, first.size());
     assert_eq!(guest.tree(), host.tree());
+    // A copy without a stamp is shown with the time the storage wrote it.
+    let backups = horizon_shared_worlds::backups::list(remote).unwrap();
+    assert_eq!(backups.len(), 1);
+    assert!(backups[0].at.is_some() && backups[0].by.is_none());
     // The host plays on: three blocks of the region, the level file, one file gone.
     for block in [2usize, 3, 17] {
         region[BLOCK as usize * block + 5] ^= 0x0f;
