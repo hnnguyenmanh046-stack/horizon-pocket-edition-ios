@@ -308,7 +308,10 @@ mod tests {
                     wanted
                 );
                 for (i, b) in foot.iter().enumerate() {
-                    assert!(b.x >= 0.0 && b.x + b.w <= size.0, "{size:?}: off the screen");
+                    assert!(
+                        b.x >= 0.0 && b.x + b.w <= size.0,
+                        "{size:?}: off the screen"
+                    );
                     if let Some(next) = foot.get(i + 1) {
                         assert!(b.x + b.w <= next.x, "{size:?}: the foot's buttons overlap");
                     }

@@ -117,7 +117,10 @@ fn green() -> u32 {
 enum Kind {
     Button(Action),
     /// A slider at `value` (0 to 1): a person's volume, or everyone's (None).
-    Slider { person: Option<u128>, value: f32 },
+    Slider {
+        person: Option<u128>,
+        value: f32,
+    },
 }
 
 struct Item {
@@ -136,7 +139,11 @@ fn rows(h: f32, top: f32) -> usize {
     (((h - 33.0 - top) / 24.0).floor() as usize).max(1)
 }
 
-fn layout(atlas: &HudAtlas, (w, h): (f32, f32), view: &View) -> (Vec<(String, u32, f32)>, Vec<Item>) {
+fn layout(
+    atlas: &HudAtlas,
+    (w, h): (f32, f32),
+    view: &View,
+) -> (Vec<(String, u32, f32)>, Vec<Item>) {
     let cx = (w / 2.0).floor();
     let (left, right, half) = (cx - 152.0, cx + 2.0, 150.0);
     let mut lines = Vec::new();
@@ -213,15 +220,17 @@ fn layout(atlas: &HudAtlas, (w, h): (f32, f32), view: &View) -> (Vec<(String, u3
             ),
             grey(),
         )),
-        None if view.people.is_empty() => Some((
-            tr("nobody", "Nobody else is in voice chat yet."),
-            grey(),
-        )),
+        None if view.people.is_empty() => {
+            Some((tr("nobody", "Nobody else is in voice chat yet."), grey()))
+        }
         None => None,
     };
     let mut y = 80.0;
     if let Some((note, color)) = note {
-        for line in wrap(&note, (w - 40.0).min(310.0), atlas).into_iter().take(2) {
+        for line in wrap(&note, (w - 40.0).min(310.0), atlas)
+            .into_iter()
+            .take(2)
+        {
             lines.push((line, color, y));
             y += 10.0;
         }
@@ -614,7 +623,14 @@ mod tests {
             panic!("the slider didn't take the tap");
         };
         assert_eq!(volume, 1.0);
-        assert_eq!(held, Held { person: Some(0), x, w });
+        assert_eq!(
+            held,
+            Held {
+                person: Some(0),
+                x,
+                w
+            }
+        );
         assert_eq!(held.action(x - 50.0), Action::Volume(0, 0.0));
         assert_eq!(held.action(x + w + 50.0), Action::Volume(0, MAX_VOLUME));
         // In steps of 5 %.
@@ -646,12 +662,24 @@ mod tests {
             .map(|i| i.label.as_str())
             .filter(|l| !l.starts_with("Mute") && !l.starts_with('<') && !l.starts_with('>'))
             .collect();
-        assert_eq!(active, ["Voice Chat: Off", "Mic: iPhone Microphone", "gui.back"]);
+        assert_eq!(
+            active,
+            ["Voice Chat: Off", "Mic: iPhone Microphone", "gui.back"]
+        );
         // The host's game has none: nothing but Back.
         let none = View::default();
         let (lines, items) = layout(&atlas, size, &none);
-        assert!(items.iter().filter(|i| i.active).all(|i| i.label == "gui.back"));
-        assert!(lines.iter().any(|(l, ..)| l.contains("doesn't have voice chat")));
+        assert!(
+            items
+                .iter()
+                .filter(|i| i.active)
+                .all(|i| i.label == "gui.back")
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|(l, ..)| l.contains("doesn't have voice chat"))
+        );
     }
 
     #[test]

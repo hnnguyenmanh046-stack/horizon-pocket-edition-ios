@@ -16466,8 +16466,12 @@ impl Game<'_> {
                     }
                 }
                 // From voice chat's page back to the Friends screen, then to the menu.
-                Screen::Friends if self.voice_page_close() => {}
-                Screen::Stats | Screen::Friends => self.screen = Screen::Paused,
+                Screen::Friends => {
+                    if !self.voice_page_close() {
+                        self.screen = Screen::Paused;
+                    }
+                }
+                Screen::Stats => self.screen = Screen::Paused,
                 Screen::Social => self.close_social(),
                 Screen::ServerLinks => self.screen = Screen::Paused,
                 // ConfirmScreen.keyPressed: Escape answers no; both return to
@@ -18195,9 +18199,7 @@ impl Game<'_> {
                             self.friends_screen_click()
                         }
                         // A slider of voice chat's page let go.
-                        Screen::Friends if button == MouseButton::Left => {
-                            self.voice_page_release()
-                        }
+                        Screen::Friends if button == MouseButton::Left => self.voice_page_release(),
                         Screen::Social if pressed && button == MouseButton::Left => {
                             self.social_click()
                         }
