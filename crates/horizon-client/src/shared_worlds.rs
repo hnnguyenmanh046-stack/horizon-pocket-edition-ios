@@ -167,9 +167,8 @@ pub fn me() -> Result<Member, String> {
     let Some(session) = crate::auth::current() else {
         // As the game names itself without an account (`Options::player_name`): what its logins
         // name, and so the profile a shared world's host lets in.
-        let name = crate::accounts::player_name().unwrap_or_else(|| {
-            crate::offline_name::load_or_create(&crate::logging::player_dir())
-        });
+        let name = crate::accounts::player_name()
+            .unwrap_or_else(|| crate::offline_name::load_or_create(&crate::logging::player_dir()));
         return Ok(Member {
             uuid: format!("{:032x}", horizon_protocol::crypto::offline_uuid(&name)),
             name,

@@ -742,7 +742,11 @@ fn serve_login(
     // A shared world's host lets a player without an account in as the offline profile of its
     // name (what such a player's login names); any other login is authenticated.
     let offline_guest = !c.is_memory()
-        && shared.config.online.as_ref().is_some_and(|o| o.offline_guests)
+        && shared
+            .config
+            .online
+            .as_ref()
+            .is_some_and(|o| o.offline_guests)
         && hello.uuid == offline_uuid(&hello.name);
     let online = shared
         .config
@@ -1753,8 +1757,14 @@ mod tests {
             .encode(),
         )
         .unwrap();
-        c.send(&login::Serverbound::Hello(login::ServerHello { name: name.into(), uuid }).encode())
-            .unwrap();
+        c.send(
+            &login::Serverbound::Hello(login::ServerHello {
+                name: name.into(),
+                uuid,
+            })
+            .encode(),
+        )
+        .unwrap();
         loop {
             let (id, payload) = c.recv().unwrap();
             match login::Clientbound::decode(id, &payload).unwrap() {
