@@ -34,7 +34,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Arc, Condvar, Mutex, MutexGuard,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU32, Ordering},
     },
     thread::JoinHandle,
     time::{Duration, Instant},
@@ -423,7 +423,16 @@ struct HostLease {
     leaving: AtomicBool,
     /// The heartbeat stands still for the want of the game's word (logged once each time).
     stalled: AtomicBool,
+    /// Minutes between backups, as the world's owner chose them ([`backups::every`]), read
+    /// again every [`EVERY_READ_BEATS`] heartbeats; and whether that changed since the game
+    /// last asked.
+    every: AtomicU32,
+    every_changed: AtomicBool,
 }
+
+/// How often a host reads the owner's choice of minutes between backups again, in heartbeats
+/// (a minute).
+const EVERY_READ_BEATS: u32 = 10;
 
 impl HostLease {
     fn write(&self, change: impl FnOnce(&mut Held) -> Result<()>) -> Result<()> {
@@ -449,6 +458,12 @@ impl HostLease {
 
     fn quiet(&self) -> Duration {
         locked(&self.last_ok).elapsed()
+    }
+
+    fn set_every(&self, minutes: u32) {
+        if self.every.swap(minutes, Ordering::SeqCst) != minutes {
+            self.every_changed.store(true, Ordering::SeqCst);
+        }
     }
 
     /// The heartbeat thread's work: the code once it is known, the players when they change,
@@ -598,18 +613,31 @@ pub fn host(
         pulse: Mutex::new(None),
         leaving: AtomicBool::new(false),
         stalled: AtomicBool::new(false),
+        // Unreadable now: the default, until the next read says otherwise.
+        every: AtomicU32::new(backups::every(ctx.remote()).unwrap_or(backups::EVERY_DEFAULT)),
+        every_changed: AtomicBool::new(false),
     });
     // The heartbeat runs from now: bringing the copy over may take a while, and the world is
     // this game's meanwhile.
     let heart = {
         let lease = lease.clone();
+        let ctx = ctx.clone();
         let step = (ctx.timing.heartbeat / 15).max(Duration::from_millis(10));
+        let read_every = ctx.timing.heartbeat * EVERY_READ_BEATS;
         std::thread::Builder::new()
             .name("shared-worlds-lease".into())
             .spawn(move || {
                 let mut last_try = None;
+                let mut every_read = Instant::now();
                 while !lease.stop.load(Ordering::SeqCst) && !lease.fenced.load(Ordering::SeqCst) {
                     lease.beat(&mut last_try);
+                    // The owner may choose another pace while someone else hosts.
+                    if every_read.elapsed() >= read_every {
+                        every_read = Instant::now();
+                        if let Ok(minutes) = backups::every(ctx.remote()) {
+                            lease.set_every(minutes);
+                        }
+                    }
                     std::thread::sleep(step);
                 }
             })?
@@ -721,6 +749,22 @@ impl Hosting {
     /// hold the world still until this turns false again.
     pub fn must_freeze(&self) -> bool {
         self.fenced() || self.lease.quiet() >= self.ctx.timing.self_fence
+    }
+
+    /// Minutes between the backups this host keeps (its checkpoints), as the owner chose.
+    pub fn backup_every(&self) -> u32 {
+        self.lease.every.load(Ordering::SeqCst)
+    }
+
+    /// The owner chose another pace on this device: it counts at once.
+    pub fn set_backup_every(&self, minutes: u32) {
+        self.lease.set_every(minutes);
+    }
+
+    /// Whether the pace changed since this was last asked (the next checkpoint's wait is
+    /// worked out again).
+    pub fn backup_every_changed(&self) -> bool {
+        self.lease.every_changed.swap(false, Ordering::SeqCst)
     }
 
     /// The game still runs the world: call it every frame while hosting (and closing it). Once
@@ -1437,6 +1481,31 @@ mod tests {
             outcome.is_some()
         });
         outcome.unwrap().unwrap()
+    }
+
+    /// The owner's choice of minutes between backups reaches whoever hosts: at the start, and
+    /// while hosting (read again in a while, or at once on the owner's own game).
+    #[test]
+    fn the_host_keeps_backups_at_the_owners_pace() {
+        let store = Arc::new(MemoryStore::new());
+        let alex = new_world(&store);
+        let steve = Device::new(&store, 2);
+        let remote = alex.ctx.remote();
+        backups::record_owner(remote, &alex.ctx.me).unwrap();
+        backups::set_every(remote, &alex.ctx.me, 15).unwrap();
+        let hosting = steve.host(Start::Free).unwrap();
+        assert_eq!(hosting.backup_every(), 15);
+        assert!(!hosting.backup_every_changed());
+        // Chosen again by the owner elsewhere: the host follows within its next read.
+        backups::set_every(remote, &alex.ctx.me, 2).unwrap();
+        wait_for("the host to read the new pace", || hosting.backup_every() == 2);
+        assert!(hosting.backup_every_changed());
+        assert!(!hosting.backup_every_changed());
+        // On the host's own game: at once.
+        hosting.set_backup_every(60);
+        assert_eq!(hosting.backup_every(), 60);
+        assert!(hosting.backup_every_changed());
+        hosting.leave(None, &mut go).unwrap();
     }
 
     /// The game said it ran the world, then stopped saying so (it hung, or lost the world

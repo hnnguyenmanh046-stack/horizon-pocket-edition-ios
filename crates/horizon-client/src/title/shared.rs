@@ -51,6 +51,7 @@ const BACKUP_ROW: u8 = 223;
 const BACKUP_PREVIOUS: u8 = 229;
 const BACKUP_NEXT: u8 = 238;
 const BACKUP_BACK: u8 = 243;
+const BACKUP_EVERY: u8 = 217;
 const APPROVE: u8 = 244;
 const DECLINE: u8 = 245;
 const WITHDRAW: u8 = 246;
@@ -216,7 +217,30 @@ fn backup_lines(details: &shared_worlds::Details) -> Vec<String> {
         }
         None => {}
     }
+    out.push(every_line(details));
     out
+}
+
+/// How often a backup is kept, and what that means: the most a host's phone dying can lose.
+fn every_line(details: &shared_worlds::Details) -> String {
+    let line = if details.owner_is_me() {
+        tr(
+            "every_yours",
+            "A backup every %d minutes while played, the most a crash can lose. Tap Backups to change it.",
+        )
+    } else {
+        tr(
+            "every_theirs",
+            "A backup every %d minutes while played, the most a crash can lose.",
+        )
+    };
+    line.replacen("%d", &details.every.to_string(), 1)
+}
+
+/// The pace after `minutes` in the owner's choices, round again after the last.
+fn next_every(minutes: u32) -> u32 {
+    let at = backups::EVERY.iter().position(|m| *m == minutes);
+    backups::EVERY[at.map_or(0, |i| (i + 1) % backups::EVERY.len())]
 }
 
 /// The storage the world and its bucket use, one short line (the oldest backups go first when
@@ -580,8 +604,9 @@ impl Screen {
                         batch,
                         &tr(
                             "no_backups",
-                            "No backups yet: one is kept every few minutes while the world is played.",
-                        ),
+                            "No backups yet: one is kept every %d minutes while the world is played.",
+                        )
+                        .replacen("%d", &details.every.to_string(), 1),
                         y + 4.0,
                         grey(),
                     );
@@ -995,10 +1020,24 @@ impl Screen {
                     }
                     [] => {}
                 }
+                // How often a backup is kept: the owner's to choose, shown to everyone.
                 push(
-                    cx - 100.0,
+                    cx - 154.0,
                     h - 27.0,
-                    200.0,
+                    150.0,
+                    if details.read {
+                        tr("every_button", "Backups: every %d min")
+                            .replacen("%d", &details.every.to_string(), 1)
+                    } else {
+                        tr("every_unread", "Backups: ...")
+                    },
+                    details.read && details.owner_is_me(),
+                    BACKUP_EVERY,
+                );
+                push(
+                    cx + 4.0,
+                    h - 27.0,
+                    150.0,
                     tr("back", "Back"),
                     true,
                     BACKUP_BACK,
@@ -1196,6 +1235,14 @@ impl Screen {
                 let _ = crate::platform::open_link(CLOUDFLARE_URL);
             }
             HELP_BACK | BACKUP_BACK | LOAD_CANCEL => self.leave_page(),
+            BACKUP_EVERY => {
+                if let Page::Backups(world) = &self.page {
+                    let details = shared_worlds::details(world);
+                    if details.read && details.owner_is_me() {
+                        shared_worlds::set_backup_every(world, next_every(details.every));
+                    }
+                }
+            }
             BACKUPS => {
                 if let Page::World(world) = &self.page {
                     shared_worlds::read_details(world);
@@ -1353,6 +1400,18 @@ mod tests {
             ("https://abc.r2.cloudflarestorage.com".into(), None)
         );
         assert_eq!(storage_address("not a url"), ("not a url".into(), None));
+    }
+
+    #[test]
+    fn the_backup_pace_cycles_through_the_owners_choices() {
+        let mut seen = vec![backups::EVERY_DEFAULT];
+        for _ in 0..backups::EVERY.len() {
+            seen.push(next_every(*seen.last().unwrap()));
+        }
+        // From the default round every choice and back to it; an unknown one starts over.
+        assert_eq!(seen, [5, 10, 15, 30, 60, 2, 5]);
+        assert_eq!(next_every(7), backups::EVERY[0]);
+        assert!(BACKUP_EVERY < ADD_CONFIRM && !(ROW..ROW + 6).contains(&BACKUP_EVERY));
     }
 
     #[test]

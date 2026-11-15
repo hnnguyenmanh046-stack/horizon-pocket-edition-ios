@@ -7467,6 +7467,15 @@ impl Game<'_> {
         // MinecraftServer.tickServer's countdown, then autoSave: three
         // hundred seconds of ticks at the rate the server runs at now.
         self.ticks_until_autosave -= 1;
+        // A shared world's owner chose another pace for its backups: the wait under way is
+        // worked out again (never longer than what is left of the new one).
+        if self
+            .shared_host
+            .as_ref()
+            .is_some_and(|hosting| hosting.backup_every_changed())
+        {
+            self.ticks_until_autosave = self.next_autosave_interval();
+        }
         self.autosaving = self.ticks_until_autosave <= 0;
         if let Some(serving) = &self.serving {
             serving.set_saving(self.autosaving);
@@ -15462,7 +15471,11 @@ impl Game<'_> {
         } else {
             self.clock.rate()
         };
-        autosave_interval(rate)
+        // A shared world's host keeps its backups (checkpoints) as often as its owner chose.
+        match &self.shared_host {
+            Some(hosting) => shared_worlds::autosave_interval_every(rate, hosting.backup_every()),
+            None => autosave_interval(rate),
+        }
     }
     /// `MinecraftServer.onTickRateChanged`: a rate that asks for a shorter
     /// wait than the one already running shortens it.

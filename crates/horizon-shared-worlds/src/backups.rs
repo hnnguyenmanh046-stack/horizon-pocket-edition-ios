@@ -10,7 +10,7 @@
 //!
 //! | Object | What it is |
 //! |---|---|
-//! | `world.json` | Who shared the world ([`WorldMeta`]) |
+//! | `world.json` | Who shared the world, and how often a backup is kept ([`WorldMeta`]) |
 //! | `load.json` | The latest request to load a backup ([`Request`]), and what became of it |
 //! | `stamp/<epoch>-<seq>-<time>-<kind>-<name>` | Empty: when a copy was made, by whom, and why |
 use crate::{
@@ -41,6 +41,71 @@ pub struct WorldMeta {
     pub version: u32,
     pub owner: Member,
     pub created: i64,
+    /// Minutes between the backups its host keeps while it is played (one of [`EVERY`]); left
+    /// out, [`EVERY_DEFAULT`]. The owner's to choose ([`set_every`]); an older game leaves it be.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub every: Option<u32>,
+}
+
+/// The minutes a world's owner may choose between backups. Each backup is also the most a
+/// host whose phone dies can lose, and a short pause of the world while it is saved.
+pub const EVERY: [u32; 6] = [2, 5, 10, 15, 30, 60];
+/// As the game's own autosave.
+pub const EVERY_DEFAULT: u32 = 5;
+
+/// The minutes between backups a record says: one of [`EVERY`] (a value no game offers is taken
+/// as the nearest one that is).
+pub fn every_of(meta: Option<&WorldMeta>) -> u32 {
+    match meta.and_then(|m| m.every) {
+        None => EVERY_DEFAULT,
+        Some(asked) => EVERY
+            .into_iter()
+            .min_by_key(|m| m.abs_diff(asked))
+            .unwrap_or(EVERY_DEFAULT),
+    }
+}
+
+/// The world's record and its tag, if it has one.
+pub fn meta(remote: Remote<'_>) -> Result<Option<(WorldMeta, Etag)>> {
+    let Some(object) = remote.store.get(&remote.key(META))? else {
+        return Ok(None);
+    };
+    let meta = serde_json::from_slice(&object.data)
+        .map_err(|e| Error::Format(format!("the world's record doesn't read: {e}")))?;
+    Ok(Some((meta, object.etag)))
+}
+
+/// The minutes between backups the world's owner chose.
+pub fn every(remote: Remote<'_>) -> Result<u32> {
+    Ok(every_of(meta(remote)?.as_ref().map(|(m, _)| m)))
+}
+
+/// The owner (`me`) chooses the minutes between backups, one of [`EVERY`]. Refused to anyone
+/// else, and for a world whose owner isn't recorded yet (its sharer's game records it first).
+pub fn set_every(remote: Remote<'_>, me: &Member, minutes: u32) -> Result<()> {
+    if !EVERY.contains(&minutes) {
+        return Err(Error::Format(format!("{minutes} minutes isn't one of {EVERY:?}")));
+    }
+    // A write between the read and this one (another field, or the same choice twice): again.
+    for _ in 0..5 {
+        let Some((mut meta, etag)) = meta(remote)? else {
+            return Err(Error::Refused);
+        };
+        if meta.owner.uuid != me.uuid {
+            return Err(Error::Refused);
+        }
+        meta.every = Some(minutes);
+        match remote.store.put(
+            &remote.key(META),
+            &serde_json::to_vec(&meta)?,
+            &Condition::Unchanged(etag),
+        ) {
+            Ok(_) => return Ok(()),
+            Err(Error::Refused) => continue,
+            Err(e) => return Err(e),
+        }
+    }
+    Err(Error::Store("the world's record kept changing".into()))
 }
 
 /// Who says yes to loading a backup.
@@ -73,9 +138,7 @@ impl Owner {
 
 /// The world's owner, as the storage records it.
 pub fn owner(remote: Remote<'_>) -> Result<Owner> {
-    if let Some(object) = remote.store.get(&remote.key(META))? {
-        let meta: WorldMeta = serde_json::from_slice(&object.data)
-            .map_err(|e| Error::Format(format!("the world's record doesn't read: {e}")))?;
+    if let Some((meta, _)) = meta(remote)? {
         return Ok(Owner::Known(meta.owner));
     }
     // Shared before owners were kept: whoever made its first copy shared it.
@@ -95,6 +158,7 @@ pub fn record_owner(remote: Remote<'_>, me: &Member) -> Result<bool> {
         version: 1,
         owner: me.clone(),
         created: now(),
+        every: None,
     };
     match remote.store.put(
         &remote.key(META),
@@ -488,6 +552,51 @@ mod tests {
             store,
             prefix: PREFIX,
         }
+    }
+
+    /// The owner alone chooses how often a backup is kept; the choice survives the record being
+    /// read by a game that doesn't know it, and a world without one keeps the default.
+    #[test]
+    fn the_owner_chooses_how_often_backups_are_kept() {
+        let store = MemoryStore::new();
+        let remote = remote(&store);
+        // No record yet: the default, and nobody may choose.
+        assert_eq!(every(remote).unwrap(), EVERY_DEFAULT);
+        assert!(matches!(set_every(remote, &member(1), 10), Err(Error::Refused)));
+        assert!(record_owner(remote, &member(1)).unwrap());
+        assert_eq!(every(remote).unwrap(), EVERY_DEFAULT);
+        // Someone else: refused, nothing changes.
+        assert!(matches!(set_every(remote, &member(2), 30), Err(Error::Refused)));
+        assert_eq!(every(remote).unwrap(), EVERY_DEFAULT);
+        // Not a choice the game offers: refused.
+        assert!(matches!(set_every(remote, &member(1), 7), Err(Error::Format(_))));
+        for minutes in EVERY {
+            set_every(remote, &member(1), minutes).unwrap();
+            assert_eq!(every(remote).unwrap(), minutes);
+        }
+        // The owner is kept, and recording it again changes nothing.
+        assert_eq!(owner(remote).unwrap(), Owner::Known(member(1)));
+        assert!(!record_owner(remote, &member(2)).unwrap());
+        assert_eq!(every(remote).unwrap(), 60);
+        // A record from before the choice existed reads, as the default.
+        let old = br#"{"version":1,"owner":{"uuid":"00000000000000000000000000000001","name":"Player1"},"created":5}"#;
+        let (_, etag) = meta(remote).unwrap().unwrap();
+        store
+            .put(&remote.key(META), old, &Condition::Unchanged(etag))
+            .unwrap();
+        assert_eq!(every(remote).unwrap(), EVERY_DEFAULT);
+        set_every(remote, &member(1), 15).unwrap();
+        assert_eq!(every(remote).unwrap(), 15);
+        // A value no game offers is read as the nearest one that is.
+        let odd = |every| {
+            every_of(Some(&WorldMeta {
+                version: 1,
+                owner: member(1),
+                created: 0,
+                every: Some(every),
+            }))
+        };
+        assert_eq!((odd(0), odd(3), odd(11), odd(1000)), (2, 2, 10, 60));
     }
 
     #[test]

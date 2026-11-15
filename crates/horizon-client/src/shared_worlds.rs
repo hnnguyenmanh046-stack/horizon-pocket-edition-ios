@@ -111,6 +111,8 @@ struct State {
     hosting_here: Option<String>,
     /// A line the list shows for a few seconds (the last upload went up, say).
     flash: Option<(String, Instant)>,
+    /// The pace of a world's backups the owner just chose here, for its host here.
+    every_now: Option<(String, u32)>,
     /// Each world's backups, as last read, and the worlds being read now.
     details: std::collections::HashMap<String, Details>,
     reading: std::collections::HashSet<String>,
@@ -726,6 +728,8 @@ pub struct Details {
     pub hosted: bool,
     /// (the whole bucket, this world) in bytes.
     pub usage: Option<(u64, u64)>,
+    /// Minutes between backups, as the owner chose (`backups::EVERY`).
+    pub every: u32,
     /// This player.
     pub me: Option<Member>,
     pub error: Option<String>,
@@ -792,6 +796,7 @@ pub fn read_details(world: &str) {
                     }),
                     loaded: lease.and_then(|l| l.loaded),
                     usage: backups::usage(remote).ok(),
+                    every: backups::every(remote).map_err(s)?,
                     me: Some(ctx.me.clone()),
                     error: None,
                 })
@@ -901,6 +906,69 @@ fn backup_task(
             "The game couldn't start that.",
         )));
     }
+}
+
+/// The owner chooses `minutes` between the world's backups: shown at once, written on a thread
+/// of its own, and taken up at once by this game if it hosts the world (another host reads it
+/// within a minute). A refusal or an error is told, and the shown choice goes back.
+pub fn set_backup_every(world: &str, minutes: u32) {
+    let before = with(|state| {
+        let details = state.details.entry(world.to_owned()).or_default();
+        std::mem::replace(&mut details.every, minutes)
+    });
+    let id = world.to_owned();
+    let spawned = std::thread::Builder::new()
+        .name("shared-worlds-every".into())
+        .spawn(move || {
+            let written = context(&id).and_then(|ctx| {
+                backups::set_every(ctx.remote(), &ctx.me, minutes).map_err(|e| match e {
+                    horizon_shared_worlds::Error::Refused => tr(
+                        "horizon.shared.every_owner",
+                        "Only the player who shared this world chooses how often its backups are kept.",
+                    ),
+                    e => e.to_string(),
+                })
+            });
+            match written {
+                Ok(()) => with(|state| {
+                    state.every_now = Some((id.clone(), minutes));
+                    state.flash = Some((
+                        tr("horizon.shared.every_set", "A backup every %d minutes from now on.")
+                            .replacen("%d", &minutes.to_string(), 1),
+                        Instant::now(),
+                    ));
+                }),
+                Err(e) => {
+                    with(|state| {
+                        if let Some(d) = state.details.get_mut(&id)
+                            && d.every == minutes
+                        {
+                            d.every = before;
+                        }
+                    });
+                    set_task(Task::Failed(e));
+                }
+            }
+        });
+    if spawned.is_err() {
+        set_task(Task::Failed(tr(
+            "horizon.shared.no_thread",
+            "The game couldn't start that.",
+        )));
+    }
+}
+
+/// A pace the owner chose on this device for `world` since this was last asked (its host here
+/// takes it up at once).
+pub fn take_every_now(world: &str) -> Option<u32> {
+    with(|state| match &state.every_now {
+        Some((id, minutes)) if id == world => {
+            let minutes = *minutes;
+            state.every_now = None;
+            Some(minutes)
+        }
+        _ => None,
+    })
 }
 
 /// Loads an approved request at once if nobody is playing; what to tell the player.

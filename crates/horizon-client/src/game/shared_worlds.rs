@@ -136,6 +136,12 @@ struct Leaving {
     failures: u32,
 }
 
+/// The ticks between a shared world's checkpoints at `rate` ticks a second: `minutes` of them,
+/// as `autosave_interval` counts its five.
+pub(super) fn autosave_interval_every(rate: f32, minutes: u32) -> i64 {
+    i64::from((rate * 60.0 * minutes as f32) as i32).max(100)
+}
+
 /// The last world's server thread ended without its closing save (it panicked): the files on
 /// disk may be half-written, and are never uploaded as the world's copy.
 static CLOSED_UNCLEAN: AtomicBool = AtomicBool::new(false);
@@ -649,6 +655,8 @@ impl Game<'_> {
                     server.execute(move |g| {
                         g.shared_host = Some(hosting);
                         g.shared_inbox = Some(inbox);
+                        // The first checkpoint at the owner's pace, not the autosave's.
+                        g.ticks_until_autosave = g.next_autosave_interval();
                     });
                 }
                 if let Err(e) = self.friends_start_with(public_tunnel()) {
@@ -721,6 +729,10 @@ impl Game<'_> {
                 log::warn!("Shared worlds: the world didn't close: {e}");
             }
             return Ok(true);
+        }
+        // The owner (this player) chose another pace for the backups: at once.
+        if let Some(minutes) = list::take_every_now(&shared.id) {
+            host.hosting.set_backup_every(minutes);
         }
         let frozen = host.hosting.must_freeze();
         if frozen && !host.frozen_told {
