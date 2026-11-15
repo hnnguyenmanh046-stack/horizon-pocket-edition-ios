@@ -296,6 +296,8 @@ pub struct CaptureOptions {
     pub echo_guard: Option<Arc<Playout>>,
     /// The system already levels the microphone (its voice processing): leave the level.
     pub level_as_is: bool,
+    /// The noise filter the player turned on ([`crate::dsp::Denoise`]).
+    pub noise_filter: bool,
 }
 
 struct Input {
@@ -398,7 +400,7 @@ fn run(shared: &Shared, sink: &Sink, options: &CaptureOptions) {
     let Ok(mut encoder) = Encoder::new() else {
         return;
     };
-    let mut chain = Chain::new(options.level_as_is);
+    let mut chain = Chain::new(options.level_as_is, options.noise_filter);
     let mut resampler = Resampler::new(RATE, RATE);
     let mut raw: Vec<f32> = Vec::new();
     let mut pending: Vec<f32> = Vec::new();
@@ -768,6 +770,7 @@ mod tests {
                 CaptureOptions {
                     echo_guard: Some(playout.clone()),
                     level_as_is: false,
+                    noise_filter: false,
                 },
             )
             .unwrap()

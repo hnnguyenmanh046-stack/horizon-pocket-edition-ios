@@ -36,6 +36,8 @@ pub struct Settings {
     /// The players muted here, by account.
     pub muted: BTreeSet<String>,
     pub echo: Echo,
+    /// The noise filter on this player's own microphone ([`crate::dsp::Denoise`]).
+    pub noise_filter: bool,
 }
 
 impl Default for Settings {
@@ -47,6 +49,7 @@ impl Default for Settings {
             volumes: BTreeMap::new(),
             muted: BTreeSet::new(),
             echo: Echo::Auto,
+            noise_filter: false,
         }
     }
 }
@@ -152,6 +155,7 @@ mod tests {
         settings.mic = "Headset Microphone".into();
         settings.voices = 0.8;
         settings.echo = Echo::Guard;
+        settings.noise_filter = true;
         let back = Settings::parse(&settings.to_json());
         assert_eq!(back, settings);
         assert_eq!(back.volume_of(ALEX), 1.5);

@@ -700,11 +700,14 @@ impl Game<'_> {
             Echo::Off => (false, false),
         };
         let playout = self.voice.playout.clone();
+        let noise_filter = self.voice.settings.noise_filter;
         let attempt = |system: bool, guard: bool| -> std::result::Result<Mic, String> {
             let pipe = make(CaptureOptions {
                 echo_guard: guard.then(|| playout.clone()),
-                // The system's voice processing levels the microphone itself.
+                // The system's voice processing levels the microphone itself, and filters
+                // its noise.
                 level_as_is: system,
+                noise_filter: noise_filter && !system,
             })?;
             let feed = pipe.clone();
             let capture = phone::start_capture(
@@ -731,7 +734,10 @@ impl Game<'_> {
     /// The microphone the game's sound library opens (a desktop, Android).
     #[cfg(not(target_os = "ios"))]
     fn voice_open_microphone(&mut self, make: MakePipe<'_>) -> std::result::Result<Mic, String> {
-        let pipe = make(CaptureOptions::default())?;
+        let pipe = make(CaptureOptions {
+            noise_filter: self.voice.settings.noise_filter,
+            ..CaptureOptions::default()
+        })?;
         let feed = pipe.clone();
         let capture = horizon_client::audio_capture::open(
             &self.voice.settings.mic,
@@ -1045,6 +1051,7 @@ impl Game<'_> {
                 .map_or_else(|| tr("mic_automatic", "Automatic"), |(_, label)| label),
             mic_choice: !self.voice_mics().is_empty(),
             voices: self.voice.voices_volume(),
+            noise_filter: self.voice.settings.noise_filter,
             people: self
                 .voice
                 .people()
@@ -1065,8 +1072,29 @@ impl Game<'_> {
                 .note
                 .as_ref()
                 .filter(|(_, at)| at.elapsed() < Duration::from_secs(6))
-                .map(|(note, _)| note.clone()),
+                .map(|(note, _)| note.clone())
+                .or_else(|| self.voice_delay_note()),
         }
+    }
+
+    /// A line for the page when the others' voices play well behind their arrival: the
+    /// connection brings them in bursts (through the public tunnel, say), and the buffer that
+    /// rides the bursts out is that long.
+    fn voice_delay_note(&self) -> Option<String> {
+        let behind = self
+            .voice
+            .people()
+            .iter()
+            .filter(|p| p.talking)
+            .map(|p| p.delay_ms)
+            .max()?;
+        (behind >= 160).then(|| {
+            tr(
+                "behind",
+                "The connection is uneven: voices play about %d ms behind.",
+            )
+            .replacen("%d", &(behind / 20 * 20).to_string(), 1)
+        })
     }
 
     /// Opens voice chat's page of the Friends screen.
@@ -1154,6 +1182,21 @@ impl Game<'_> {
                         tr(
                             "bluetooth_note",
                             "A Bluetooth headset's own microphone lowers the quality of everything you hear, as on a call.",
+                        ),
+                        Instant::now(),
+                    ));
+                }
+            }
+            Action::NoiseFilter(on) => {
+                self.voice.settings.noise_filter = on;
+                self.voice.unsaved.get_or_insert_with(Instant::now);
+                // The microphone starts again with it (or without).
+                self.voice.mic = None;
+                if on {
+                    self.voice.note = Some((
+                        tr(
+                            "noise_note",
+                            "The noise filter takes a room's steady noise out of your microphone. It uses a little more battery.",
                         ),
                         Instant::now(),
                     ));

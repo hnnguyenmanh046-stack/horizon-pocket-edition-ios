@@ -1,7 +1,8 @@
 //! Voice chat's page of the pause menu's Friends screen in a shared world (`game/voice.rs`
 //! fills it). Top to bottom: voice chat on or off beside the microphone on or muted; which
 //! microphone beside everyone's volume together; then each of the others, a slider for their
-//! volume (0 to 200 %) beside Mute, a page of them at a time; and Back at the foot.
+//! volume (0 to 200 %) beside Mute, a page of them at a time; and at the foot the noise filter
+//! of this player's own microphone beside Back.
 //!
 //! A slider takes a tap as well as a drag: on a phone a finger's tap sets it.
 use crate::{
@@ -51,6 +52,8 @@ pub struct View {
     pub mic_choice: bool,
     /// Everyone's volume together, 0 to [`MAX_VOLUME`].
     pub voices: f32,
+    /// The noise filter on this player's own microphone.
+    pub noise_filter: bool,
     pub people: Vec<Person>,
     /// The first of the people shown.
     pub first: usize,
@@ -65,6 +68,8 @@ pub enum Action {
     Mic(bool),
     /// The next microphone of the device's.
     NextMic,
+    /// The noise filter on this player's own microphone, on or off.
+    NoiseFilter(bool),
     Voices(f32),
     Volume(u128, f32),
     Mute(u128, bool),
@@ -299,7 +304,19 @@ fn layout(
     items.push(button(
         cx - 100.0,
         h - 27.0,
-        200.0,
+        98.0,
+        if view.noise_filter {
+            tr("noise_on", "Noise Filter: On")
+        } else {
+            tr("noise_off", "Noise Filter: Off")
+        },
+        view.offered,
+        Action::NoiseFilter(!view.noise_filter),
+    ));
+    items.push(button(
+        cx + 2.0,
+        h - 27.0,
+        98.0,
         "gui.back".into(),
         true,
         Action::Back,
@@ -441,6 +458,7 @@ mod tests {
             mic_name: "iPhone Microphone".into(),
             mic_choice: true,
             voices: 1.0,
+            noise_filter: false,
             people: (0..7).map(|i| person(i, &format!("Player{i}"))).collect(),
             first: 0,
             note: None,
@@ -647,6 +665,11 @@ mod tests {
         ));
         let (x, y, _) = at("Mute");
         assert_eq!(tap(x + 5.0, y + 5.0), Some((Action::Mute(0, true), None)));
+        let (x, y, _) = at("Noise Filter: Off");
+        assert_eq!(
+            tap(x + 5.0, y + 5.0),
+            Some((Action::NoiseFilter(true), None))
+        );
         // Nowhere: nothing.
         assert_eq!(tap(1.0, 1.0), None);
         // With voice chat off only turning it on (and Back, and muting ahead) can be asked.
@@ -664,7 +687,12 @@ mod tests {
             .collect();
         assert_eq!(
             active,
-            ["Voice Chat: Off", "Mic: iPhone Microphone", "gui.back"]
+            [
+                "Voice Chat: Off",
+                "Mic: iPhone Microphone",
+                "Noise Filter: Off",
+                "gui.back"
+            ]
         );
         // The host's game has none: nothing but Back.
         let none = View::default();

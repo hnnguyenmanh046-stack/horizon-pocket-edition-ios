@@ -8,6 +8,9 @@ description = "Voice chat between the players of a world: the codec, the message
 [dependencies]
 # The codec: libopus (BSD), built with the crate (opusic-sys). 48 kHz mono speech at ~32 kbit/s.
 opus = "0.4"
+# The noise filter a player may turn on (RNNoise in Rust, BSD): the library alone, without its
+# command line tool.
+nnnoiseless = { version = "0.5", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1.0.151"
 

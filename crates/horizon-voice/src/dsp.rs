@@ -226,10 +226,52 @@ impl EchoGuard {
     }
 }
 
+/// The noise filter a player may turn on: a room's steady noise (a fan, traffic, a keyboard)
+/// taken out of the microphone before anything else looks at it (RNNoise). Off unless asked
+/// for: it costs more than the codec does, and a voice is a little less its own through it.
+pub struct Denoise {
+    state: Box<nnnoiseless::DenoiseState<'static>>,
+    /// Its first frame fades in from nothing: not used.
+    primed: bool,
+}
+
+impl Default for Denoise {
+    fn default() -> Self {
+        Self {
+            state: nnnoiseless::DenoiseState::new(),
+            primed: false,
+        }
+    }
+}
+
+impl Denoise {
+    /// Filters a frame in place (two of the filter's own frames of 10 ms).
+    pub fn process(&mut self, frame: &mut [f32; FRAME]) {
+        const PART: usize = nnnoiseless::DenoiseState::FRAME_SIZE;
+        // The filter works on samples as 16-bit ones count them.
+        const SCALE: f32 = 32_768.0;
+        let mut input = [0.0f32; PART];
+        let mut output = [0.0f32; PART];
+        for part in frame.chunks_exact_mut(PART) {
+            for (to, from) in input.iter_mut().zip(part.iter()) {
+                *to = from * SCALE;
+            }
+            self.state.process_frame(&mut output, &input);
+            if !std::mem::replace(&mut self.primed, true) {
+                part.fill(0.0);
+                continue;
+            }
+            for (to, from) in part.iter_mut().zip(&output) {
+                *to = if from.is_finite() { from / SCALE } else { 0.0 };
+            }
+        }
+    }
+}
+
 /// The microphone's whole way to the coder.
-#[derive(Debug, Clone)]
 pub struct Chain {
     high_pass: HighPass,
+    denoise: Option<Denoise>,
     gate: Gate,
     agc: Agc,
     guard: EchoGuard,
@@ -241,6 +283,7 @@ impl Default for Chain {
     fn default() -> Self {
         Self {
             high_pass: HighPass::new(80.0),
+            denoise: None,
             gate: Gate::default(),
             agc: Agc::default(),
             guard: EchoGuard::default(),
@@ -250,10 +293,12 @@ impl Default for Chain {
 }
 
 impl Chain {
-    /// The way for a microphone whose level is left as the system gives it, or not.
-    pub fn new(level_as_is: bool) -> Self {
+    /// The way for a microphone whose level is left as the system gives it, or not, with
+    /// the noise filter or without.
+    pub fn new(level_as_is: bool, noise_filter: bool) -> Self {
         Self {
             level_as_is,
+            denoise: noise_filter.then(Denoise::default),
             ..Self::default()
         }
     }
@@ -277,6 +322,9 @@ impl Chain {
             }
         }
         self.high_pass.process(frame);
+        if let Some(denoise) = &mut self.denoise {
+            denoise.process(frame);
+        }
         if let Some(far) = far {
             self.guard.process(frame, far);
         }
@@ -470,6 +518,32 @@ mod tests {
     }
 
     #[test]
+    fn the_noise_filter_takes_a_rooms_noise_down_and_keeps_within_bounds() {
+        let mut denoise = Denoise::default();
+        let mut seed = 21;
+        let mut left = 0.0;
+        for mut frame in noise(0.05, 150, &mut seed) {
+            denoise.process(&mut frame);
+            assert!(frame.iter().all(|s| s.is_finite() && s.abs() <= 1.5));
+            left = rms(&frame);
+        }
+        assert!(left < 0.05 * 0.7, "the noise is still at {left}");
+        // Silence in is silence out.
+        let mut quiet = [0.0; FRAME];
+        for _ in 0..10 {
+            denoise.process(&mut quiet);
+        }
+        assert!(rms(&quiet) < 0.001);
+        // In the chain it comes before the gate: a noisy room isn't sent.
+        let mut chain = Chain::new(false, true);
+        let mut sent = 0;
+        for mut frame in noise(0.02, 300, &mut seed) {
+            sent += usize::from(chain.process(&mut frame, None) == Verdict::Speech);
+        }
+        assert!(sent < 100, "{sent} frames of a noisy room were sent");
+    }
+
+    #[test]
     fn the_whole_way_gives_speech_at_its_level_under_full_scale() {
         let mut chain = Chain::default();
         let mut seed = 11;
@@ -496,10 +570,7 @@ mod tests {
             assert_eq!(chain.process(&mut frame, Some(0.3)), Verdict::Silent);
         }
         // As the microphone gives it, when asked.
-        let mut chain = Chain {
-            level_as_is: true,
-            ..Chain::default()
-        };
+        let mut chain = Chain::new(true, false);
         let mut frame = tone(300.0, 0.05, 1)[0];
         chain.process(&mut frame, None);
         assert!(amplitude_at(&frame[FRAME / 2..], 300.0) < 0.06);

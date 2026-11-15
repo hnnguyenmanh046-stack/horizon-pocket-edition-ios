@@ -53,6 +53,14 @@ Voice chat codes voices with [Opus](https://opus-codec.org/), built from the sou
 > IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT
 > OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+## RNNoise (voice chat's noise filter)
+
+The noise filter a player may turn on for their microphone is
+[nnnoiseless](https://github.com/jneem/nnnoiseless) by Joe Neeman, a port to Rust of Xiph's
+[RNNoise](https://gitlab.xiph.org/xiph/rnnoise) (Copyright 2017-2018 Mozilla, Copyright 2008-2011
+Octasic Inc., Copyright 2007-2009 Xiph.Org Foundation, Copyright 2003-2004 Mark Borgerding), under
+the same 3-clause BSD licence as Opus above.
+
 ## Create
 
 `crates/horizon-client/src/game/kinetic_machines.rs` ports
