@@ -545,13 +545,15 @@ pub fn output_callbacks() -> u64 {
     CALLBACKS.load(std::sync::atomic::Ordering::Relaxed)
 }
 
-// Only the output stream mixes; a build without one (no `audio` feature) never does.
-#[cfg_attr(not(feature = "audio"), allow(dead_code))]
+/// The game's sounds alone, as the output mixed them before there were stream sources: what
+/// the tests of the mixer listen to.
+#[cfg(test)]
 fn mix(mixer: &mut Mixer, data: &mut [f32], channels: usize, rate: u32) {
     mix_with(mixer, data, channels, rate, None);
 }
 
-/// [`mix`], with a stream source's sound added before the limiter.
+/// What the output plays: the game's sounds, with a stream source's sound added before the
+/// limiter. Only the output stream mixes; a build without one (no `audio` feature) never does.
 #[cfg_attr(not(feature = "audio"), allow(dead_code))]
 fn mix_with(
     mixer: &mut Mixer,
@@ -1688,10 +1690,8 @@ mod tests {
         assert_eq!(data, [0.0; 16]);
         // Louder than full scale with the game's own sound: limited, not clipped.
         let mut m = Mixer::default();
-        m.channels.insert(
-            1,
-            channel(vec![1.0; 9], None, [-1.0, 0.0, 0.0], false),
-        );
+        m.channels
+            .insert(1, channel(vec![1.0; 9], None, [-1.0, 0.0, 0.0], false));
         mix_with(&mut m, &mut data, 2, 48_000, Some(&Steady(0.9)));
         assert!(data.iter().all(|s| s.abs() <= 1.0 + 1e-6), "{data:?}");
         assert!(data.iter().any(|s| *s > 0.4));

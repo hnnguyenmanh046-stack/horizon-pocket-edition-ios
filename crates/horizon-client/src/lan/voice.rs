@@ -450,15 +450,32 @@ mod tests {
         assert!(steve.got().is_empty());
         // A flood: what a stall could have held back goes through, the rest is dropped, and
         // a second later a second's worth goes through again. Nobody is disconnected.
+        // (Steve's game reads as they come: the lane to a player who doesn't holds only the
+        // last half second.)
+        let mut passed = 0;
         for seq in 0..1_000 {
             alex.say(&relay, &frame(seq, 0), start);
+            passed += steve.frames().len();
         }
-        assert_eq!(steve.frames().len(), BURST as usize);
+        assert_eq!(passed, BURST as usize);
         let later = start + Duration::from_secs(1);
+        let mut passed = 0;
         for seq in 0..1_000 {
             alex.say(&relay, &frame(seq, 0), later);
+            passed += steve.frames().len();
         }
-        assert_eq!(steve.frames().len(), RATE as usize);
+        assert_eq!(passed, RATE as usize);
+        // A listener who doesn't read is sent on to all the same, and holds only so much.
+        let idle = Player::new(&relay, 6, "Idle");
+        idle.join(&relay, true, false);
+        idle.got();
+        let much_later = later + Duration::from_secs(10);
+        for seq in 0..60 {
+            alex.say(&relay, &frame(seq, 0), much_later);
+        }
+        let held: Vec<u16> = idle.frames().into_iter().map(|(_, seq)| seq).collect();
+        assert_eq!(held, (35..60).collect::<Vec<u16>>());
+        steve.got();
         // A game of another version of the messages isn't welcomed, and isn't on the list.
         let old = Player::new(&relay, 5, "Old");
         old.say(
@@ -495,14 +512,16 @@ mod tests {
         listener.got();
         let start = Instant::now();
         let at = |ms: u64| start + Duration::from_millis(ms);
-        // Five start one after another, a frame each every 20 ms.
+        // Five start one after another, a frame each every 20 ms (the listener reads as they
+        // come).
+        let mut heard = Vec::new();
         for tick in 0..10u16 {
             for (i, player) in players[..5].iter().enumerate() {
                 let now = at(u64::from(tick) * 20 + i as u64);
                 player.say(&relay, &frame(tick, 0), now);
             }
+            heard.extend(listener.frames());
         }
-        let heard = listener.frames();
         assert_eq!(heard.len(), 40);
         assert!(
             heard.iter().all(|(id, _)| *id < 4),

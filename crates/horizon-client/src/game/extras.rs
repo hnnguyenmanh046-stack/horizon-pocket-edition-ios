@@ -260,6 +260,9 @@ impl Game<'_> {
             extras_hud::draw_minimap(batch, atlas, &mut corners, &look);
         }
         self.native_hud(batch, &mut corners);
+        // Who is talking, in a shared world's voice chat.
+        let top_left = !self.debug;
+        self.voice_hud(batch, &mut corners, top_left);
     }
     /// The height the status effect icons take at the top right
     /// (`Hud.extractEffects`: beneficial at y 1, harmful at y 26).

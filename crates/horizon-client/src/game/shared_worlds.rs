@@ -1294,6 +1294,7 @@ impl Game<'_> {
             copied: shared
                 .copied
                 .is_some_and(|t| t.elapsed() < Duration::from_secs(2)),
+            voice: Some(self.voice.enabled()),
             ..View::default()
         };
         match &shared.phase {
@@ -1468,6 +1469,9 @@ impl Game<'_> {
     }
 
     pub(super) fn draw_shared_screen(&mut self, batch: &mut HudBatch) {
+        if self.voice.page_open() {
+            return self.draw_voice_page(batch);
+        }
         let view = self.shared_view();
         horizon_client::widgets::begin_screen(|| {
             horizon_client::widgets::ScreenInfo::new("shared_world", shared_screen::TITLE)
@@ -1476,6 +1480,9 @@ impl Game<'_> {
     }
 
     pub(super) fn shared_screen_click(&mut self) {
+        if self.voice.page_open() {
+            return self.voice_page_click();
+        }
         let view = self.shared_view();
         let Some(action) =
             shared_screen::click(&self.gui.atlas, self.gui_size(), self.cursor, &view)
@@ -1485,6 +1492,7 @@ impl Game<'_> {
         self.audio.play_button_click();
         match action {
             Action::Done => self.screen = super::Screen::Paused,
+            Action::Voice => self.voice_page_show(),
             Action::ApproveLoad | Action::DeclineLoad => {
                 let approve = action == Action::ApproveLoad;
                 if let Some(shared) = &self.shared {

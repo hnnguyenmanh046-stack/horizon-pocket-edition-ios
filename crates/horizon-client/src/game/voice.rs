@@ -9,9 +9,14 @@
 //! they are while the world changes hosts (the connection is made again, the session isn't).
 use super::Game;
 use horizon_client::{
-    Result, lang,
+    Result,
+    extras::Corner,
+    extras_hud::Corners,
+    hud::{HudBatch, rgba},
+    lang,
     text::Text,
     voice_net::{Link, Sender, Told},
+    voice_screen::{self, Action, Held},
 };
 use horizon_voice::{
     engine::{CaptureOptions, CapturePipe, Playout},
@@ -229,6 +234,12 @@ pub(super) struct Voice {
     probe: Option<Probe>,
     /// The checks' tone, when one was asked for.
     tone: Option<f32>,
+    /// The Friends screen shows voice chat's page; the slider held on it, the first of the
+    /// people it shows, and a line about what was just done.
+    page: bool,
+    held: Option<Held>,
+    first: usize,
+    note: Option<(String, Instant)>,
 }
 
 fn file() -> PathBuf {
@@ -266,7 +277,16 @@ impl Voice {
             mic_lost: None,
             probe: None,
             tone: None,
+            page: false,
+            held: None,
+            first: 0,
+            note: None,
         }
+    }
+
+    /// The Friends screen shows voice chat's page.
+    pub(super) fn page_open(&self) -> bool {
+        self.page
     }
 
     /// Voice chat is on (the others are heard).
@@ -333,7 +353,10 @@ impl Voice {
                 continue;
             }
             let uuid = format!("{:032x}", e.uuid);
-            let (volume, muted) = (self.settings.volume_of(&uuid), self.settings.is_muted(&uuid));
+            let (volume, muted) = (
+                self.settings.volume_of(&uuid),
+                self.settings.is_muted(&uuid),
+            );
             self.playout.set_speaker(e.id, volume, muted);
             ids.push(e.id);
             if muted || volume == 0.0 {
@@ -401,10 +424,9 @@ impl Voice {
             return;
         }
         self.unsaved = None;
-        if let Err(e) = horizon_shared_worlds::scan::write_atomic(
-            &file(),
-            self.settings.to_json().as_bytes(),
-        ) {
+        if let Err(e) =
+            horizon_shared_worlds::scan::write_atomic(&file(), self.settings.to_json().as_bytes())
+        {
             log::warn!("Voice chat: its settings weren't written: {e}");
         }
     }
@@ -459,6 +481,10 @@ impl Voice {
         self.hinted = false;
         self.hinted_users.clear();
         self.tone = None;
+        self.page = false;
+        self.held = None;
+        self.first = 0;
+        self.note = None;
         self.save(true);
     }
 }
@@ -534,8 +560,11 @@ impl Game<'_> {
             Err(e) => {
                 self.voice.mic_wanted = false;
                 self.voice_line(
-                    tr("mic_failed", "The microphone couldn't be started: %s")
-                        .replacen("%s", &e.to_string(), 1),
+                    tr("mic_failed", "The microphone couldn't be started: %s").replacen(
+                        "%s",
+                        &e.to_string(),
+                        1,
+                    ),
                 );
                 return;
             }
@@ -673,6 +702,177 @@ impl Game<'_> {
                     "Voice chat is available in this world. Turn it on in Game Menu > Friends > Voice Chat.",
                 ));
             }
+        }
+    }
+
+    /// The microphones this device has to choose from, as it names them (`voice_mic.rs`).
+    fn voice_mics(&self) -> Vec<String> {
+        Vec::new()
+    }
+
+    fn voice_view(&self) -> voice_screen::View {
+        let (mic_level, speaking) = self.voice.mic_level();
+        let chosen = self.voice.mic_choice();
+        voice_screen::View {
+            offered: self.voice_offered(),
+            enabled: self.voice.enabled(),
+            mic_live: self.voice.mic_live(),
+            mic_level,
+            speaking,
+            mic_name: if chosen.is_empty() {
+                tr("mic_automatic", "Automatic")
+            } else {
+                chosen.to_owned()
+            },
+            mic_choice: !self.voice_mics().is_empty(),
+            voices: self.voice.voices_volume(),
+            people: self
+                .voice
+                .people()
+                .into_iter()
+                .map(|p| voice_screen::Person {
+                    uuid: p.uuid,
+                    name: p.name,
+                    enabled: p.enabled,
+                    mic_live: p.mic_live,
+                    volume: p.volume,
+                    muted: p.muted,
+                    talking: p.talking,
+                })
+                .collect(),
+            first: self.voice.first,
+            note: self
+                .voice
+                .note
+                .as_ref()
+                .filter(|(_, at)| at.elapsed() < Duration::from_secs(6))
+                .map(|(note, _)| note.clone()),
+        }
+    }
+
+    /// Opens voice chat's page of the Friends screen.
+    pub(super) fn voice_page_show(&mut self) {
+        self.voice.page = true;
+        self.voice.held = None;
+        self.voice.first = 0;
+    }
+
+    /// Escape, or Back: from voice chat's page to the Friends screen. False when the page
+    /// wasn't open.
+    pub(super) fn voice_page_close(&mut self) -> bool {
+        self.voice.held = None;
+        std::mem::replace(&mut self.voice.page, false)
+    }
+
+    pub(super) fn draw_voice_page(&mut self, batch: &mut HudBatch) {
+        let view = self.voice_view();
+        horizon_client::widgets::begin_screen(|| {
+            horizon_client::widgets::ScreenInfo::new("voice_chat", voice_screen::TITLE)
+        });
+        voice_screen::draw(
+            batch,
+            &self.gui.atlas,
+            self.cursor,
+            &view,
+            self.voice.held.as_ref(),
+        );
+    }
+
+    /// A press on voice chat's page.
+    pub(super) fn voice_page_click(&mut self) {
+        let view = self.voice_view();
+        let Some((action, held)) =
+            voice_screen::press(&self.gui.atlas, self.gui_size(), self.cursor, &view)
+        else {
+            return;
+        };
+        if held.is_none() {
+            self.audio.play_button_click();
+        }
+        self.voice.held = held;
+        self.voice_act(action);
+    }
+
+    /// The cursor moved with a slider of the page held.
+    pub(super) fn voice_page_drag(&mut self) {
+        if let Some(held) = self.voice.held {
+            let action = held.action(self.cursor.0);
+            self.voice_act(action);
+        }
+    }
+
+    /// The button was let go: a held slider lets go, with the click a slider gives then.
+    pub(super) fn voice_page_release(&mut self) {
+        if self.voice.held.take().is_some() {
+            self.audio.play_button_click();
+        }
+    }
+
+    /// Whether a finger landing at `cursor` (GUI pixels) is on a slider of the page, which it
+    /// drags like a held mouse instead of scrolling.
+    pub(super) fn voice_slider_under(&self, cursor: (f32, f32)) -> bool {
+        self.voice.page
+            && voice_screen::press(&self.gui.atlas, self.gui_size(), cursor, &self.voice_view())
+                .is_some_and(|(_, held)| held.is_some())
+    }
+
+    fn voice_act(&mut self, action: Action) {
+        match action {
+            Action::Enable(on) => self.voice_set_enabled(on),
+            Action::Mic(live) => self.voice_set_mic(live),
+            Action::NextMic => {
+                // Automatic, then each of the device's, and round again.
+                let mut choices = vec![String::new()];
+                choices.extend(self.voice_mics());
+                let at = choices
+                    .iter()
+                    .position(|c| c == self.voice.mic_choice())
+                    .unwrap_or(0);
+                let next = choices[(at + 1) % choices.len()].clone();
+                self.voice.set_mic_choice(&next);
+            }
+            Action::Voices(volume) => self.voice.set_voices_volume(volume),
+            Action::Volume(uuid, volume) => self.voice.set_volume(uuid, volume),
+            Action::Mute(uuid, muted) => self.voice.set_muted(uuid, muted),
+            Action::Page(first) => self.voice.first = first,
+            Action::Back => {
+                self.voice_page_close();
+            }
+        }
+    }
+
+    /// Who is talking now, a small list in the top left corner of the HUD (hidden with the
+    /// rest of it, and behind the debug screen).
+    pub(super) fn voice_hud(&self, batch: &mut HudBatch, corners: &mut Corners, visible: bool) {
+        if !self.voice.enabled() || !visible {
+            return;
+        }
+        let mut names: Vec<String> = self
+            .voice
+            .people()
+            .into_iter()
+            .filter(|p| p.talking && !p.muted)
+            .map(|p| p.name)
+            .collect();
+        if self.voice.mic_level().1 {
+            names.insert(0, tr("you", "You"));
+        }
+        if names.is_empty() {
+            return;
+        }
+        let atlas = &self.gui.atlas;
+        let width = names
+            .iter()
+            .map(|n| HudBatch::text_width(atlas, n))
+            .fold(0.0f32, f32::max)
+            + 12.0;
+        let height = names.len() as f32 * 10.0 + 2.0;
+        let (x, y) = corners.place(Corner::TopLeft, width, height);
+        batch.fill(atlas, x, y, width, height, rgba(0, 0, 0, 120));
+        for (i, name) in names.iter().enumerate() {
+            let row = y + 1.0 + i as f32 * 10.0;
+            batch.fill(atlas, x + 3.0, row + 3.0, 3.0, 3.0, rgba(85, 255, 85, 255));
+            batch.text(atlas, name, x + 9.0, row, u32::MAX, true);
         }
     }
 

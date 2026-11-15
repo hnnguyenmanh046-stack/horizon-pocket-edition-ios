@@ -326,7 +326,6 @@ mod server_travel;
 mod setup;
 mod shader_packs;
 mod shared_worlds;
-mod voice;
 mod shelf;
 mod shield;
 mod shoulders;
@@ -373,6 +372,7 @@ mod ui_control;
 mod update_offer;
 mod vault;
 mod villagers;
+mod voice;
 mod wandering_trader;
 mod win;
 mod wind;
@@ -16465,6 +16465,8 @@ impl Game<'_> {
                         self.death_confirm_answer(false)?;
                     }
                 }
+                // From voice chat's page back to the Friends screen, then to the menu.
+                Screen::Friends if self.voice_page_close() => {}
                 Screen::Stats | Screen::Friends => self.screen = Screen::Paused,
                 Screen::Social => self.close_social(),
                 Screen::ServerLinks => self.screen = Screen::Paused,
@@ -17773,6 +17775,9 @@ impl Game<'_> {
                         if self.screen == Screen::WorldOptions {
                             self.world_options_drag();
                         }
+                        if self.screen == Screen::Friends {
+                            self.voice_page_drag();
+                        }
                         if self.screen == Screen::Creative {
                             let (_, oy) = Self::creative_origin(&b);
                             self.creative_screen.drag_scrollbar(self.cursor.1 - oy);
@@ -18188,6 +18193,10 @@ impl Game<'_> {
                         }
                         Screen::Friends if pressed && button == MouseButton::Left => {
                             self.friends_screen_click()
+                        }
+                        // A slider of voice chat's page let go.
+                        Screen::Friends if button == MouseButton::Left => {
+                            self.voice_page_release()
                         }
                         Screen::Social if pressed && button == MouseButton::Left => {
                             self.social_click()

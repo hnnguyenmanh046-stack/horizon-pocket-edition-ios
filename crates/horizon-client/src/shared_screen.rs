@@ -34,6 +34,8 @@ pub enum Action {
     /// The owner's answers to a request to load a backup.
     ApproveLoad,
     DeclineLoad,
+    /// Voice chat's page (`voice_screen.rs`).
+    Voice,
     Done,
 }
 
@@ -54,6 +56,8 @@ pub struct View {
     pub invite: bool,
     /// It was just copied.
     pub copied: bool,
+    /// Voice chat has a page to open, and whether it is on.
+    pub voice: Option<bool>,
 }
 
 const WHITE: u32 = u32::MAX;
@@ -141,11 +145,33 @@ fn layout(
             y += 24.0;
         }
     }
-    let done = if view.invite {
+    // The foot: Voice Chat, Copy Invite and Done, as many as there are, side by side.
+    let foot = 1 + usize::from(view.voice.is_some()) + usize::from(view.invite);
+    let (mut x, each) = match foot {
+        1 => (cx - 100.0, 200.0),
+        2 => (cx - 100.0, 98.0),
+        _ => (cx - 151.0, 98.0),
+    };
+    if let Some(on) = view.voice {
         buttons.push(Button {
-            x: cx - 100.0,
+            x,
             y: h - 27.0,
-            w: 98.0,
+            w: each,
+            label: if on {
+                tr("voice_on", "Voice Chat: On")
+            } else {
+                tr("voice", "Voice Chat")
+            },
+            action: Action::Voice,
+            active: true,
+        });
+        x += each + 4.0;
+    }
+    if view.invite {
+        buttons.push(Button {
+            x,
+            y: h - 27.0,
+            w: each,
             label: if view.copied {
                 tr("copied", "Copied")
             } else {
@@ -154,10 +180,9 @@ fn layout(
             action: Action::CopyInvite,
             active: true,
         });
-        (cx + 2.0, 98.0)
-    } else {
-        (cx - 100.0, 200.0)
-    };
+        x += each + 4.0;
+    }
+    let done = (x, each);
     buttons.push(Button {
         x: done.0,
         y: h - 27.0,
@@ -240,6 +265,62 @@ mod tests {
                 .collect(),
             invite: true,
             copied: false,
+            voice: None,
+        }
+    }
+
+    /// The foot holds Voice Chat, Copy Invite and Done side by side, on the screen, apart,
+    /// and each label fits; with fewer, the ones there are.
+    #[test]
+    fn the_foot_holds_voice_chat_beside_the_invite_and_done() {
+        let atlas = atlas();
+        for size in [
+            (320.0, 240.0),
+            (427.0, 240.0),
+            (520.0, 240.0),
+            (341.0, 256.0),
+            (640.0, 360.0),
+        ] {
+            for (voice, invite) in [
+                (Some(false), true),
+                (Some(true), true),
+                (Some(true), false),
+                (None, true),
+                (None, false),
+            ] {
+                let view = View {
+                    voice,
+                    invite,
+                    ..busy()
+                };
+                let (_, buttons) = layout(&atlas, size, &view);
+                let foot: Vec<&Button> = buttons.iter().filter(|b| b.y == size.1 - 27.0).collect();
+                let wanted: Vec<Action> = [
+                    voice.map(|_| Action::Voice),
+                    invite.then_some(Action::CopyInvite),
+                    Some(Action::Done),
+                ]
+                .into_iter()
+                .flatten()
+                .collect();
+                assert_eq!(
+                    foot.iter().map(|b| b.action.clone()).collect::<Vec<_>>(),
+                    wanted
+                );
+                for (i, b) in foot.iter().enumerate() {
+                    assert!(b.x >= 0.0 && b.x + b.w <= size.0, "{size:?}: off the screen");
+                    if let Some(next) = foot.get(i + 1) {
+                        assert!(b.x + b.w <= next.x, "{size:?}: the foot's buttons overlap");
+                    }
+                    if !b.label.starts_with("gui.") {
+                        assert!(
+                            HudBatch::text_width(&atlas, &b.label) <= b.w - 6.0,
+                            "{size:?}: {} doesn't fit",
+                            b.label
+                        );
+                    }
+                }
+            }
         }
     }
 
@@ -335,6 +416,7 @@ mod tests {
             buttons: vec![("Ask to Host".into(), Action::AskHost, true)],
             invite: true,
             copied: false,
+            voice: None,
         };
         let (lines, buttons) = layout(&atlas, (427.0, 240.0), &view);
         assert!(lines.iter().any(|(l, _, _)| l.contains("Hosted by Alex")));

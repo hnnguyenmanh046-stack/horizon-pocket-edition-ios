@@ -1231,6 +1231,10 @@ impl Game<'_> {
             let (ox, oy) = Self::creative_origin(&batch);
             return self.creative_screen.inside_scrollbar(x - ox, y - oy);
         }
+        // A volume slider of voice chat's page is dragged, not scrolled past.
+        if self.screen == Screen::Friends && self.voice_slider_under((x, y)) {
+            return true;
+        }
         false
     }
 

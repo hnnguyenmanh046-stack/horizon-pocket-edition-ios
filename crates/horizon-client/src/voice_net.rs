@@ -180,10 +180,32 @@ mod tests {
             enabled: true,
             mic_live: false,
         };
-        received(&Down::Welcome { version: VERSION, id: 3 }.encode());
-        received(&Down::Welcome { version: VERSION + 1, id: 4 }.encode());
-        received(&Down::Roster { entries: vec![entry(1)] }.encode());
-        received(&Down::Roster { entries: vec![entry(1), entry(2)] }.encode());
+        received(
+            &Down::Welcome {
+                version: VERSION,
+                id: 3,
+            }
+            .encode(),
+        );
+        received(
+            &Down::Welcome {
+                version: VERSION + 1,
+                id: 4,
+            }
+            .encode(),
+        );
+        received(
+            &Down::Roster {
+                entries: vec![entry(1)],
+            }
+            .encode(),
+        );
+        received(
+            &Down::Roster {
+                entries: vec![entry(1), entry(2)],
+            }
+            .encode(),
+        );
         received(&[0xff, 1, 2]);
         received(&[]);
         assert_eq!(
@@ -215,7 +237,13 @@ mod tests {
         assert!(!playout.live());
         // A flood of lists leaves one; of welcomes, no more than the game can take.
         for id in 0..200 {
-            received(&Down::Welcome { version: VERSION, id }.encode());
+            received(
+                &Down::Welcome {
+                    version: VERSION,
+                    id,
+                }
+                .encode(),
+            );
         }
         assert_eq!(link.take().len(), MOST);
         HERE.with(|here| *here.borrow_mut() = None);
