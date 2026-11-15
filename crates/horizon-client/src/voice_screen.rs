@@ -301,10 +301,11 @@ fn layout(
             Action::Page(first + n),
         ));
     }
+    // The filter's label is the longer: Back, a short word, gives it the room.
     items.push(button(
         cx - 100.0,
         h - 27.0,
-        98.0,
+        116.0,
         if view.noise_filter {
             tr("noise_on", "Noise Filter: On")
         } else {
@@ -314,9 +315,9 @@ fn layout(
         Action::NoiseFilter(!view.noise_filter),
     ));
     items.push(button(
-        cx + 2.0,
+        cx + 20.0,
         h - 27.0,
-        98.0,
+        80.0,
         "gui.back".into(),
         true,
         Action::Back,
