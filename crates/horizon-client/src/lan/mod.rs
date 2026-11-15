@@ -29,6 +29,7 @@ pub mod prediction;
 pub mod recipes;
 pub mod scoreboard;
 pub mod tracking;
+pub mod voice;
 pub mod waypoints;
 
 pub use conn::{Holding, PlayerSender, flush_all};
@@ -87,6 +88,9 @@ pub enum Out {
     /// Send a play disconnect with this component, then close.
     Disconnect(horizon_world::nbt::Tag),
     Close,
+    /// Something waits in the connection's express lane (voice chat): it goes out before
+    /// what is queued behind this (`conn::PlayerSender::send_now`).
+    Express,
 }
 
 /// PlayerList.canPlayerLogin for a dedicated server: the disconnect reason
@@ -376,6 +380,8 @@ pub struct Shared {
     closing: AtomicUsize,
     /// Connections turned away since the last report of them, and when that was.
     turned_away: Mutex<(usize, Option<Instant>)>,
+    /// Voice chat's relay between the players (a shared world's; off in any other).
+    pub voice: voice::Relay,
 }
 impl Shared {
     /// The registries and tags a new connection is sent.
@@ -585,6 +591,7 @@ impl Lan {
             closing: AtomicUsize::new(0),
             turned_away: Mutex::new((0, None)),
             random: Mutex::new(crate::server::java_properties::now_millis() as u64 | 1),
+            voice: voice::Relay::new(voice::wanted()),
             config,
         });
         let mut lan = Self {

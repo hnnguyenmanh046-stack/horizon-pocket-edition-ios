@@ -401,10 +401,7 @@ fn run(shared: &Shared, sink: &Sink, options: &CaptureOptions) {
     let Ok(mut encoder) = Encoder::new() else {
         return;
     };
-    let mut chain = Chain {
-        level_as_is: options.level_as_is,
-        ..Chain::default()
-    };
+    let mut chain = Chain::new(options.level_as_is);
     let mut resampler = Resampler::new(RATE, RATE);
     let mut raw: Vec<f32> = Vec::new();
     let mut pending: Vec<f32> = Vec::new();

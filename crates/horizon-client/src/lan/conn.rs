@@ -247,7 +247,14 @@ pub struct PlayerSender {
     posted: Arc<AtomicUsize>,
     /// A network connection's keep-alive clock (none for a test's channel).
     watch: Option<Arc<KeepAliveWatch>>,
+    /// Voice chat's frames for this player: written before anything queued, oldest first.
+    express: Arc<Mutex<std::collections::VecDeque<Vec<u8>>>>,
 }
+
+/// The most the express lane holds (half a second of one voice): past it the oldest goes, so
+/// a player whose connection is slow hears what is said now, not what was.
+const EXPRESS_MOST: usize = 25;
+
 impl PlayerSender {
     pub fn new(tx: Sender<Out>, pending: Arc<AtomicUsize>) -> Self {
         Self {
@@ -256,7 +263,31 @@ impl PlayerSender {
             held: Arc::default(),
             posted: Arc::default(),
             watch: None,
+            express: Arc::default(),
         }
+    }
+    fn express(&self) -> std::sync::MutexGuard<'_, std::collections::VecDeque<Vec<u8>>> {
+        self.express.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+    /// Send `body` ahead of everything queued for this player, from any thread and outside
+    /// the tick's order: for voice chat alone, whose frames are worth nothing late and have
+    /// no order with the game's packets. The held and posted packets are not touched.
+    pub fn send_now(&self, body: Vec<u8>) {
+        {
+            let mut lane = self.express();
+            if lane.len() >= EXPRESS_MOST
+                && let Some(old) = lane.pop_front()
+            {
+                self.pending.fetch_sub(old.len(), Ordering::Relaxed);
+            }
+            self.pending.fetch_add(body.len(), Ordering::Relaxed);
+            lane.push_back(body);
+        }
+        let _ = self.tx.send(Out::Express);
+    }
+    /// The next body of the express lane, for the writer.
+    pub(super) fn take_express(&self) -> Option<Vec<u8>> {
+        self.express().pop_front()
     }
     /// Whether the client has answered no keep-alive for too long, read
     /// without the writer thread, which a client that stops reading blocks.
@@ -1029,6 +1060,16 @@ fn login_and_configure(
             }),
         )?;
     }
+    // And that this world carries voice chat (a shared world's host; lan::voice).
+    if brand == "horizon" && shared.voice.on() {
+        send(
+            c,
+            cfg::Clientbound::CustomPayload(cfg::CustomPayload {
+                channel: horizon_voice::wire::CHANNEL.into(),
+                data: super::voice::offer(),
+            }),
+        )?;
+    }
     // And how far it samples far terrain for it (crate::lod_net).
     if brand == "horizon" && shared.config.lod_distance > 0 {
         send(
@@ -1306,16 +1347,23 @@ fn play(c: Connection, shared: &Arc<Shared>, parts: Parts, address: std::net::So
     }
     let writer_thread = {
         let (alive, latency, pending) = (alive.clone(), latency.clone(), pending.clone());
+        let express = sender.clone();
         std::thread::Builder::new()
             .name(format!("horizon-lan-out-{conn_id}"))
             .spawn(move || {
                 // Ticks and frames come first (horizon_threads).
                 horizon_threads::behind_server();
-                write_loop(writer, rx, start, alive, latency, pending)
+                write_loop(writer, rx, start, alive, latency, pending, &express)
             })
             .ok()
     };
     let name = parts.name.clone();
+    // A Horizon client in a world that carries voices: within the relay's reach from now
+    // until the connection ends.
+    let voice = (parts.brand == "horizon" && shared.voice.on()).then_some(&shared.voice);
+    if let Some(voice) = voice {
+        voice.enter(conn_id, parts.uuid, &name, sender.clone());
+    }
     let joined = Joined {
         conn: conn_id,
         uuid: parts.uuid,
@@ -1340,6 +1388,7 @@ fn play(c: Connection, shared: &Arc<Shared>, parts: Parts, address: std::net::So
             &alive,
             required_pack,
             shared.config.rate_limit,
+            voice,
         ) {
             Ended::Closed(reason) => reason,
             Ended::PackDeclined(rejected) => {
@@ -1356,6 +1405,9 @@ fn play(c: Connection, shared: &Arc<Shared>, parts: Parts, address: std::net::So
     } else {
         "server closed".to_owned()
     };
+    if let Some(voice) = voice {
+        voice.leave(conn_id);
+    }
     let _ = tx.send(Out::Close);
     let _ = events.send(NetEvent::Left(conn_id, reason));
     shared.closing.fetch_add(1, Ordering::AcqRel);
@@ -1427,6 +1479,7 @@ fn read_loop(
     alive: &AtomicI64,
     required_pack: bool,
     rate_limit: i32,
+    voice: Option<&super::voice::Relay>,
 ) -> Ended {
     let mut rate = PacketRate::new(rate_limit, Instant::now());
     loop {
@@ -1448,6 +1501,15 @@ fn read_loop(
         }
         match play::Serverbound::decode(id, &payload).and_then(checked_play) {
             Ok(play::Serverbound::KeepAlive(k)) => alive.store(k.id, Ordering::Relaxed),
+            // Voice chat goes from this thread straight to the others' writers, not through
+            // the game's tick (lan::voice).
+            Ok(play::Serverbound::CustomPayload(p))
+                if voice.is_some() && p.channel == horizon_voice::wire::CHANNEL =>
+            {
+                if let Some(voice) = voice {
+                    voice.handle(conn, &p.data);
+                }
+            }
             Ok(play::Serverbound::ResourcePack(r))
                 if r.action == PACK_DECLINED && required_pack =>
             {
@@ -1606,6 +1668,7 @@ fn write_loop(
     alive: Arc<AtomicI64>,
     latency: Arc<AtomicI32>,
     pending: Arc<AtomicUsize>,
+    express: &PlayerSender,
 ) {
     let mut sent_at: Option<(i64, Instant)> = None;
     let mut next = Instant::now() + KEEP_ALIVE_EVERY;
@@ -1614,14 +1677,32 @@ fn write_loop(
             pending.fetch_sub(body.len(), Ordering::Relaxed);
             send_body(&mut writer, &body).is_ok() && pending.load(Ordering::Relaxed) <= MAX_PENDING
         };
-        match rx.recv_timeout(Duration::from_millis(200)) {
-            Ok(Out::Packet(body)) => {
+        // Voice chat's frames go out before each queued packet: a second's worth of chunks
+        // on its way to a slow connection doesn't hold a voice back.
+        let express_first = |write: &mut dyn FnMut(Vec<u8>) -> bool| {
+            while let Some(body) = express.take_express() {
                 if !write(body) {
+                    return false;
+                }
+            }
+            true
+        };
+        match rx.recv_timeout(Duration::from_millis(200)) {
+            Ok(Out::Express) => {
+                if !express_first(&mut write) {
+                    break;
+                }
+            }
+            Ok(Out::Packet(body)) => {
+                if !express_first(&mut write) || !write(body) {
                     break;
                 }
             }
             Ok(Out::Packets(bodies)) => {
-                if !bodies.into_iter().all(&mut write) {
+                if !bodies
+                    .into_iter()
+                    .all(|body| express_first(&mut write) && write(body))
+                {
                     break;
                 }
             }

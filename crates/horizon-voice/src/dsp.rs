@@ -250,6 +250,14 @@ impl Default for Chain {
 }
 
 impl Chain {
+    /// The way for a microphone whose level is left as the system gives it, or not.
+    pub fn new(level_as_is: bool) -> Self {
+        Self {
+            level_as_is,
+            ..Self::default()
+        }
+    }
+
     /// What speech is multiplied by now, to bring it toward everyone's level.
     pub fn gain(&self) -> f32 {
         if self.level_as_is {

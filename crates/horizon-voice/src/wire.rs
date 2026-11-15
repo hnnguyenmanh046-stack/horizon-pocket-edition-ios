@@ -271,8 +271,8 @@ mod tests {
             id,
             uuid: 0x0123_4567_89ab_cdef_0011_2233_4455_6677 + u128::from(id),
             name: name.to_owned(),
-            enabled: id % 2 == 0,
-            mic_live: id % 3 == 0,
+            enabled: id.is_multiple_of(2),
+            mic_live: id.is_multiple_of(3),
         }
     }
 
