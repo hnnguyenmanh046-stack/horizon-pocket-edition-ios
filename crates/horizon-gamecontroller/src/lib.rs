@@ -4,6 +4,8 @@
 //! loop, which is the one winit runs, so reading a pad is reading properties: no event queue to drain.
 //! Elsewhere the functions report no controllers.
 
+pub mod voice;
+
 /// One controller iOS has paired.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Controller {

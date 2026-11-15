@@ -16,6 +16,7 @@ pub const APP_NAME: &str = if cfg!(target_os = "ios") {
 pub mod assets;
 pub mod atlas_sources;
 pub mod audio;
+pub mod audio_capture;
 pub mod auth;
 pub mod ban_notice;
 pub mod bidi;

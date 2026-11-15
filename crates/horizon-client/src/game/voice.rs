@@ -18,6 +18,8 @@ use horizon_client::{
     voice_net::{Link, Sender, Told},
     voice_screen::{self, Action, Held},
 };
+#[cfg(target_os = "ios")]
+use horizon_gamecontroller::voice as phone;
 use horizon_voice::{
     engine::{CaptureOptions, CapturePipe, Playout},
     settings::Settings,
@@ -182,11 +184,48 @@ impl Drop for Tone {
     }
 }
 
+/// What feeds the microphone's pipe: held for as long as the microphone is live (dropping
+/// it stops the device).
+#[allow(dead_code)]
+enum Source {
+    /// The checks' tone.
+    Tone(Tone),
+    /// An iPhone's or iPad's microphone, through the audio session.
+    #[cfg(target_os = "ios")]
+    Phone(phone::Capture),
+    /// The microphone the game's sound library opened.
+    #[cfg(not(target_os = "ios"))]
+    Device(horizon_client::audio_capture::Capture),
+}
+
 /// The microphone while it is live: its pipe to the connection, and what feeds it.
 struct Mic {
     pipe: Arc<CapturePipe>,
-    _tone: Option<Tone>,
+    _source: Source,
+    /// Where sound came out when it started: on another output the microphone is started
+    /// again (the speaker needs the echo kept out, headphones don't).
+    #[cfg(target_os = "ios")]
+    output: Option<phone::Output>,
 }
+
+/// The sound output being watched after the system touched the audio session: when it stops
+/// asking for sound and doesn't start again by itself, it is started again.
+#[cfg(target_os = "ios")]
+struct Watched {
+    until: Instant,
+    /// The output's count of callbacks when last looked at, and when that was.
+    seen: u64,
+    at: Instant,
+    kicks: u8,
+}
+
+/// The session stays set for recording this long after the microphone goes off, so that
+/// turning it off and on again doesn't make the sound hiccup twice.
+#[cfg(target_os = "ios")]
+const SESSION_KEPT_FOR: Duration = Duration::from_secs(15);
+
+/// Makes a pipe to the connection for a microphone treated as the options say.
+type MakePipe<'a> = &'a dyn Fn(CaptureOptions) -> std::result::Result<Arc<CapturePipe>, String>;
 
 /// One player in voice chat's reach, for the screens.
 #[derive(Debug, Clone, PartialEq)]
@@ -240,6 +279,18 @@ pub(super) struct Voice {
     held: Option<Held>,
     first: usize,
     note: Option<(String, Instant)>,
+    /// The player was asked for the microphone this session (the system asks once ever).
+    #[cfg(target_os = "ios")]
+    asked: bool,
+    /// The ring switch's line was shown this session.
+    told_switch: bool,
+    /// The audio session is set for recording; since when the microphone has been off.
+    #[cfg(target_os = "ios")]
+    recording: bool,
+    #[cfg(target_os = "ios")]
+    idle: Option<Instant>,
+    #[cfg(target_os = "ios")]
+    watched: Option<Watched>,
 }
 
 fn file() -> PathBuf {
@@ -281,6 +332,15 @@ impl Voice {
             held: None,
             first: 0,
             note: None,
+            #[cfg(target_os = "ios")]
+            asked: false,
+            told_switch: false,
+            #[cfg(target_os = "ios")]
+            recording: false,
+            #[cfg(target_os = "ios")]
+            idle: None,
+            #[cfg(target_os = "ios")]
+            watched: None,
         }
     }
 
@@ -485,6 +545,11 @@ impl Voice {
         self.held = None;
         self.first = 0;
         self.note = None;
+        #[cfg(target_os = "ios")]
+        {
+            self.asked = false;
+        }
+        self.told_switch = false;
         self.save(true);
     }
 }
@@ -546,35 +611,246 @@ impl Game<'_> {
         self.voice_set_mic(live);
     }
 
+    /// Whether the microphone may be started: yes, no, or not known yet (the player is
+    /// being asked, the first time ever).
+    fn voice_mic_allowed(&mut self) -> Option<bool> {
+        #[cfg(target_os = "ios")]
+        if self.voice.tone.is_none() {
+            return match phone::mic_permission() {
+                phone::Permission::Granted => Some(true),
+                phone::Permission::Denied => Some(false),
+                phone::Permission::Unknown => {
+                    if !std::mem::replace(&mut self.voice.asked, true) {
+                        phone::request_mic_permission();
+                    }
+                    None
+                }
+            };
+        }
+        Some(true)
+    }
+
     /// Starts the microphone: its pipe to the connection, and the device (or the checks'
     /// tone) that feeds it.
     fn voice_start_mic(&mut self) {
         let Some(sender) = self.voice.sender.clone() else {
             return;
         };
-        let pipe = match CapturePipe::start(
-            Box::new(move |message| sender.send(message)),
-            CaptureOptions::default(),
-        ) {
-            Ok(pipe) => Arc::new(pipe),
+        let make = move |options: CaptureOptions| {
+            let sender = sender.clone();
+            CapturePipe::start(Box::new(move |message| sender.send(message)), options)
+                .map(Arc::new)
+                .map_err(|e| e.to_string())
+        };
+        let started = match self.voice.tone {
+            Some(hz) => make(CaptureOptions::default()).map(|pipe| Mic {
+                _source: Source::Tone(Tone::start(pipe.clone(), hz)),
+                pipe,
+                #[cfg(target_os = "ios")]
+                output: None,
+            }),
+            None => self.voice_open_microphone(&make),
+        };
+        match started {
+            Ok(mic) => {
+                self.voice.mic = Some(mic);
+                // An iPhone with its microphone live plays through the ring switch.
+                if cfg!(target_os = "ios")
+                    && !std::mem::replace(&mut self.voice.told_switch, true)
+                    && self.voice.tone.is_none()
+                {
+                    self.voice_line(tr(
+                        "ring_switch",
+                        "While your microphone is on, the ring/silent switch doesn't silence the game: iOS treats a live microphone like a call.",
+                    ));
+                }
+            }
             Err(e) => {
                 self.voice.mic_wanted = false;
                 self.voice_line(
-                    tr("mic_failed", "The microphone couldn't be started: %s").replacen(
-                        "%s",
-                        &e.to_string(),
-                        1,
-                    ),
+                    tr("mic_failed", "The microphone couldn't be started: %s").replacen("%s", &e, 1),
                 );
-                return;
             }
+        }
+    }
+
+    /// The iPhone's microphone: the audio session set to record from the one chosen, and
+    /// the echo of the others' voices kept out when they come from the speaker (the
+    /// system's echo canceller, or failing that the microphone turned down while they talk).
+    #[cfg(target_os = "ios")]
+    fn voice_open_microphone(&mut self, make: MakePipe<'_>) -> std::result::Result<Mic, String> {
+        use horizon_voice::settings::Echo;
+        let choice = match self.voice.settings.mic.as_str() {
+            "builtin" => phone::Choice::BuiltIn,
+            "wired" => phone::Choice::Wired,
+            "bluetooth" => phone::Choice::Bluetooth,
+            _ => phone::Choice::Automatic,
         };
-        let tone = self.voice.tone.map(|hz| Tone::start(pipe.clone(), hz));
-        self.voice.mic = Some(Mic { pipe, _tone: tone });
+        phone::begin_recording(choice)?;
+        self.voice.recording = true;
+        self.voice.idle = None;
+        self.voice_watch_output();
+        let output = phone::route().map(|r| r.output);
+        let open_air = output.is_none_or(|o| o.open_air());
+        let (system, guard) = match self.voice.settings.echo {
+            Echo::Auto => (open_air, false),
+            Echo::System => (true, false),
+            Echo::Guard => (false, open_air),
+            Echo::Off => (false, false),
+        };
+        let playout = self.voice.playout.clone();
+        let attempt = |system: bool, guard: bool| -> std::result::Result<Mic, String> {
+            let pipe = make(CaptureOptions {
+                echo_guard: guard.then(|| playout.clone()),
+                // The system's voice processing levels the microphone itself.
+                level_as_is: system,
+            })?;
+            let feed = pipe.clone();
+            let capture = phone::start_capture(
+                system,
+                Box::new(move |samples, channels, rate| feed.feed(samples, channels, rate)),
+            )?;
+            Ok(Mic {
+                pipe,
+                _source: Source::Phone(capture),
+                output,
+            })
+        };
+        attempt(system, guard).or_else(|e| {
+            if !system {
+                return Err(e);
+            }
+            // Without the system's echo canceller: the microphone turned down while the
+            // others are heard on the speaker.
+            log::warn!("Voice chat: the system's voice processing didn't start ({e})");
+            attempt(false, open_air)
+        })
+    }
+
+    /// The microphone the game's sound library opens (a desktop, Android).
+    #[cfg(not(target_os = "ios"))]
+    fn voice_open_microphone(&mut self, make: MakePipe<'_>) -> std::result::Result<Mic, String> {
+        let pipe = make(CaptureOptions::default())?;
+        let feed = pipe.clone();
+        let capture = horizon_client::audio_capture::open(
+            &self.voice.settings.mic,
+            Box::new(move |samples, channels, rate| feed.feed(samples, channels, rate)),
+        )?;
+        Ok(Mic {
+            pipe,
+            _source: Source::Device(capture),
+        })
+    }
+
+    /// The app left the screen: the microphone goes off, and stays off when it comes back.
+    pub(super) fn voice_backgrounded(&mut self) {
+        if self.voice.mic_wanted || self.voice.mic.is_some() {
+            self.voice.mic_wanted = false;
+            self.voice.mic = None;
+            self.voice.mic_lost = None;
+        }
+    }
+
+    /// The sound output is watched for a while: the system may have stopped it.
+    #[cfg(target_os = "ios")]
+    fn voice_watch_output(&mut self) {
+        let now = Instant::now();
+        self.voice.watched = Some(Watched {
+            until: now + Duration::from_secs(30),
+            seen: horizon_client::audio::output_callbacks(),
+            at: now,
+            kicks: 0,
+        });
+    }
+
+    /// What the system did to the audio session, and what follows from it: an interruption
+    /// (a call, Siri) turns the microphone off; headphones gone turn voice chat off, so the
+    /// others aren't suddenly heard out loud; another output starts the microphone again
+    /// for it; and a sound output the system stopped is started again.
+    #[cfg(target_os = "ios")]
+    fn voice_platform(&mut self) {
+        // Nothing to hear about until voice chat was ever used.
+        if !(self.voice.enabled || self.voice.recording || self.voice.watched.is_some()) {
+            return;
+        }
+        for event in phone::events() {
+            match event {
+                phone::Event::Interrupted => {
+                    if self.voice.mic_wanted || self.voice.mic.is_some() {
+                        self.voice.mic_wanted = false;
+                        self.voice.mic = None;
+                        self.voice_line(tr(
+                            "mic_interrupted",
+                            "Your microphone was turned off: a call or another app took the sound.",
+                        ));
+                    }
+                    self.voice_watch_output();
+                }
+                phone::Event::Resumed | phone::Event::Reset => {
+                    // Started again from scratch when it is still wanted.
+                    self.voice.mic = None;
+                    self.voice_watch_output();
+                }
+                phone::Event::OutputLost => {
+                    if self.voice.enabled {
+                        self.voice_set_enabled(false);
+                        self.voice_line(tr(
+                            "headphones_gone",
+                            "Voice chat was turned off because your headphones disconnected.",
+                        ));
+                    }
+                    self.voice_watch_output();
+                }
+                phone::Event::RouteChanged => {
+                    let now = phone::route().map(|r| r.output);
+                    if self.voice.mic.as_ref().is_some_and(|m| m.output != now) {
+                        self.voice.mic = None;
+                    }
+                    self.voice_watch_output();
+                }
+            }
+        }
+        // The microphone has been off a while: the session goes back to playing only.
+        if self.voice.mic.is_some() || !self.voice.recording {
+            self.voice.idle = None;
+        } else {
+            let since = *self.voice.idle.get_or_insert_with(Instant::now);
+            if since.elapsed() >= SESSION_KEPT_FOR || !self.voice.enabled {
+                phone::end_recording();
+                self.voice.recording = false;
+                self.voice.idle = None;
+                self.voice_watch_output();
+            }
+        }
+        // A sound output that stopped asking for sound and didn't start again by itself.
+        let callbacks = horizon_client::audio::output_callbacks();
+        let mut kick = false;
+        let mut done = false;
+        if let Some(watched) = &mut self.voice.watched {
+            let now = Instant::now();
+            if callbacks != watched.seen {
+                (watched.seen, watched.at) = (callbacks, now);
+            } else if now.duration_since(watched.at) >= Duration::from_millis(1500) {
+                watched.at = now;
+                watched.kicks += 1;
+                kick = true;
+            }
+            done = now >= watched.until || watched.kicks >= 5;
+        }
+        if done {
+            self.voice.watched = None;
+        }
+        if kick {
+            log::warn!("Voice chat: the sound output stood still: starting it again");
+            self.audio.suspend_output();
+            self.audio.resume_output();
+        }
     }
 
     /// Voice chat's work for this frame.
     pub(super) fn tick_voice(&mut self) {
+        #[cfg(target_os = "ios")]
+        self.voice_platform();
         // Only in a shared world, and only while its session lasts.
         if !self.shared_active() {
             if self.voice.enabled || self.voice.link.is_some() {
@@ -648,8 +924,21 @@ impl Game<'_> {
         }
         // The microphone, as it is meant to be.
         if self.voice.enabled && self.voice.mic_wanted && self.voice.mic.is_none() {
-            self.voice.mic_lost = None;
-            self.voice_start_mic();
+            match self.voice_mic_allowed() {
+                Some(true) => {
+                    self.voice.mic_lost = None;
+                    self.voice_start_mic();
+                }
+                Some(false) => {
+                    self.voice.mic_wanted = false;
+                    self.voice_line(tr(
+                        "mic_denied",
+                        "The microphone isn't allowed. Allow it in the Settings app (Horizon PE > Microphone), then turn it on again here.",
+                    ));
+                }
+                // The player is being asked.
+                None => {}
+            }
         }
         let state = (self.voice.enabled, self.voice.mic.is_some());
         if self.voice.told_state != Some(state)
@@ -705,9 +994,39 @@ impl Game<'_> {
         }
     }
 
-    /// The microphones this device has to choose from, as it names them (`voice_mic.rs`).
-    fn voice_mics(&self) -> Vec<String> {
-        Vec::new()
+    /// The microphones to choose from besides the automatic choice: what is kept for each
+    /// (the settings' `mic`) and what the player reads.
+    fn voice_mics(&self) -> Vec<(String, String)> {
+        #[cfg(target_os = "ios")]
+        {
+            let output = phone::route().map(|r| r.output);
+            let mut mics = vec![("builtin".to_owned(), tr("mic_builtin", "This Device"))];
+            if output == Some(phone::Output::Headphones) {
+                mics.push(("wired".to_owned(), tr("mic_wired", "Wired Headset")));
+            }
+            // A Bluetooth headset's own microphone makes everything heard a call's quality.
+            if output == Some(phone::Output::Bluetooth) || self.voice.mic_choice() == "bluetooth"
+            {
+                mics.push((
+                    "bluetooth".to_owned(),
+                    tr("mic_bluetooth", "Bluetooth (worse)"),
+                ));
+            }
+            mics
+        }
+        #[cfg(not(target_os = "ios"))]
+        horizon_client::audio_capture::input_devices()
+            .into_iter()
+            .map(|name| {
+                // As much of a long name as the button holds.
+                let label = if name.chars().count() > 18 {
+                    name.chars().take(17).chain(['.']).collect()
+                } else {
+                    name.clone()
+                };
+                (name, label)
+            })
+            .collect()
     }
 
     fn voice_view(&self) -> voice_screen::View {
@@ -719,11 +1038,11 @@ impl Game<'_> {
             mic_live: self.voice.mic_live(),
             mic_level,
             speaking,
-            mic_name: if chosen.is_empty() {
-                tr("mic_automatic", "Automatic")
-            } else {
-                chosen.to_owned()
-            },
+            mic_name: self
+                .voice_mics()
+                .into_iter()
+                .find(|(kept, _)| kept == chosen)
+                .map_or_else(|| tr("mic_automatic", "Automatic"), |(_, label)| label),
             mic_choice: !self.voice_mics().is_empty(),
             voices: self.voice.voices_volume(),
             people: self
@@ -823,13 +1142,22 @@ impl Game<'_> {
             Action::NextMic => {
                 // Automatic, then each of the device's, and round again.
                 let mut choices = vec![String::new()];
-                choices.extend(self.voice_mics());
+                choices.extend(self.voice_mics().into_iter().map(|(kept, _)| kept));
                 let at = choices
                     .iter()
                     .position(|c| c == self.voice.mic_choice())
                     .unwrap_or(0);
                 let next = choices[(at + 1) % choices.len()].clone();
                 self.voice.set_mic_choice(&next);
+                if next == "bluetooth" {
+                    self.voice.note = Some((
+                        tr(
+                            "bluetooth_note",
+                            "A Bluetooth headset's own microphone lowers the quality of everything you hear, as on a call.",
+                        ),
+                        Instant::now(),
+                    ));
+                }
             }
             Action::Voices(volume) => self.voice.set_voices_volume(volume),
             Action::Volume(uuid, volume) => self.voice.set_volume(uuid, volume),

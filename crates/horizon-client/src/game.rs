@@ -17255,6 +17255,8 @@ impl ApplicationHandler for Game<'_> {
         }
         self.audio.suspend_output();
         self.touch_release_all();
+        // Out of sight, nobody is listened to: voice chat's microphone goes off.
+        self.voice_backgrounded();
         self.save_for_background();
     }
     /// The application is ending. On macOS, Quit (Cmd+Q) ends it through

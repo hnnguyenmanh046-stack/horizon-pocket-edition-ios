@@ -596,7 +596,11 @@ impl TouchControls {
         {
             let wide = p.size / self.aspect();
             let x = p.center[0];
-            let factory = if self.settings.left_handed { 1.0 - x } else { x };
+            let factory = if self.settings.left_handed {
+                1.0 - x
+            } else {
+                x
+            };
             let placed = [0.38, 0.42, 0.46, 0.50, 0.54, 0.58]
                 .iter()
                 .any(|f: &f32| (factory - f).abs() < 0.0001);
@@ -2794,7 +2798,10 @@ mod tests {
         for pair in rects.windows(2) {
             assert!(pair[0][0] + pair[0][2] < pair[1][0], "{rects:?}");
         }
-        assert!(rects[0][0] >= 0.0 && rects[5][0] + rects[5][2] <= 1.0, "{rects:?}");
+        assert!(
+            rects[0][0] >= 0.0 && rects[5][0] + rects[5][2] <= 1.0,
+            "{rects:?}"
+        );
         // An iPad, nearer square: the row spreads from its middle, apart and on the screen;
         // a 16:9 screen's row is where it always was.
         let mut pad = TouchControls::default();
@@ -2807,7 +2814,10 @@ mod tests {
         for pair in rects.windows(2) {
             assert!(pair[0][0] + pair[0][2] < pair[1][0], "{rects:?}");
         }
-        assert!(rects[0][0] >= 0.0 && rects[5][0] + rects[5][2] <= 1.0, "{rects:?}");
+        assert!(
+            rects[0][0] >= 0.0 && rects[5][0] + rects[5][2] <= 1.0,
+            "{rects:?}"
+        );
         assert_eq!(pad.placement(Control::Pause).center[0], 0.5);
         let mut wide = TouchControls::default();
         wide.viewport(1920, 1080);
@@ -2828,7 +2838,10 @@ mod tests {
         old["layouts"][0][Control::Chat as usize]["center"] = serde_json::json!([0.3, 0.4]);
         old["button_visibility"][Control::Debug as usize] = serde_json::json!(2);
         let restored: Settings = serde_json::from_value(old).unwrap();
-        assert_eq!(restored.layouts[0][Control::Chat as usize].center, [0.3, 0.4]);
+        assert_eq!(
+            restored.layouts[0][Control::Chat as usize].center,
+            [0.3, 0.4]
+        );
         assert_eq!(restored.button_visibility[Control::Debug as usize], 2);
         for mode in 0..3 {
             assert_eq!(

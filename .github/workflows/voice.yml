@@ -8,6 +8,7 @@ on:
     paths:
       - .github/workflows/voice.yml
       - crates/horizon-voice/**
+      - crates/horizon-gamecontroller/**
       - Cargo.toml
       - Cargo.lock
   workflow_dispatch:
@@ -84,11 +85,13 @@ jobs:
         with:
           shared-key: voice-apple
           cache-on-failure: true
+      # With the iPhone's own audio code (horizon-gamecontroller's voice.rs), which nothing but an
+      # Apple target compiles.
       - name: Build for an iPhone
-        run: cargo build -p horizon-voice --target aarch64-apple-ios
+        run: cargo build -p horizon-voice -p horizon-gamecontroller --target aarch64-apple-ios
       - name: Build for the simulator
         if: ${{ !cancelled() }}
-        run: cargo build -p horizon-voice --target aarch64-apple-ios-sim
+        run: cargo build -p horizon-voice -p horizon-gamecontroller --target aarch64-apple-ios-sim
       # The host's own build runs the tests against the same C code Apple's compiler made.
       - name: Test on macOS
         if: ${{ !cancelled() }}

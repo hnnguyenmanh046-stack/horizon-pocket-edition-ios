@@ -13,6 +13,9 @@ objc2 = "0.6.3"
 # The expiration handler of background time (a block), as objc2's UIKit crates take them.
 block2 = "0.6"
 log = "0.4"
+# The microphone's unit for voice chat (voice.rs): the crate cpal reads the microphone with, so the
+# same one in the lockfile, here with the system's voice processing where it is wanted.
+coreaudio-rs = { version = "0.13", default-features = false, features = ["core_audio", "audio_toolbox"] }
 objc2-ui-kit = { version = "0.3.2", default-features = false, features = ["std", "UIPasteboard", "UIFeedbackGenerator", "UIImpactFeedbackGenerator", "UISelectionFeedbackGenerator"] }
 objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSArray", "NSEnumerator", "NSString"] }
 objc2-game-controller = { version = "0.3.2", default-features = false, features = ["std", "GCKeyboard", "GCMouse", "GCController", "GCDevice", "GCExtendedGamepad", "GCPhysicalInputProfile", "GCControllerElement", "GCControllerButtonInput", "GCControllerAxisInput", "GCControllerDirectionPad"] }
