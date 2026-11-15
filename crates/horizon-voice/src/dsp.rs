@@ -533,9 +533,10 @@ mod tests {
         // Silence in is silence out.
         let mut quiet = [0.0; FRAME];
         for _ in 0..10 {
+            quiet = [0.0; FRAME];
             denoise.process(&mut quiet);
         }
-        assert!(rms(&quiet) < 0.001);
+        assert!(rms(&quiet) < 0.001, "silence came out at {}", rms(&quiet));
         // In the chain it comes before the gate: a quiet room is still silence, and speech
         // after it is still speech.
         let mut chain = Chain::new(false, true);
