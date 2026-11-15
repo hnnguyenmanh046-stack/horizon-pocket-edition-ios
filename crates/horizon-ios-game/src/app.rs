@@ -166,6 +166,13 @@ impl App {
                     private.display(),
                     horizon_client::ios::args()
                 );
+                // The Simulator's check of voice chat's calls into the system
+                // (tools/ci/ios_simulator_smoke.sh sets this; no player's phone does).
+                if std::env::var_os("HORIZON_VOICE_SELFTEST").is_some() {
+                    for line in horizon_gamecontroller::voice::selftest() {
+                        log::info!("Horizon voice self-test: {line}");
+                    }
+                }
                 // Read from the app's bundle (`assets/`), as Android's from the APK.
                 horizon_client::preparer::put_shader_pack(&home);
                 // The saved Microsoft sign-in renews while the game loads.

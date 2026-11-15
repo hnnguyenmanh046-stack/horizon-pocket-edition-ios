@@ -21,7 +21,10 @@ xcrun simctl boot "$device" || true
 xcrun simctl bootstatus "$device" -b
 xcrun simctl install "$device" "$app"
 started=$(date +%s)
-xcrun simctl launch "$device" "$bundle"
+# Voice chat's calls into the system are gone through once at the start (the microphone allowed
+# beforehand, so no prompt waits for a tap nobody makes).
+xcrun simctl privacy "$device" grant microphone "$bundle" || true
+SIMCTL_CHILD_HORIZON_VOICE_SELFTEST=1 xcrun simctl launch "$device" "$bundle"
 sleep 120
 data=$(xcrun simctl get_app_container "$device" "$bundle" data)
 logs="$data/Documents/logs"
@@ -42,6 +45,13 @@ elif grep -q 'panicked at' "$logs/stderr.log" 2>/dev/null; then
 fi
 if ! grep -q 'Horizon renderer: creating the pipelines' "$logs/latest.log" 2>/dev/null; then
   echo "::error::the game did not reach its renderer's pipelines (latest.log above)"
+  failed=1
+fi
+# Voice chat's self-test went through every call without the system refusing one as unknown
+# (what a machine with no microphone answers is shown, not judged).
+grep -F 'Horizon voice self-test' "$logs/latest.log" 2>/dev/null | sed 's/^/  /' || true
+if ! grep -qF 'Horizon voice self-test: done' "$logs/latest.log" 2>/dev/null; then
+  echo "::error::voice chat's self-test did not finish (latest.log above)"
   failed=1
 fi
 if ! grep -qE 'Horizon: iOS, game folder' "$logs/latest.log" 2>/dev/null; then

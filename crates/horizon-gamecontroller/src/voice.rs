@@ -197,6 +197,52 @@ pub fn start_capture(voice_processing: bool, samples: Samples) -> Result<Capture
     }
 }
 
+/// Goes once through everything above and says how each step went, for the checks in the
+/// iOS Simulator (`tools/ci/ios_simulator_smoke.sh`): the calls into the system must at
+/// least be ones it knows, whatever a machine with no microphone answers.
+pub fn selftest() -> Vec<String> {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+    let mut lines = vec![
+        format!("permission {:?}", mic_permission()),
+        format!("route {:?}", route()),
+    ];
+    let _ = events();
+    match begin_recording(Choice::Automatic) {
+        Ok(()) => lines.push("recording".into()),
+        Err(e) => lines.push(format!("not recording: {e}")),
+    }
+    lines.push(format!("inputs {:?}", inputs()));
+    lines.push(format!("route while recording {:?}", route()));
+    for system in [false, true] {
+        let heard = Arc::new(AtomicUsize::new(0));
+        let count = heard.clone();
+        let capture = start_capture(
+            system,
+            Box::new(move |samples, _, _| {
+                count.fetch_add(samples.len(), Ordering::Relaxed);
+            }),
+        );
+        match capture {
+            Ok(capture) => {
+                std::thread::sleep(std::time::Duration::from_millis(300));
+                drop(capture);
+                lines.push(format!(
+                    "capture (voice processing {system}): {} samples",
+                    heard.load(Ordering::Relaxed)
+                ));
+            }
+            Err(e) => lines.push(format!("capture (voice processing {system}) failed: {e}")),
+        }
+    }
+    end_recording();
+    lines.push(format!("events {:?}", events()));
+    lines.push("done".into());
+    lines
+}
+
 #[cfg(target_os = "ios")]
 mod ios {
     use super::{Capture, Choice, Event, Input, InputKind, Output, Permission, Route, Samples};
