@@ -792,6 +792,13 @@ impl Loading {
     pub(super) fn setup_key_event(&mut self, event: &winit::event::KeyEvent) -> bool {
         use winit::keyboard::{KeyCode, PhysicalKey};
         let PhysicalKey::Code(key) = event.physical_key else {
+            // iOS's on-screen keyboard types letters as text with no key behind them.
+            if event.state == winit::event::ElementState::Pressed
+                && let Some(text) = event.text.as_deref()
+                && let Some(form) = &mut self.setup.form
+            {
+                form.type_text(text);
+            }
             return self.setup.form.is_some();
         };
         if event.state != winit::event::ElementState::Pressed {

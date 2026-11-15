@@ -127,8 +127,10 @@ each one right now.
 
 The world always runs on the host's phone, as single player does, so it plays as fast. A copy
 of it lives in a storage bucket your group owns, which is how the next host gets the newest
-version. Everyone needs a **Microsoft account** signed in: it is how each game knows who you are,
-so your inventory, pets and stats stay yours whoever hosts.
+version. Sign in with a **Microsoft account** if you can: the host's game checks it, so your
+inventory, pets and stats stay yours whoever hosts, and nobody can play as you. Friends who
+aren't signed in (Play Offline) can join and host too, under their name: their things are kept
+by that name, so anyone with the world invite could use the same name.
 
 ### Set up the storage once (about 10 minutes, on your phone)
 

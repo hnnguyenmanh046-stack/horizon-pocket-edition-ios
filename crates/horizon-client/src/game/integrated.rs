@@ -789,7 +789,13 @@ impl Game<'_> {
             // No network until it is opened to the LAN; the memory connection
             // is not compressed (`Connection.isMemoryConnection`).
             listen: false,
-            online: horizon_client::lan::OnlineMode::lan(),
+            // A shared world's host lets players without an account join it (by their names),
+            // and authenticates signed-in ones whether or not this player is signed in.
+            online: if horizon_client::shared_worlds::hosting_now() {
+                horizon_client::lan::OnlineMode::shared_world()
+            } else {
+                horizon_client::lan::OnlineMode::lan()
+            },
             // Registered local seats share this computer; the vanilla LAN capacity still
             // applies to other connections when the world is published.
             bypasses_limit: Some(Arc::new(move |uuid| {

@@ -739,7 +739,16 @@ fn serve_login(
     // integrated server's own player through memory, derive the profile
     // from the name. Behind a Velocity proxy (forwarding.secret) the proxy has
     // authenticated the player and the profile is the one it forwards.
-    let online = shared.config.online.as_ref().filter(|_| !c.is_memory());
+    // A shared world's host lets a player without an account in as the offline profile of its
+    // name (what such a player's login names); any other login is authenticated.
+    let offline_guest = !c.is_memory()
+        && shared.config.online.as_ref().is_some_and(|o| o.offline_guests)
+        && hello.uuid == offline_uuid(&hello.name);
+    let online = shared
+        .config
+        .online
+        .as_ref()
+        .filter(|_| !c.is_memory() && !offline_guest);
     let forwarding = shared
         .config
         .forwarding_secret
@@ -1728,6 +1737,71 @@ mod tests {
             tag(r#"{"translate":"a","with":["b",{"text":"c","color":"red"}]}"#),
             r#"{"translate":"a","with":["b",{"text":"c","color":"red"}]}"#
         );
+    }
+
+    /// Starts a hello over the network, as a player whose login names `uuid`: the first login
+    /// packet the server answers with.
+    fn first_answer(port: u16, name: &str, uuid: u128) -> login::Clientbound {
+        let mut c = Connection::connect("127.0.0.1", port, Duration::from_secs(5)).unwrap();
+        c.send(
+            &handshake::Serverbound::Intention(handshake::Intention {
+                protocol: horizon_protocol::PROTOCOL_VERSION,
+                host: "127.0.0.1".into(),
+                port,
+                intent: handshake::LOGIN,
+            })
+            .encode(),
+        )
+        .unwrap();
+        c.send(&login::Serverbound::Hello(login::ServerHello { name: name.into(), uuid }).encode())
+            .unwrap();
+        loop {
+            let (id, payload) = c.recv().unwrap();
+            match login::Clientbound::decode(id, &payload).unwrap() {
+                login::Clientbound::Compression(p) => c.set_compression(p.threshold),
+                other => return other,
+            }
+        }
+    }
+
+    #[test]
+    fn a_shared_worlds_host_lets_players_without_an_account_in_and_authenticates_the_others() {
+        let config = crate::lan::NetConfig {
+            announce: false,
+            listen: true,
+            online: crate::lan::OnlineMode::shared_world(),
+            ..crate::lan::NetConfig::lan(0, "Island".into(), 8)
+        };
+        let lan =
+            crate::lan::Lan::start_with(Arc::new(crate::lan::data::SyncData::empty()), config)
+                .unwrap();
+        // Not signed in: in at once, as the offline profile of the name.
+        match first_answer(lan.port, "Wanderer", offline_uuid("Wanderer")) {
+            login::Clientbound::LoginFinished(p) => {
+                assert_eq!(p.profile.uuid, offline_uuid("Wanderer"));
+                assert_eq!(p.profile.name, "Wanderer");
+            }
+            other => panic!("expected the login to finish, got {other:?}"),
+        }
+        // Signed in (an account's own UUID): asked to authenticate, as any online server does.
+        assert!(matches!(
+            first_answer(lan.port, "Alex", 0x1234_5678_9abc_def0_1234_5678_9abc_def0),
+            login::Clientbound::Hello(_)
+        ));
+        // A plain LAN world of a signed-in host lets nobody past authentication.
+        let lan_world = crate::lan::NetConfig {
+            announce: false,
+            listen: true,
+            online: crate::lan::OnlineMode::generate(false).ok().map(Arc::new),
+            ..crate::lan::NetConfig::lan(0, "World".into(), 8)
+        };
+        let other =
+            crate::lan::Lan::start_with(Arc::new(crate::lan::data::SyncData::empty()), lan_world)
+                .unwrap();
+        assert!(matches!(
+            first_answer(other.port, "Wanderer", offline_uuid("Wanderer")),
+            login::Clientbound::Hello(_)
+        ));
     }
 
     /// The owner's login never waits on the profile fetch, even one that

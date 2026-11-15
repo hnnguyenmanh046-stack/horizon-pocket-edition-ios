@@ -107,6 +107,24 @@ impl Form {
             }
         }
     }
+    /// Text typed with no key behind it (iOS's on-screen keyboard), into the focused field.
+    pub fn type_text(&mut self, text: &str) {
+        let text: String = text.chars().filter(|c| !c.is_control()).collect();
+        if text.is_empty() {
+            return;
+        }
+        let secret = self.secret();
+        if let Some(i) = self.focus {
+            let f = &mut self.fields[i];
+            if secret {
+                f.insert_password(&text)
+            } else {
+                f.insert_text(&text)
+            }
+            self.sync(false);
+        }
+    }
+
     pub fn key(&mut self, key: KeyCode, text: Option<&str>, ctrl: bool, shift: bool) {
         if key == KeyCode::Tab {
             let i = self.focus.unwrap_or(0);

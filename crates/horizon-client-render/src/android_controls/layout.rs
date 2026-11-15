@@ -574,7 +574,7 @@ pub struct Settings {
     pub layouts: [[Placement; 14]; 3],
 }
 /// The factory defaults' revision. 1: toggle sprint and inventory walk controls on.
-pub const DEFAULTS_REV: u32 = 1;
+pub const DEFAULTS_REV: u32 = 2;
 fn default_profile_name() -> String {
     "default".into()
 }
@@ -676,7 +676,8 @@ impl Default for Settings {
             sprint_toggle: true,
             toggle_sprint: true,
             inventory_controls: true,
-            virtual_mouse_enabled: false,
+            // iOS: its menus are played with the virtual mouse from the start.
+            virtual_mouse_enabled: cfg!(target_os = "ios"),
             keyboard_button: false,
             virtual_mouse_hidden: true,
             disable_game_animations: false,
@@ -782,6 +783,10 @@ impl Settings {
             s.sprint_toggle = true;
             s.toggle_sprint = true;
             s.inventory_controls = true;
+        }
+        // iOS: settings saved before the virtual mouse was on by default there get it on once.
+        if s.defaults_rev < 2 && cfg!(target_os = "ios") {
+            s.virtual_mouse_enabled = true;
         }
         s.defaults_rev = s.defaults_rev.max(DEFAULTS_REV);
         s.sanitize();
@@ -2337,6 +2342,31 @@ mod tests {
         assert_eq!(settings.mode, Mode::Crosshair);
 
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn the_virtual_mouse_is_on_by_default_on_ios_only_and_stays_as_saved() {
+        assert_eq!(
+            Settings::default().virtual_mouse_enabled,
+            cfg!(target_os = "ios")
+        );
+        let dir = std::env::temp_dir().join(format!("horizon-vm-default-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("horizon-touch.json");
+        // A file of the first defaults, the mouse off.
+        let mut old = serde_json::to_value(Settings::default()).unwrap();
+        let fields = old.as_object_mut().unwrap();
+        fields.insert("defaults_rev".into(), 1.into());
+        fields.insert("virtual_mouse_enabled".into(), false.into());
+        std::fs::write(&path, serde_json::to_vec(&old).unwrap()).unwrap();
+        let mut loaded = Settings::load_from(&path);
+        assert_eq!(loaded.virtual_mouse_enabled, cfg!(target_os = "ios"));
+        assert_eq!(loaded.defaults_rev, DEFAULTS_REV);
+        // Turned off afterwards, it stays off.
+        loaded.virtual_mouse_enabled = false;
+        loaded.save_to(&path).unwrap();
+        assert!(!Settings::load_from(&path).virtual_mouse_enabled);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

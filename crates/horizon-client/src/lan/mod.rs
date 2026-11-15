@@ -102,6 +102,10 @@ pub struct OnlineMode {
     pub public_der: Vec<u8>,
     /// prevent-proxy-connections: the session service also checks the address.
     pub prevent_proxy: bool,
+    /// A shared world's host: a player without an account (whose login names the offline
+    /// profile of its name) comes in as that offline profile; every other one is still
+    /// authenticated, so a signed-in player can't be passed for.
+    pub offline_guests: bool,
 }
 
 impl OnlineMode {
@@ -113,7 +117,22 @@ impl OnlineMode {
             public_der: key.public_der(),
             key,
             prevent_proxy,
+            offline_guests: false,
         })
+    }
+    /// A shared world's host (`horizon_client::shared_worlds`), signed in or not: signed-in
+    /// players are authenticated as anywhere (their own UUIDs, whoever hosts), players without
+    /// an account join as the offline profile of their name.
+    pub fn shared_world() -> Option<Arc<Self>> {
+        Self::generate(false)
+            .map_err(|e| log::warn!("The shared world stays in offline mode: {e}"))
+            .ok()
+            .map(|online| {
+                Arc::new(Self {
+                    offline_guests: true,
+                    ..online
+                })
+            })
     }
     /// IntegratedServer.initServer (`setUsesAuthentication(true)`): a LAN or
     /// friends world authenticates its guests when the host is signed in;

@@ -148,8 +148,10 @@ pub fn device() -> String {
     id
 }
 
-/// The player as a shared world knows them: a Microsoft account, which proves who they are to
-/// the other players' games. An offline or Ely.by player can't take part.
+/// The player as a shared world knows them: a Microsoft account (the other players' games check
+/// it, so nobody can pass for them), or, not signed in, the offline profile of the name this
+/// game plays with (a host lets that in by name: anyone with the invite could take the name).
+/// An Ely.by account can't take part (no host could check it).
 pub fn me() -> Result<Member, String> {
     // The end-to-end checks (tools/shared_worlds_e2e.py) run without Microsoft accounts: an
     // offline player of this name, as the game's `--name` makes it. Never set in a player's game.
@@ -163,15 +165,21 @@ pub fn me() -> Result<Member, String> {
         });
     }
     let Some(session) = crate::auth::current() else {
-        return Err(tr(
-            "horizon.shared.needs_account",
-            "Shared worlds need a Microsoft account: sign in first.",
-        ));
+        // As the game names itself without an account (`Options::player_name`): what its logins
+        // name, and so the profile a shared world's host lets in.
+        let name = crate::accounts::player_name().unwrap_or_else(|| {
+            crate::offline_name::load_or_create(&crate::logging::player_dir())
+        });
+        return Ok(Member {
+            uuid: format!("{:032x}", horizon_protocol::crypto::offline_uuid(&name)),
+            name,
+            reachable: false,
+        });
     };
     if session.is_ely() {
         return Err(tr(
             "horizon.shared.needs_microsoft",
-            "Shared worlds need a Microsoft account, not an Ely.by one.",
+            "Shared worlds work with a Microsoft account, or with none (play offline), but not with Ely.by.",
         ));
     }
     Ok(Member {
@@ -304,6 +312,12 @@ pub fn context(id: &str) -> Result<Context, String> {
         me,
         device(),
     ))
+}
+
+/// Whether this game hosts a shared world now (it is getting it ready, playing it or uploading
+/// it): its server lets players without an account in.
+pub fn hosting_now() -> bool {
+    with(|state| state.hosting_here.is_some())
 }
 
 /// The game says which world it hosts now (None: none).

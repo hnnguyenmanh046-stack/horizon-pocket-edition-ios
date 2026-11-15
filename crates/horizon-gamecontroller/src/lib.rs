@@ -539,7 +539,8 @@ mod uikit {
     }
 
     thread_local! {
-        /// Background time asked for, by the reason it was asked for.
+        /// Background time asked for, by the reason it was asked for (the main thread's: every
+        /// call ends up there).
         static TASKS: std::cell::RefCell<Vec<(String, usize)>> =
             const { std::cell::RefCell::new(Vec::new()) };
     }
@@ -547,26 +548,73 @@ mod uikit {
     /// `UIBackgroundTaskInvalid`.
     const NO_TASK: usize = 0;
 
+    /// Runs `work` on the main thread, soon (GCD's main queue): UIKit's calls are the main
+    /// thread's, and the game's threads ask for background time and give it back too.
+    fn on_main(work: Box<dyn FnOnce() + Send>) {
+        unsafe extern "C" {
+            static _dispatch_main_q: u8;
+            fn dispatch_async_f(
+                queue: *const c_void,
+                context: *mut c_void,
+                work: extern "C" fn(*mut c_void),
+            );
+        }
+        extern "C" fn run(context: *mut c_void) {
+            // SAFETY: the box `on_main` leaked for this one call.
+            let work = unsafe { Box::from_raw(context.cast::<Box<dyn FnOnce() + Send>>()) };
+            work();
+        }
+        let context = Box::into_raw(Box::new(work)).cast::<c_void>();
+        // SAFETY: the main queue lives as long as the process; `run` takes the box back once.
+        unsafe {
+            dispatch_async_f(
+                std::ptr::addr_of!(_dispatch_main_q).cast::<c_void>(),
+                context,
+                run,
+            )
+        };
+    }
+
+    /// Gives the background time asked for as `reason` back, if it is still held.
+    fn end_task(app: &AnyObject, reason: &str) {
+        let held = TASKS.with(|t| t.borrow().iter().position(|(r, _)| r == reason));
+        if let Some(at) = held {
+            let (_, task) = TASKS.with(|t| t.borrow_mut().remove(at));
+            // SAFETY: a task this app began and has not ended, on the main thread.
+            let _: () = unsafe { msg_send![app, endBackgroundTask: task] };
+        }
+    }
+
     pub fn background_task(reason: &str, on: bool) {
         let Some(app) = application() else {
+            // Another thread: the main thread does it. Ending the time from the thread that
+            // finished the work never reached UIKit before, and iOS ends an app whose time
+            // runs out unreturned.
+            let reason = reason.to_owned();
+            on_main(Box::new(move || background_task(&reason, on)));
             return;
         };
-        let held = TASKS.with(|t| t.borrow().iter().position(|(r, _)| r == reason));
+        let held = TASKS.with(|t| t.borrow().iter().any(|(r, _)| r == reason));
         match (on, held) {
-            (true, None) => {
-                let none: *const c_void = std::ptr::null();
-                // SAFETY: main-thread UIKit call; a nil expiration handler is allowed.
-                let task: usize =
-                    unsafe { msg_send![&*app, beginBackgroundTaskWithExpirationHandler: none] };
+            (true, false) => {
+                // When the time runs out (the sign-in or the upload took longer than iOS
+                // gives): give it back, so iOS suspends the game instead of ending it.
+                let expired = reason.to_owned();
+                let handler = block2::RcBlock::new(move || {
+                    if let Some(app) = application() {
+                        log::warn!("Horizon: the background time for {expired} ran out");
+                        end_task(&app, &expired);
+                    }
+                });
+                // SAFETY: main-thread UIKit call; UIKit copies the handler.
+                let task: usize = unsafe {
+                    msg_send![&*app, beginBackgroundTaskWithExpirationHandler: &*handler]
+                };
                 if task != NO_TASK {
                     TASKS.with(|t| t.borrow_mut().push((reason.to_owned(), task)));
                 }
             }
-            (false, Some(at)) => {
-                let (_, task) = TASKS.with(|t| t.borrow_mut().remove(at));
-                // SAFETY: a task this app began and has not ended.
-                let _: () = unsafe { msg_send![&*app, endBackgroundTask: task] };
-            }
+            (false, true) => end_task(&app, reason),
             _ => {}
         }
     }
