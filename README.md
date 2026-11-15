@@ -199,12 +199,31 @@ every player as "(direct)", "(direct, UDP)" or "(bore.pub)", and each guest sees
 Faster for everyone: a host on home Wi-Fi with UPnP on in the router; or, when the host is behind
 the tunnel, **Give Host** to a player marked "(faster)", whose network takes direct connections.
 
+### Backups
+
+A copy of the world goes up every few minutes while it is played, and when its host leaves. The
+storage keeps, as backups: the last 20 copies (the last hour or so of play), one a day for 30
+days, and one a week for 26 weeks. Copies share what didn't change, so each backup costs only
+the blocks that did. The whole bucket (every world in it) is kept under 8 GB, well inside R2's
+free 10 GB: when it would go over, the oldest backups go first (never the newest few, the world
+as it is now, or the copy a load could be undone to).
+
+- **Load a backup:** Shared Worlds, the world, **Backups...**, pick one. Anyone in the world can
+  ask; the player who shared it approves it (Backups..., **Approve Load**, or in the world: Game
+  Menu, Friends). Their own requests need no approval.
+- **When it loads:** at once if nobody is playing. If someone is, their game warns everyone,
+  closes the world, loads the backup and opens it again; the others join again by themselves.
+- **Undo:** the copy a load replaced is always kept: **Undo Last Load** brings it back, the
+  same way (asked, then approved).
+- What was played after a backup is never lost by loading it: it stays a backup itself.
+
 ### Good to know
 
 - 8 players at most in a world.
 - Removing a world from your list leaves it in the storage for the others; your copy becomes a
   normal singleplayer world.
-- Old copies are kept for a while (the last 20, and one a day for two weeks), then removed.
+- Backups: see below. The game's own **How to Set Up...** page (on Share a World's storage page)
+  has these setup steps too, with an **Open Cloudflare** button.
 - Shared worlds are between phones running this app. Friends on PC (official Horizon) are planned
   for later.
 

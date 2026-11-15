@@ -21,6 +21,7 @@
 #![forbid(unsafe_code)]
 
 pub mod apply;
+pub mod backups;
 pub mod bore;
 pub mod codec;
 pub mod error;

@@ -87,6 +87,10 @@ pub struct Lease {
     /// the host's until the handoff (an older game leaves it out).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub closing: bool,
+    /// The last backup loaded, and the copy it replaced (what undoing it loads). Carried from
+    /// host to host.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub loaded: Option<Loaded>,
     /// Who is in the world, the host first.
     pub players: Vec<Member>,
     /// The newest copy of the save. A copy counts only once it is named here.
@@ -111,6 +115,21 @@ impl Lease {
             State::Handoff | State::Closed => 0,
         }
     }
+}
+
+/// A backup that was loaded ([`crate::backups::load`]).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Loaded {
+    /// The copy loaded.
+    pub backup: GenId,
+    /// The copy that was the newest before it: loading it again undoes the load.
+    pub replaced: Option<GenId>,
+    /// Who asked.
+    pub by: String,
+    /// The request carried out ([`crate::backups::Request::id`]).
+    pub request: String,
+    /// When (seconds since 1970, the loading game's clock).
+    pub at: i64,
 }
 
 /// A lease as the storage had it, with the tag a change must name.
@@ -175,6 +194,7 @@ impl Leases {
         device: &str,
         why: Claim,
     ) -> Result<Held> {
+        let loaded = seen.and_then(|s| s.lease.loaded.clone());
         let (epoch, generation, condition) = match seen {
             None => (1, None, Condition::Absent),
             Some(seen) => {
@@ -207,6 +227,7 @@ impl Leases {
             tunnel: false,
             tunnel_at: None,
             closing: false,
+            loaded,
             players: vec![me.clone()],
             generation,
         };
@@ -355,6 +376,14 @@ impl Held {
     /// Makes `generation` the world's newest copy. Its files must already be in the storage.
     pub fn commit(&mut self, generation: GenId) -> Result<()> {
         self.update(|lease| lease.generation = Some(generation))
+    }
+
+    /// Makes `generation`, a loaded backup's copy, the newest, and records the load.
+    pub fn commit_loaded(&mut self, generation: GenId, loaded: Loaded) -> Result<()> {
+        self.update(|lease| {
+            lease.generation = Some(generation);
+            lease.loaded = Some(loaded.clone());
+        })
     }
 
     /// The host leaves, having published `generation`; `successor` (a UUID) hosts next.

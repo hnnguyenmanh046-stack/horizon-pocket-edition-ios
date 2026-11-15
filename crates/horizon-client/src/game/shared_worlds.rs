@@ -17,7 +17,8 @@ use horizon_client::{
 use horizon_shared_worlds::{
     Error,
     lease::{Claim, Member, Watch, turn},
-    session::{self, Context, Hosting, Next, Start, Watcher, next_step},
+    backups,
+    session::{self, Context, Hosting, Next, RequestWatch, Start, Watcher, next_step},
 };
 use std::{
     collections::HashMap,
@@ -81,6 +82,11 @@ pub(super) struct Shared {
     phase: Phase,
     /// Copy Code was pressed.
     copied: Option<Instant>,
+    /// The world's request to load a backup, read every few seconds.
+    requests: Option<RequestWatch>,
+    /// The request (id, state) last told to the player, and whether one was seen at all.
+    told: Option<(String, backups::State)>,
+    told_once: bool,
 }
 
 enum Phase {
@@ -113,6 +119,8 @@ struct Host {
     tunneled_told: u32,
     /// How each player's connection goes, as they said: true through the public tunnel.
     paths: HashMap<u128, Route>,
+    /// The owner approved loading a backup: the world closes for it then.
+    load_at: Option<Instant>,
 }
 
 struct Leaving {
@@ -289,10 +297,20 @@ impl Game<'_> {
         // The list has been watching the lease: a host that stood still there isn't waited for
         // from the start again.
         let guest = watch(&ctx, list::watch_of(world))?;
+        let requests = match RequestWatch::start(ctx.clone()) {
+            Ok(r) => Some(r),
+            Err(e) => {
+                log::warn!("Shared worlds: load requests aren't followed: {e}");
+                None
+            }
+        };
         self.shared = Some(Shared {
             id: world.to_owned(),
             name,
             ctx,
+            requests,
+            told: None,
+            told_once: false,
             copied: None,
             phase: Phase::Watching(guest),
         });
@@ -325,8 +343,107 @@ impl Game<'_> {
         }
     }
 
+    /// What the world's request to load a backup says now: told to the player as it changes,
+    /// and carried out by the host's game once the owner approved it (the world closes, the
+    /// backup is loaded as the world is taken again, and it opens from it; the others follow).
+    fn shared_loads(&mut self, shared: &mut Shared) {
+        let Some((seen, owner)) = shared.requests.as_ref().and_then(RequestWatch::latest) else {
+            return;
+        };
+        let request = seen.map(|s| s.request);
+        let key = request.as_ref().map(|r| (r.id.clone(), r.state));
+        if key != shared.told {
+            // What was settled before this session began isn't news.
+            let first = !shared.told_once;
+            shared.told_once = true;
+            shared.told = key;
+            if let Some(r) = &request
+                && (!first || r.state.open())
+                && self.title.is_none()
+            {
+                let when = list::when_id(&list::details(&shared.id), r.backup);
+                let owner_name = owner.name().unwrap_or("The owner").to_owned();
+                let text = match r.state {
+                    backups::State::Asked if owner.is(&shared.ctx.me) => Some(
+                        tr(
+                            "load_asked_you",
+                            "%a asks to load the backup from %t: Game Menu, Friends, to answer.",
+                        )
+                        .replacen("%a", &r.by.name, 1)
+                        .replacen("%t", &when, 1),
+                    ),
+                    backups::State::Asked => Some(
+                        tr("load_asked", "%a asks to load the backup from %t. %o decides.")
+                            .replacen("%a", &r.by.name, 1)
+                            .replacen("%t", &when, 1)
+                            .replacen("%o", &owner_name, 1),
+                    ),
+                    backups::State::Approved => Some(
+                        tr(
+                            "load_approved",
+                            "%o approved loading the backup from %t: the world closes in a few seconds and opens again from it.",
+                        )
+                        .replacen("%o", r.decided_by.as_deref().unwrap_or(&owner_name), 1)
+                        .replacen("%t", &when, 1),
+                    ),
+                    backups::State::Declined => Some(
+                        tr("load_declined", "%o said no to loading the backup.")
+                            .replacen("%o", r.decided_by.as_deref().unwrap_or(&owner_name), 1),
+                    ),
+                    backups::State::Withdrawn => Some(tr(
+                        "load_withdrawn",
+                        "The request to load a backup was taken back.",
+                    )),
+                    backups::State::Failed => Some(
+                        tr("load_failed", "The backup couldn't be loaded: %s")
+                            .replacen("%s", r.note.as_deref().unwrap_or(""), 1),
+                    ),
+                    backups::State::Done => None,
+                };
+                if let Some(text) = text {
+                    self.system_message(Text::literal(text));
+                }
+            }
+        }
+        // The host's game carries out an approved load: a few seconds' warning, then the world
+        // closes, hands itself back to this game, which loads the backup as it takes it again.
+        let Phase::Hosting(host) = &mut shared.phase else {
+            return;
+        };
+        let Some(r) = request.filter(|r| r.state == backups::State::Approved) else {
+            host.load_at = None;
+            return;
+        };
+        if !host.opened || host.fenced || host.successor.is_some() {
+            return;
+        }
+        if host
+            .hosting
+            .lease()
+            .loaded
+            .as_ref()
+            .is_some_and(|l| l.request == r.id)
+        {
+            return;
+        }
+        let due = *host
+            .load_at
+            .get_or_insert_with(|| Instant::now() + Duration::from_secs(8));
+        if Instant::now() >= due {
+            host.successor = Some(shared.ctx.me.uuid.clone());
+            self.system_message(Text::literal(tr(
+                "loading_backup",
+                "Loading the backup: the world opens again from it in a moment.",
+            )));
+            if let Err(e) = self.leave_server(None) {
+                log::warn!("Shared worlds: the world didn't close for the load: {e}");
+            }
+        }
+    }
+
     /// One step; false ends the session.
     fn step_shared(&mut self, shared: &mut Shared) -> Result<bool> {
+        self.shared_loads(shared);
         match &mut shared.phase {
             Phase::Preparing(done) => match done.try_recv() {
                 Err(TryRecvError::Empty) => Ok(true),
@@ -434,6 +551,7 @@ impl Game<'_> {
             fenced: false,
             tunneled_told: 0,
             paths: HashMap::new(),
+            load_at: None,
         }));
         Ok(true)
     }
@@ -895,6 +1013,18 @@ impl Game<'_> {
                     let handing = seen.lease.state == horizon_shared_worlds::lease::State::Handoff;
                     working(if silent && !handing {
                         countdown()
+                    } else if shared
+                        .requests
+                        .as_ref()
+                        .and_then(RequestWatch::latest)
+                        .is_some_and(|(r, _)| {
+                            r.is_some_and(|s| s.request.state == backups::State::Approved)
+                        })
+                    {
+                        tr(
+                            "loading_backup_wait",
+                            "Loading the backup the owner approved: the world opens again from it in a moment.",
+                        )
                     } else if seen.lease.closing {
                         tr(
                             "host_closing",
@@ -1107,6 +1237,38 @@ impl Game<'_> {
             }
             Phase::Preparing(_) | Phase::Leaving(_) => {}
         }
+        if let Some((Some(seen), owner)) = shared.requests.as_ref().and_then(RequestWatch::latest)
+        {
+            let r = seen.request;
+            let when = list::when_id(&list::details(&shared.id), r.backup);
+            match r.state {
+                backups::State::Asked => {
+                    view.lines.push(
+                        tr("load_asked_line", "%a asks to load the backup from %t.")
+                            .replacen("%a", &r.by.name, 1)
+                            .replacen("%t", &when, 1),
+                    );
+                    if owner.is(&shared.ctx.me) {
+                        view.buttons.insert(
+                            0,
+                            (tr("approve_load", "Approve Load"), Action::ApproveLoad, true),
+                        );
+                        view.buttons.insert(
+                            1,
+                            (tr("decline_load", "Decline Load"), Action::DeclineLoad, true),
+                        );
+                    }
+                }
+                backups::State::Approved => view.lines.push(
+                    tr(
+                        "load_approved_line",
+                        "Loading the backup from %t: the world closes for a moment and opens again from it.",
+                    )
+                    .replacen("%t", &when, 1),
+                ),
+                _ => {}
+            }
+        }
         view
     }
 
@@ -1128,6 +1290,30 @@ impl Game<'_> {
         self.audio.play_button_click();
         match action {
             Action::Done => self.screen = super::Screen::Paused,
+            Action::ApproveLoad | Action::DeclineLoad => {
+                let approve = action == Action::ApproveLoad;
+                if let Some(shared) = &self.shared {
+                    let ctx = shared.ctx.clone();
+                    // The answer goes up on its own thread; the screen follows the request.
+                    let _ = std::thread::Builder::new()
+                        .name("shared-worlds-answer".into())
+                        .spawn(move || {
+                            let remote = ctx.remote();
+                            let answered = backups::owner(remote).and_then(|owner| {
+                                match backups::request(remote)? {
+                                    Some(seen) => {
+                                        backups::decide(remote, &seen, &ctx.me, &owner, approve)
+                                            .map(|_| ())
+                                    }
+                                    None => Ok(()),
+                                }
+                            });
+                            if let Err(e) = answered {
+                                log::warn!("Shared worlds: the answer wasn't saved: {e}");
+                            }
+                        });
+                }
+            }
             Action::CopyCode => {
                 if let Some(code) = view.code {
                     self.copy_text(&code);
@@ -1366,6 +1552,8 @@ impl Game<'_> {
                         "uploading": host.hosting.uploading(),
                         "frozen": host.hosting.must_freeze(),
                         "epoch": host.hosting.epoch(),
+                        "generation": host.hosting.lease().generation.map(|g| json!({"epoch": g.epoch, "seq": g.seq})),
+                        "loaded": host.hosting.lease().loaded.map(|l| json!({"epoch": l.backup.epoch, "seq": l.backup.seq, "request": l.request})),
                         // How each guest said it connects, and the sessions open now.
                         "routes": host.players.iter().filter_map(|p| {
                             let u = u128::from_str_radix(&p.uuid, 16).ok()?;
@@ -1399,7 +1587,74 @@ impl Game<'_> {
                     .ok_or(super::integrated::NO_ANSWER)??;
                 Ok(Some(json!({ "taken": taken })))
             }
-            _ => Err("shared list|add INVITE|create ...|invite ID|play ID|give UUID|ask|status|checkpoint".into()),
+            Some("backups") => {
+                // shared backups WORLD: what the Backups page shows (read in the background).
+                let world = words.get(2).ok_or("shared backups WORLD")?;
+                list::read_details(world);
+                let d = list::details(world);
+                Ok(Some(json!({
+                    "read": d.read,
+                    "error": d.error,
+                    "owner": d.owner.as_ref().and_then(|o| o.name().map(str::to_owned)),
+                    "owner_is_me": d.owner_is_me(),
+                    "backups": d.backups.iter().map(|b| json!({
+                        "epoch": b.id.epoch, "seq": b.id.seq, "day": b.id.day,
+                        "at": b.at, "by": b.by, "kind": b.kind.map(|k| format!("{k:?}")),
+                    })).collect::<Vec<_>>(),
+                    "request": d.request.as_ref().map(|s| json!({
+                        "id": s.request.id,
+                        "state": format!("{:?}", s.request.state),
+                        "by": s.request.by.name,
+                        "epoch": s.request.backup.epoch,
+                        "seq": s.request.backup.seq,
+                        "undo": s.request.undo,
+                    })),
+                    "loaded": d.loaded.as_ref().map(|l| json!({
+                        "epoch": l.backup.epoch,
+                        "seq": l.backup.seq,
+                        "replaced": l.replaced.map(|r| json!({"epoch": r.epoch, "seq": r.seq})),
+                        "by": l.by,
+                    })),
+                    "usage": d.usage,
+                })))
+            }
+            Some("load") => {
+                // shared load WORLD EPOCH SEQ | shared load WORLD undo: as Backups' rows and
+                // Undo Last Load.
+                let world = words.get(2).ok_or("shared load WORLD EPOCH SEQ|undo")?;
+                let d = list::details(world);
+                let (backup, undo) = if words.get(3) == Some(&"undo") {
+                    let replaced = d
+                        .loaded
+                        .as_ref()
+                        .and_then(|l| l.replaced)
+                        .ok_or("no load to undo")?;
+                    (replaced, true)
+                } else {
+                    let epoch: u64 = words.get(3).ok_or("EPOCH")?.parse().map_err(|_| "EPOCH")?;
+                    let seq: u32 = words.get(4).ok_or("SEQ")?.parse().map_err(|_| "SEQ")?;
+                    let backup = d
+                        .backups
+                        .iter()
+                        .find(|b| b.id.epoch == epoch && b.id.seq == seq)
+                        .ok_or("no such backup (read them with shared backups)")?;
+                    (backup.id, false)
+                };
+                list::ask_load(world, backup, undo);
+                Ok(Some(json!({ "ok": true })))
+            }
+            Some("answer") => {
+                // shared answer WORLD yes|no: the owner's Approve Load or Decline.
+                let world = words.get(2).ok_or("shared answer WORLD yes|no")?;
+                let approve = match words.get(3).copied() {
+                    Some("yes") => true,
+                    Some("no") => false,
+                    _ => return Err("shared answer WORLD yes|no".into()),
+                };
+                list::decide(world, approve);
+                Ok(Some(json!({ "ok": true })))
+            }
+            _ => Err("shared list|add INVITE|create ...|invite ID|play ID|give UUID|ask|status|checkpoint|backups ID|load ID EPOCH SEQ|load ID undo|answer ID yes|no".into()),
         }
     }
 }

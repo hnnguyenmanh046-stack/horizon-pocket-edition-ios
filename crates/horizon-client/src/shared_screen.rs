@@ -28,6 +28,9 @@ pub enum Action {
     AskHost,
     /// The invite code that joins the host now, to the clipboard.
     CopyCode,
+    /// The owner's answers to a request to load a backup.
+    ApproveLoad,
+    DeclineLoad,
     Done,
 }
 

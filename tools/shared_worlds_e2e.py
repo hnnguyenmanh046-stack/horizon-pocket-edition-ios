@@ -15,6 +15,10 @@
 7. restart:  Alex hosts again and Alex's game is killed; started again on the same device, it
              lists the world as nobody playing and takes it straight back (the same epoch, no
              wait for a host that is gone).
+8. backups:  Alex hosts and places a block between two copies. Steve asks to load the copy from
+             before it; Alex, who shared the world, approves from inside it. Alex's game closes
+             the world, loads the backup and opens it again: the block is gone. Undo Last Load
+             brings it back the same way.
 
     python3 tools/shared_worlds_e2e.py --client target/fast/horizon-client --resources R --xvfb --offscreen
 
@@ -233,6 +237,47 @@ def run(client, resources, work):
         assert hosting['epoch'] == epoch, (hosting['epoch'], epoch)
         assert took < 45, took
         print(f'restart: the same device took its world back after {took:.0f} s (epoch {epoch})', flush=True)
+
+        # 8. Backups, asked for by one player and approved by the one who shared the world.
+        steve = player('Steve')
+        steve(f'shared add {invite}', check=False)
+        alex.wait('status', lambda v: v['player'] is not None and v['pending_chunks'] == 0, 180,
+                  'Alex in the world again')
+        third = spot(alex, 10)
+        alex.checkpoint('the copy before the gold block')
+        before = alex.session()['generation']
+        alex(f'command setblock {third[0]} {third[1]} {third[2]} minecraft:gold_block')
+        alex.block(third, 'minecraft:gold_block', 'the gold block')
+        alex.checkpoint('the copy with the gold block')
+        steve.wait(f'shared backups {world}', lambda v: v['read'] and any(
+            b['epoch'] == before['epoch'] and b['seq'] == before['seq'] for b in v['backups']), 60,
+            'Steve reading the backups')
+        assert not steve(f'shared backups {world}')['owner_is_me']
+        steve(f'shared load {world} {before["epoch"]} {before["seq"]}')
+        steve.wait_task(lambda t: t.startswith('Done') or t.startswith('Failed'), 60, "Steve's request")
+        asked = alex.wait(f'shared backups {world}', lambda v: v['read'] and (v['request'] or {}).get('state') == 'Asked',
+                          60, "Steve's request on Alex's game")['request']
+        assert asked['by'] == 'Steve', asked
+        alex(f'shared answer {world} yes')
+        loading = time.monotonic()
+        alex.wait('shared status', lambda v: (v.get('session') or {}).get('phase') == 'hosting'
+                  and v['session']['opened'] and (v['session'].get('loaded') or {}).get('request') == asked['id'],
+                  300, 'Alex hosting the backup')
+        alex.wait('status', lambda v: v['player'] is not None and v['pending_chunks'] == 0, 180,
+                  'Alex in the backup')
+        alex.wait(f'getblock {third[0]} {third[1]} {third[2]}', lambda v: v['block'] != 'minecraft:gold_block',
+                  60, 'the gold block gone with the load')
+        print(f'backups: loaded the copy from before the block after {time.monotonic() - loading:.0f} s', flush=True)
+        alex.wait(f'shared backups {world}', lambda v: v['read'] and v['loaded'] and v['loaded']['replaced'], 60,
+                  'the load to undo')
+        alex(f'shared load {world} undo')
+        alex.wait('shared status', lambda v: (v.get('session') or {}).get('phase') == 'hosting'
+                  and v['session']['opened'] and (v['session'].get('loaded') or {}).get('request') not in (None, asked['id']),
+                  300, 'Alex hosting the undone load')
+        alex.wait('status', lambda v: v['player'] is not None and v['pending_chunks'] == 0, 180,
+                  'Alex back in the world')
+        alex.block(third, 'minecraft:gold_block', 'the gold block back with the undo', 60)
+        print('backups: the load was undone; the gold block is back', flush=True)
         alex('disconnect')
         task = alex.wait_task(lambda t: t.startswith('Done') or t.startswith('Failed'), 300, 'the last upload again')['task']
         assert task.startswith('Done'), task
@@ -257,7 +302,7 @@ def main():
     Player.extra = ['--offscreen'] if args.offscreen else []
     with tempfile.TemporaryDirectory(prefix='hse-', dir='/tmp') as directory:
         run(args.client.resolve(), args.resources.resolve(), Path(directory))
-    print('Shared worlds end to end passed: create, host, join, give, takeover, close, restart')
+    print('Shared worlds end to end passed: create, host, join, give, takeover, close, restart, backups')
 
 
 if __name__ == '__main__':

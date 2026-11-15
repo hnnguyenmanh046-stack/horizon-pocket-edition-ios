@@ -17,6 +17,7 @@
 use crate::{
     Error, Result,
     apply::{Fetched, Layout, fetch, recover},
+    backups,
     invite::WorldInvite,
     lease::{Claim, Held, Lease, Leases, Member, Seen, State, Timing, Watch, turn},
     manifest::{GenId, Manifest, WORK},
@@ -298,6 +299,8 @@ pub fn create(ctx: &Context, name: &str, progress: Progress<'_>) -> Result<GenId
     let leases = ctx.leases();
     let mut held = leases.claim(None, &ctx.me, &ctx.device, Claim::Free)?;
     let made = (|| {
+        // Who shared it: the one who says yes to loading a backup.
+        backups::record_owner(ctx.remote(), &ctx.me)?;
         let layout = ctx.layout();
         recover(&layout)?;
         let mut index = LocalIndex::default();
@@ -323,6 +326,7 @@ pub fn create(ctx: &Context, name: &str, progress: Progress<'_>) -> Result<GenId
             progress,
         )?;
         held.commit(id)?;
+        note(ctx, id, backups::Kind::First);
         layout.save_base(&manifest)?;
         index.save(&layout.index())?;
         Marker {
@@ -505,7 +509,7 @@ pub fn host(
 ) -> Result<Hosting> {
     let lock = FolderLock::take(&ctx.folder)?;
     let leases = ctx.leases();
-    let (held, resumed) = match start {
+    let (mut held, mut resumed) = match start {
         Start::Takeover(seen) => (
             leases.claim(Some(&seen), &ctx.me, &ctx.device, Claim::Takeover)?,
             false,
@@ -528,6 +532,13 @@ pub fn host(
             }
         }
     };
+    // A backup the owner approved loading: this game holds the world now, so it loads it,
+    // before anything is brought onto this device (which then brings the backup).
+    if carry_out(&ctx, &mut held).is_some() {
+        // The backup replaces whatever this device had, its own unsent progress included,
+        // which is kept apart as for any newer copy.
+        resumed = false;
+    }
     let epoch = held.lease().epoch;
     let newest = held.lease().generation;
     let lease = Arc::new(HostLease {
@@ -765,7 +776,9 @@ impl Hosting {
                     Ok(manifest) => {
                         uploads.previous = Some(manifest);
                         uploads.commits += 1;
-                        tidy = uploads.commits.is_multiple_of(20);
+                        // The first copy of a stay (the bucket may have filled meanwhile),
+                        // then every 20.
+                        tidy = uploads.commits == 1 || uploads.commits.is_multiple_of(20);
                         // Every staged file is in the copy just committed.
                         let _ = fs::remove_dir_all(&staging);
                         Ok(id)
@@ -778,7 +791,7 @@ impl Hosting {
                 // Outside the lock: the game never waits on it. A newer upload may start
                 // meanwhile; the sweep only removes what is older than `id` and unused by it.
                 if tidy {
-                    sweep(&ctx, id);
+                    sweep(&ctx, &lease, id);
                 }
             });
         if let Err(e) = spawned {
@@ -848,6 +861,7 @@ impl Hosting {
                 progress,
             )?;
             lease.write(|held| held.hand_off(id, successor))?;
+            note(&ctx, id, backups::Kind::Left);
             layout.save_base(&manifest)?;
             index.save(&layout.index())?;
             let _ = fs::remove_dir_all(layout.staging());
@@ -924,21 +938,222 @@ fn upload(
         &mut |_, _| !stop.load(Ordering::SeqCst),
     )?;
     lease.write(|held| held.commit(id))?;
+    note(ctx, id, backups::Kind::Checkpoint);
     layout.save_base(&manifest)?;
     index.save(&layout.index())?;
     Ok(manifest)
 }
 
-fn sweep(ctx: &Context, current: GenId) {
-    match retention::sweep(ctx.remote(), current) {
-        Ok(swept) if swept.packs > 0 || swept.manifests > 0 => log::info!(
-            "Shared worlds: removed {} old copies and {} packs ({} KiB)",
-            swept.manifests,
-            swept.packs,
-            swept.bytes / 1024
-        ),
-        Ok(_) => {}
+/// Stamps a copy just committed: when, by whom, why (only for showing backups).
+fn note(ctx: &Context, id: GenId, kind: backups::Kind) {
+    if let Err(e) = backups::stamp(ctx.remote(), id, kind, &ctx.me.name, backups::now()) {
+        log::info!("Shared worlds: the copy {id:?} isn't stamped: {e}");
+    }
+}
+
+/// Loads the backup an approved request names, `held` being this game's lease on the world:
+/// the new copy's id when it did. A request already carried out (its finish not written) is
+/// marked done; one that can't be is marked failed, and the world goes on from its newest copy.
+fn carry_out(ctx: &Context, held: &mut Held) -> Option<GenId> {
+    let seen = match backups::request(ctx.remote()) {
+        Ok(Some(seen)) if seen.request.state == backups::State::Approved => seen,
+        Ok(_) => return None,
+        Err(e) => {
+            log::warn!("Shared worlds: the load requests weren't read: {e}");
+            return None;
+        }
+    };
+    if held
+        .lease()
+        .loaded
+        .as_ref()
+        .is_some_and(|l| l.request == seen.request.id)
+    {
+        backups::finish(ctx.remote(), &seen, backups::State::Done, None);
+        return None;
+    }
+    // Past every copy of this epoch (a host that picked its own lease up again has some).
+    let epoch = held.lease().epoch;
+    let seq = match ctx.next_seq(epoch) {
+        Ok(seq) => seq,
+        Err(e) => {
+            log::warn!("Shared worlds: the backup wasn't loaded yet: {e}");
+            return None;
+        }
+    };
+    let id = GenId {
+        epoch,
+        seq,
+        day: today(),
+    };
+    match backups::load(
+        ctx.remote(),
+        held,
+        seen.request.backup,
+        id,
+        &seen.request.by,
+        &seen.request.id,
+    ) {
+        Ok(_) => {
+            log::info!(
+                "Shared worlds: loaded the backup {:?} as {id:?}",
+                seen.request.backup
+            );
+            backups::finish(ctx.remote(), &seen, backups::State::Done, None);
+            Some(id)
+        }
+        Err(Error::Fenced) => None,
+        Err(e) => {
+            log::warn!("Shared worlds: the backup wasn't loaded: {e}");
+            backups::finish(
+                ctx.remote(),
+                &seen,
+                backups::State::Failed,
+                Some(e.to_string()),
+            );
+            None
+        }
+    }
+}
+
+/// Carries out the approved request at once, when nobody hosts the world: a load needs no game
+/// open (each player's copy follows the next time they play). [`Error::Refused`] while someone
+/// hosts it or nothing is approved: then whoever takes the world next carries it out.
+pub fn load_now(ctx: &Context) -> Result<GenId> {
+    let leases = ctx.leases();
+    let Some(seen) = leases.read()? else {
+        return Err(Error::Store(
+            "this world is no longer in its storage".into(),
+        ));
+    };
+    let mut held = leases.claim(Some(&seen), &ctx.me, &ctx.device, Claim::Free)?;
+    let loaded = carry_out(ctx, &mut held);
+    let released = held.release();
+    match loaded {
+        Some(id) => released.map(|()| id),
+        None => {
+            released?;
+            Err(Error::Refused)
+        }
+    }
+}
+
+/// What a sweep must keep for loads: the copy the last load replaced (its undo), and the
+/// backup an open request asks for.
+fn needed_for_loads(ctx: &Context, lease: &HostLease) -> Result<Vec<GenId>> {
+    let mut keep: Vec<GenId> = locked(&lease.snapshot)
+        .loaded
+        .iter()
+        .filter_map(|l| l.replaced)
+        .collect();
+    if let Some(seen) = backups::request(ctx.remote())?
+        && seen.request.state.open()
+    {
+        keep.push(seen.request.backup);
+    }
+    Ok(keep)
+}
+
+fn sweep(ctx: &Context, lease: &HostLease, current: GenId) {
+    // Without knowing what a load needs, nothing is removed.
+    let protected = match needed_for_loads(ctx, lease) {
+        Ok(p) => p,
+        Err(e) => {
+            log::warn!("Shared worlds: old copies weren't removed: {e}");
+            return;
+        }
+    };
+    match retention::sweep(ctx.remote(), current, &protected, retention::BUDGET) {
+        Ok(swept) => {
+            if swept.packs > 0 || swept.manifests > 0 {
+                log::info!(
+                    "Shared worlds: removed {} old copies and {} packs ({} KiB); the bucket holds {} MB",
+                    swept.manifests,
+                    swept.packs,
+                    swept.bytes / 1024,
+                    swept.used / 1_000_000
+                );
+            }
+            if swept.full {
+                log::warn!(
+                    "Shared worlds: the bucket holds {} MB, over the {} MB kept free, with only the backups that must stay",
+                    swept.used / 1_000_000,
+                    retention::BUDGET / 1_000_000
+                );
+            }
+        }
         Err(e) => log::warn!("Shared worlds: old copies weren't removed: {e}"),
+    }
+}
+
+/// Reads a world's request to load a backup, and its owner, every few seconds while it is
+/// played: the host's game carries out an approved one, and every player's Friends screen shows
+/// it (with the owner's answer buttons).
+pub struct RequestWatch {
+    latest: Arc<Mutex<Option<(Option<backups::Seen>, backups::Owner)>>>,
+    stop: Arc<AtomicBool>,
+    thread: Option<JoinHandle<()>>,
+}
+
+impl RequestWatch {
+    pub fn start(ctx: Arc<Context>) -> Result<Self> {
+        let latest = Arc::new(Mutex::new(None));
+        let stop = Arc::new(AtomicBool::new(false));
+        let thread = {
+            let (latest, stop) = (latest.clone(), stop.clone());
+            std::thread::Builder::new()
+                .name("shared-worlds-requests".into())
+                .spawn(move || {
+                    let every = ctx.timing.poll * 2;
+                    let step = Duration::from_millis(50).min(every);
+                    let mut next = Instant::now();
+                    let mut owner: Option<backups::Owner> = None;
+                    let mut reads = 0u32;
+                    while !stop.load(Ordering::SeqCst) {
+                        if Instant::now() >= next {
+                            next = Instant::now() + every;
+                            reads += 1;
+                            // The owner rarely changes: once, then now and then while unknown.
+                            let known = matches!(owner, Some(backups::Owner::Known(_)));
+                            if owner.is_none() || (!known && reads.is_multiple_of(6)) {
+                                match backups::owner(ctx.remote()) {
+                                    Ok(o) => owner = Some(o),
+                                    Err(e) => log::info!("Shared worlds: the owner wasn't read: {e}"),
+                                }
+                            }
+                            match (backups::request(ctx.remote()), &owner) {
+                                (Ok(request), Some(owner)) => {
+                                    *locked(&latest) = Some((request, owner.clone()));
+                                }
+                                (Err(e), _) => {
+                                    log::info!("Shared worlds: the load request wasn't read: {e}")
+                                }
+                                _ => {}
+                            }
+                        }
+                        std::thread::sleep(step);
+                    }
+                })?
+        };
+        Ok(Self {
+            latest,
+            stop,
+            thread: Some(thread),
+        })
+    }
+
+    /// The request as last read (None: there is none) and the owner. None before the first read.
+    pub fn latest(&self) -> Option<(Option<backups::Seen>, backups::Owner)> {
+        locked(&self.latest).clone()
+    }
+}
+
+impl Drop for RequestWatch {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
     }
 }
 
@@ -1132,6 +1347,113 @@ mod tests {
             outcome.is_some()
         });
         outcome.unwrap().unwrap()
+    }
+
+    #[test]
+    fn a_backup_asked_for_approved_and_loaded_and_the_load_undone() {
+        let store = Arc::new(MemoryStore::new());
+        let alex = new_world(&store);
+        let steve = Device::new(&store, 2);
+        let remote = alex.ctx.remote();
+        // Alex shared it: Alex is its owner.
+        let owner = backups::owner(remote).unwrap();
+        assert_eq!(owner, backups::Owner::Known(alex.ctx.me.clone()));
+        // Two more copies: "level 2", then "level 3" (with a new file).
+        let hosting = alex.host(Start::Free).unwrap();
+        alex.write("level.dat", b"level 2");
+        let second = checkpoint(&hosting);
+        alex.write("level.dat", b"level 3");
+        alex.write("data/new.dat", b"new");
+        let third = checkpoint(&hosting);
+        hosting.leave(None, &mut go).unwrap();
+        let newest = alex.ctx.status().unwrap().unwrap().lease.generation.unwrap();
+        assert!(newest > third);
+        let listed = backups::list(remote).unwrap();
+        assert!(listed.iter().any(|b| b.id == second && b.kind == Some(backups::Kind::Checkpoint)));
+        assert_eq!(listed[0].id, newest);
+        assert_eq!(listed[0].kind, Some(backups::Kind::Left));
+        // Steve asks for the second copy: it waits for Alex, and nothing loads meanwhile.
+        backups::ask(remote, second, &steve.ctx.me, &owner, false).unwrap();
+        assert!(matches!(load_now(&steve.ctx), Err(Error::Refused)));
+        let seen = backups::request(remote).unwrap().unwrap();
+        backups::decide(remote, &seen, &alex.ctx.me, &owner, true).unwrap();
+        // Nobody plays it: loaded at once, by whoever carries it out.
+        let loaded = load_now(&steve.ctx).unwrap();
+        let lease = alex.ctx.status().unwrap().unwrap().lease;
+        assert_eq!(lease.state, State::Closed);
+        assert_eq!(lease.generation, Some(loaded));
+        let record = lease.loaded.clone().unwrap();
+        assert_eq!((record.backup, record.replaced), (second, Some(newest)));
+        assert_eq!(record.by, steve.ctx.me.name);
+        assert_eq!(
+            backups::request(remote).unwrap().unwrap().request.state,
+            backups::State::Done
+        );
+        // Carried out once only.
+        assert!(matches!(load_now(&steve.ctx), Err(Error::Refused)));
+        // The next host plays the backup, whose files are the second copy's.
+        let hosting = steve.host(Start::Free).unwrap();
+        assert_eq!(steve.read("level.dat"), b"level 2");
+        assert!(!steve.world().join("data/new.dat").exists());
+        hosting.leave(None, &mut go).unwrap();
+        // The load is still known to the next lease, and undone by loading what it replaced.
+        let lease = alex.ctx.status().unwrap().unwrap().lease;
+        let replaced = lease.loaded.as_ref().unwrap().replaced.unwrap();
+        assert_eq!(replaced, newest);
+        backups::ask(remote, replaced, &alex.ctx.me, &owner, true).unwrap();
+        // The owner's own request needs no answer; a host starting carries it out too.
+        let hosting = alex.host(Start::Free).unwrap();
+        assert_eq!(alex.read("level.dat"), b"level 3");
+        assert_eq!(alex.read("data/new.dat"), b"new");
+        let lease = hosting.lease();
+        assert_eq!(lease.loaded.as_ref().unwrap().backup, newest);
+        // Play goes on from it: a checkpoint is the next copy of this epoch.
+        alex.write("level.dat", b"level 4");
+        let after = checkpoint(&hosting);
+        assert!(after > lease.generation.unwrap());
+        hosting.leave(None, &mut go).unwrap();
+    }
+
+    #[test]
+    fn a_backup_that_is_gone_fails_its_request_and_the_world_goes_on() {
+        let store = Arc::new(MemoryStore::new());
+        let alex = new_world(&store);
+        let remote = alex.ctx.remote();
+        let owner = backups::owner(remote).unwrap();
+        let gone = GenId {
+            epoch: 1,
+            seq: 99,
+            day: 20261101,
+        };
+        backups::ask(remote, gone, &alex.ctx.me, &owner, false).unwrap();
+        let hosting = alex.host(Start::Free).unwrap();
+        assert_eq!(alex.read("level.dat"), b"level 1");
+        let request = backups::request(remote).unwrap().unwrap().request;
+        assert_eq!(request.state, backups::State::Failed);
+        assert!(request.note.is_some());
+        assert!(hosting.lease().loaded.is_none());
+        hosting.leave(None, &mut go).unwrap();
+    }
+
+    #[test]
+    fn a_host_that_picked_its_own_lease_up_loads_an_approved_backup_as_its_next_copy() {
+        let store = Arc::new(MemoryStore::new());
+        let alex = new_world(&store);
+        let remote = alex.ctx.remote();
+        let owner = backups::owner(remote).unwrap();
+        let first = alex.ctx.status().unwrap().unwrap().lease.generation.unwrap();
+        let hosting = alex.host(Start::Free).unwrap();
+        alex.write("level.dat", b"level 2");
+        checkpoint(&hosting);
+        // The game stops without handing the world on; the owner asks for the first copy.
+        hosting.abandon();
+        backups::ask(remote, first, &alex.ctx.me, &owner, false).unwrap();
+        let again = alex.host(Start::Free).unwrap();
+        assert_eq!(alex.read("level.dat"), b"level 1");
+        let lease = again.lease();
+        assert_eq!(lease.loaded.as_ref().unwrap().backup, first);
+        assert_eq!(lease.generation.unwrap().epoch, hosting.lease().epoch);
+        again.leave(None, &mut go).unwrap();
     }
 
     #[test]
@@ -1541,6 +1863,7 @@ mod tests {
             tunnel: false,
             tunnel_at: None,
             closing: false,
+            loaded: None,
             players: vec![member(1, true), member(2, true), member(3, false)],
             generation: None,
         };
@@ -1582,6 +1905,7 @@ mod tests {
             tunnel: true,
             tunnel_at: None,
             closing: false,
+            loaded: None,
             ..hosting.clone()
         };
         assert_eq!(
