@@ -110,7 +110,40 @@ def with_arguments(text, call, count, new):
     return text
 
 
+# Newer Horizon flies the dragon's fireballs as level projectiles (`ProjectileKind::DragonFireball`);
+# here they keep a list of their own (`Game::dragon_fireballs`). A match arm on the kind goes, and a
+# mod that lit them from the projectiles (Dynamic Lights) lights them from that list instead.
+DRAGON_ARM = re.compile(
+    r"[ \t]*(?://[^\n]*\n[ \t]*)?ProjectileKind::DragonFireball\s*=>\s*\(Some\((\w+)::Glow::DragonFireball\),"
+    r"\s*([\d.]+)\),[ \t]*\n"
+)
+ROCKETS = re.compile(r"\n([ \t]*)for \w+ in game\.rockets\.iter\(\) \{")
+
+
+def dragon_fireballs(text):
+    arm = DRAGON_ARM.search(text)
+    if not arm:
+        return text
+    module, lift = arm[1], arm[2]
+    text = text[: arm.start()] + text[arm.end() :]
+    rockets = ROCKETS.search(text)
+    if not rockets:
+        # Anywhere else: an arm for a kind that isn't one here never matched anything.
+        return text
+    pad = rockets[1]
+    lights = (
+        f"\n{pad}// The dragon's fireballs (a list of their own here).\n"
+        f"{pad}for b in game.dragon_fireballs.iter() {{\n"
+        f"{pad}    let c = b.previous.lerp(b.position, alpha);\n"
+        f"{pad}    let at = DVec3::new(c.x, c.y + {lift}, c.z);\n"
+        f"{pad}    push(Source {{ at, level: glow({module}::Glow::DragonFireball, at) }});\n"
+        f"{pad}}}"
+    )
+    return text[: rockets.start()] + lights + text[rockets.start() :]
+
+
 def code(text):
+    text = dragon_fireballs(text)
     for call, count, new in CALLS:
         text = with_arguments(text, call, count, new)
     for old, new in CHANGED:
