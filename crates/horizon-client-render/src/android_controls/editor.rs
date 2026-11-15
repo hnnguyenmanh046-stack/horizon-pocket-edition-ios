@@ -524,11 +524,12 @@ impl TouchControls {
         }
     }
 }
+/// The list of built-in controls: three to a row, so all fifteen stay on the screen.
 fn palette_rect(index: usize) -> [f32; 4] {
     [
-        0.22 + (index % 2) as f32 * 0.29,
-        0.17 + (index / 2) as f32 * 0.11,
-        0.27,
+        0.22 + (index % 3) as f32 * 0.193,
+        0.17 + (index / 3) as f32 * 0.11,
+        0.18,
         0.09,
     ]
 }

@@ -191,6 +191,9 @@ pub struct TouchControls {
     pub force_crosshair: bool,
     pub projectile_crosshair: bool,
     pub shield_available: bool,
+    /// Voice chat is on (a shared world's): its microphone button shows, red while muted.
+    pub voice_available: bool,
+    pub voice_muted: bool,
     /// Physical keypad profiles keep utility controls without a movement overlay.
     pub auxiliary_only: bool,
     /// Inventory utility buttons emit real modifier/mouse events, never movement.
@@ -218,6 +221,8 @@ pub struct TouchControls {
     pub settings_requested: bool,
     pub debug_requested: bool,
     pub perspective_requested: bool,
+    /// The microphone button was tapped: on, or muted again.
+    pub voice_requested: bool,
     pub clicked: bool,
     pub context_use: bool,
     pub vertical_movement: bool,
@@ -243,6 +248,8 @@ impl Default for TouchControls {
             force_crosshair: false,
             projectile_crosshair: false,
             shield_available: false,
+            voice_available: false,
+            voice_muted: true,
             auxiliary_only: false,
             inventory_mode: false,
             inventory_shift: false,
@@ -265,6 +272,7 @@ impl Default for TouchControls {
             settings_requested: false,
             debug_requested: false,
             perspective_requested: false,
+            voice_requested: false,
             clicked: false,
             context_use: false,
             vertical_movement: false,
@@ -363,6 +371,7 @@ impl TouchControls {
                 | Control::Pause
                 | Control::Settings
                 | Control::Perspective
+                | Control::Voice
         )
     }
     pub fn auxiliary_at(&self, point: [f32; 2]) -> bool {
@@ -483,6 +492,10 @@ impl TouchControls {
         if c == Control::Shield && !self.shield_available && self.editor.is_none() {
             return false;
         }
+        // The microphone is there while voice chat is on (and always in the editor, to place).
+        if c == Control::Voice && !self.voice_available && self.editor.is_none() {
+            return false;
+        }
         if c == Control::Shield
             && self.force_crosshair
             && self.settings.button_visibility[Control::Use as usize] == 0
@@ -528,13 +541,26 @@ impl TouchControls {
         // Keep factory top buttons separate on tall surfaces. Custom positions
         // and every landscape layout remain exactly as the player saved them.
         if self.aspect() < 1.0 && p.center[1] == 0.055 && p.size == 0.075 {
-            let top = match c {
-                Control::Debug => Some((0.42, 0.18)),
-                Control::Chat => Some((0.46, 0.34)),
-                Control::Pause => Some((0.50, 0.50)),
-                Control::Settings => Some((0.54, 0.66)),
-                Control::Perspective => Some((0.58, 0.82)),
-                _ => None,
+            // Five across, as ever; six while the microphone is there with them.
+            let top = if self.visible(Control::Voice) {
+                match c {
+                    Control::Voice => Some((0.38, 0.085)),
+                    Control::Debug => Some((0.42, 0.25)),
+                    Control::Chat => Some((0.46, 0.415)),
+                    Control::Pause => Some((0.50, 0.58)),
+                    Control::Settings => Some((0.54, 0.745)),
+                    Control::Perspective => Some((0.58, 0.91)),
+                    _ => None,
+                }
+            } else {
+                match c {
+                    Control::Debug => Some((0.42, 0.18)),
+                    Control::Chat => Some((0.46, 0.34)),
+                    Control::Pause => Some((0.50, 0.50)),
+                    Control::Settings => Some((0.54, 0.66)),
+                    Control::Perspective => Some((0.58, 0.82)),
+                    _ => None,
+                }
             };
             if let Some((old, new)) = top {
                 let old = if self.settings.left_handed {
@@ -550,6 +576,32 @@ impl TouchControls {
                     };
                     p.size = p.size.min(self.aspect() * 0.12);
                 }
+            }
+        }
+        // On a screen nearer square than a phone's (an iPad) the factory top row's buttons are
+        // wider than their places: the row spreads from its middle until they stand apart.
+        // Phones, and every position the player chose, are left as they are.
+        if self.aspect() >= 1.0
+            && p.center[1] == 0.055
+            && p.size == 0.075
+            && matches!(
+                c,
+                Control::Voice
+                    | Control::Debug
+                    | Control::Chat
+                    | Control::Pause
+                    | Control::Settings
+                    | Control::Perspective
+            )
+        {
+            let wide = p.size / self.aspect();
+            let x = p.center[0];
+            let factory = if self.settings.left_handed { 1.0 - x } else { x };
+            let placed = [0.38, 0.42, 0.46, 0.50, 0.54, 0.58]
+                .iter()
+                .any(|f: &f32| (factory - f).abs() < 0.0001);
+            if wide > 0.045 && placed {
+                p.center[0] = 0.5 + (x - 0.5) * (wide * 1.05 / 0.04);
             }
         }
         let mut p = self.fit_placement(p);
@@ -758,6 +810,8 @@ impl TouchControls {
                     Control::Settings => Some("settings"),
                     Control::Debug => Some("debug"),
                     Control::Perspective => Some("perspective"),
+                    Control::Voice if self.voice_muted => Some("mic_muted"),
+                    Control::Voice => Some("mic"),
                     _ => None,
                 };
                 if themed.is_some_and(|name| {
@@ -779,7 +833,7 @@ impl TouchControls {
                     Control::Jump => "ui/jump",
                     Control::Sneak => "ui/sneak",
                     Control::Pause => "ui/pause_icon",
-                    Control::Chat | Control::Debug | Control::Perspective => "gui",
+                    Control::Chat | Control::Debug | Control::Perspective | Control::Voice => "gui",
                     Control::Inventory => "ui/more-dots",
                     Control::Settings => "ui/gear",
                     Control::Offhand | Control::Shield => "ui/joystick_knob",
@@ -792,6 +846,7 @@ impl TouchControls {
                     Control::Perspective => {
                         region(b, a, "gui", [236.0, 46.0, 18.0, 18.0], bounds, color)
                     }
+                    Control::Voice => mic_button(b, a, bounds, self.voice_muted, color),
                     Control::Offhand | Control::Shield => {
                         let label = if control == Control::Offhand {
                             "Swap"
@@ -1019,6 +1074,10 @@ impl TouchControls {
                     self.perspective_requested = true;
                     Role::Ignore
                 }
+                Some(Control::Voice) => {
+                    self.voice_requested = true;
+                    Role::Ignore
+                }
                 Some(Control::Sneak)
                     if self.settings.mode == Mode::Dpad
                         && self.toggle_crouch
@@ -1145,6 +1204,7 @@ impl TouchControls {
         self.settings_requested = false;
         self.debug_requested = false;
         self.perspective_requested = false;
+        self.voice_requested = false;
     }
     /// A short world tap never holds a mouse button into the next tick.
     /// Its item-use intent is resolved against the current entity target.
@@ -1513,6 +1573,79 @@ fn shift_glyph(b: &mut HudBatch, a: &HudAtlas, [x, y, w, h]: [f32; 4], down: boo
     }
 }
 
+/// Voice chat's microphone button: the plate of its neighbours (Chat's frame) with a
+/// microphone on it. Muted, the plate and the microphone are red and a bar crosses it; live,
+/// both are as the other buttons are.
+fn mic_button(b: &mut HudBatch, a: &HudAtlas, [x, y, w, h]: [f32; 4], muted: bool, color: u32) {
+    const MIC: [&str; 12] = [
+        "....####....",
+        "...######...",
+        "...######...",
+        "...######...",
+        "...######...",
+        ".#.######.#.",
+        ".#.######.#.",
+        ".#..####..#.",
+        "..#......#..",
+        "...######...",
+        ".....##.....",
+        "...######...",
+    ];
+    const BAR: [&str; 12] = [
+        "##..........",
+        ".##.........",
+        "..##........",
+        "...##.......",
+        "....##......",
+        ".....##.....",
+        "......##....",
+        ".......##...",
+        "........##..",
+        ".........##.",
+        "..........##",
+        "...........#",
+    ];
+    // The same opacity as the plate was asked for, in red when muted.
+    let alpha = color & 0xFF00_0000;
+    let red = (rgba(255, 70, 70, 255) & 0x00FF_FFFF) | alpha;
+    menu_frame(b, a, [x, y, w, h], if muted { red } else { color });
+    let inner = [x + w * 0.2, y + h * 0.2, w * 0.6, h * 0.6];
+    pixel_glyph(b, a, inner, &MIC, if muted { red } else { color });
+    if muted {
+        pixel_glyph(b, a, inner, &BAR, color);
+    }
+}
+
+/// A glyph drawn from rows of cells (`#` filled), each run of cells in a row as one quad,
+/// square and centred in the rectangle.
+fn pixel_glyph(b: &mut HudBatch, a: &HudAtlas, [x, y, w, h]: [f32; 4], rows: &[&str], color: u32) {
+    let size = rows.len().max(1) as f32;
+    let cell = w.min(h) / size;
+    let (left, top) = (x + (w - cell * size) / 2.0, y + (h - cell * size) / 2.0);
+    for (row, line) in rows.iter().enumerate() {
+        let cells = line.as_bytes();
+        let mut col = 0;
+        while col < cells.len() {
+            if cells[col] != b'#' {
+                col += 1;
+                continue;
+            }
+            let start = col;
+            while col < cells.len() && cells[col] == b'#' {
+                col += 1;
+            }
+            b.fill(
+                a,
+                left + start as f32 * cell,
+                top + row as f32 * cell,
+                (col - start) as f32 * cell,
+                cell,
+                color,
+            );
+        }
+    }
+}
+
 /// Reuse Chat's complete 18x18 border, including its bottommost pixel row.
 fn menu_frame(b: &mut HudBatch, a: &HudAtlas, [x, y, w, h]: [f32; 4], color: u32) {
     if !a.sprites.contains_key("gui/bedrock/gui") {
@@ -1721,6 +1854,7 @@ pub fn draw_single_mcpe_control(
         Control::Offhand => "ui/offhand_icon",
         Control::Shield => "ui/shield_icon",
         Control::Move => "ui/joystick_frame",
+        Control::Voice => "ui/mic_icon",
     };
     match control {
         Control::Chat if a.sprites.contains_key("gui/bedrock/gui") => {
@@ -1732,6 +1866,7 @@ pub fn draw_single_mcpe_control(
         Control::Perspective if a.sprites.contains_key("gui/bedrock/gui") => {
             region(b, a, "gui", [236.0, 46.0, 18.0, 18.0], bounds, color)
         }
+        Control::Voice => mic_button(b, a, bounds, tc.voice_muted, color),
         Control::Offhand | Control::Shield => {
             let label = if control == Control::Offhand {
                 "Swap"
@@ -2586,6 +2721,132 @@ mod tests {
         assert!(touch.debug_requested && touch.perspective_requested);
         touch.clear();
         assert!(!touch.debug_requested && !touch.perspective_requested);
+    }
+    /// Voice chat's microphone: the leftmost of the top row, there only while voice chat is on
+    /// (and in the editor), a tap asks for the microphone, and layouts saved before it load
+    /// whole with it at its place.
+    #[test]
+    fn the_microphone_button_is_leftmost_shown_with_voice_chat_and_added_to_old_layouts() {
+        let mut touch = TouchControls::default();
+        touch.viewport(2532, 1170);
+        let top = [
+            Control::Voice,
+            Control::Debug,
+            Control::Chat,
+            Control::Pause,
+            Control::Settings,
+            Control::Perspective,
+        ];
+        // Off: not there, and a tap where it would be isn't its.
+        assert!(!touch.visible(Control::Voice) && touch.voice_muted);
+        let point = touch.settings.placement(Control::Voice).center;
+        touch.update(1, point, true, false);
+        touch.update(1, point, false, true);
+        assert!(!touch.voice_requested);
+        touch.clear();
+        // On: there, left of all the others of its row, the same size, and none overlap.
+        touch.voice_available = true;
+        assert!(touch.visible(Control::Voice));
+        let rects: Vec<_> = top
+            .iter()
+            .map(|c| touch.placement(*c).rect(touch.aspect()))
+            .collect();
+        for pair in rects.windows(2) {
+            assert!(pair[0][0] + pair[0][2] <= pair[1][0] + 0.0001, "{rects:?}");
+            assert_eq!(pair[0][1], pair[1][1]);
+            assert_eq!(pair[0][3], pair[1][3]);
+        }
+        assert!(rects[0][0] >= 0.0);
+        // A tap asks for the microphone and is nothing else's.
+        touch.update(1, point, true, false);
+        assert!(matches!(touch.fingers[&1].0, Role::Ignore));
+        touch.update(1, point, false, true);
+        assert!(touch.voice_requested);
+        assert_eq!(touch.poll_state().triggers, [0.0; 2]);
+        touch.clear();
+        assert!(!touch.voice_requested);
+        // Hidden by the player in the editor's list: hidden, voice chat or not.
+        touch.settings.button_visibility[Control::Voice as usize] = 2;
+        assert!(!touch.visible(Control::Voice));
+        touch.settings.button_visibility[Control::Voice as usize] = 0;
+        // With a keypad's profile it stays, as the other shortcuts do.
+        touch.auxiliary_only = true;
+        assert!(touch.visible(Control::Voice) && !touch.visible(Control::Jump));
+        touch.auxiliary_only = false;
+        // The editor shows it to be placed whether voice chat is on or not.
+        touch.voice_available = false;
+        touch.open_editor();
+        assert!(touch.visible(Control::Voice));
+        // A phone held upright: six across, none overlapping, all on the screen; without the
+        // microphone the five are where they were.
+        let mut tall = TouchControls::default();
+        tall.viewport(480, 854);
+        let five: Vec<_> = top[1..]
+            .iter()
+            .map(|c| tall.placement(*c).center[0])
+            .collect();
+        assert_eq!(five, [0.18, 0.34, 0.50, 0.66, 0.82]);
+        tall.voice_available = true;
+        let rects: Vec<_> = top
+            .iter()
+            .map(|c| tall.placement(*c).rect(tall.aspect()))
+            .collect();
+        for pair in rects.windows(2) {
+            assert!(pair[0][0] + pair[0][2] < pair[1][0], "{rects:?}");
+        }
+        assert!(rects[0][0] >= 0.0 && rects[5][0] + rects[5][2] <= 1.0, "{rects:?}");
+        // An iPad, nearer square: the row spreads from its middle, apart and on the screen;
+        // a 16:9 screen's row is where it always was.
+        let mut pad = TouchControls::default();
+        pad.viewport(2048, 1536);
+        pad.voice_available = true;
+        let rects: Vec<_> = top
+            .iter()
+            .map(|c| pad.placement(*c).rect(pad.aspect()))
+            .collect();
+        for pair in rects.windows(2) {
+            assert!(pair[0][0] + pair[0][2] < pair[1][0], "{rects:?}");
+        }
+        assert!(rects[0][0] >= 0.0 && rects[5][0] + rects[5][2] <= 1.0, "{rects:?}");
+        assert_eq!(pad.placement(Control::Pause).center[0], 0.5);
+        let mut wide = TouchControls::default();
+        wide.viewport(1920, 1080);
+        assert_eq!(wide.placement(Control::Debug).center[0], 0.42);
+        assert_eq!(wide.placement(Control::Perspective).center[0], 0.58);
+        // A layout saved with fourteen controls: every one of them kept, the microphone
+        // added at its place, shown by default.
+        let settings = Settings::default();
+        let mut old = serde_json::to_value(&settings).unwrap();
+        for row in old["layouts"].as_array_mut().unwrap() {
+            assert_eq!(row.as_array().unwrap().len(), 15);
+            row.as_array_mut().unwrap().truncate(14);
+        }
+        old["button_visibility"]
+            .as_array_mut()
+            .unwrap()
+            .truncate(14);
+        old["layouts"][0][Control::Chat as usize]["center"] = serde_json::json!([0.3, 0.4]);
+        old["button_visibility"][Control::Debug as usize] = serde_json::json!(2);
+        let restored: Settings = serde_json::from_value(old).unwrap();
+        assert_eq!(restored.layouts[0][Control::Chat as usize].center, [0.3, 0.4]);
+        assert_eq!(restored.button_visibility[Control::Debug as usize], 2);
+        for mode in 0..3 {
+            assert_eq!(
+                restored.layouts[mode][Control::Voice as usize],
+                settings.layouts[mode][Control::Voice as usize]
+            );
+        }
+        assert_eq!(restored.button_visibility[Control::Voice as usize], 0);
+        assert_eq!(
+            settings.layouts[0][Control::Voice as usize].center,
+            [0.38, 0.055]
+        );
+        // And one saved now reads back as it is.
+        let again: Settings =
+            serde_json::from_value(serde_json::to_value(&settings).unwrap()).unwrap();
+        assert_eq!(again.layouts, settings.layouts);
+        assert_eq!(Control::ALL.len(), 15);
+        assert_eq!(Control::ALL[Control::Voice as usize], Control::Voice);
     }
     #[test]
     fn mining_indicator_grows_outwards_with_bounded_radius() {

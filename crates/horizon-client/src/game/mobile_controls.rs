@@ -266,9 +266,13 @@ impl Game<'_> {
             .chain(self.offhand.as_ref())
             .any(|s| self.blocks_attacks(s).is_some());
         let breaking = self.touch_mining_progress();
+        // Voice chat's microphone button: there while voice chat is on, red while muted.
+        let (voice_on, mic_live) = (self.voice.enabled(), self.voice.mic_live());
         let tc = &mut self.mobile.controls;
         tc.auxiliary_only = self.settings.keypad.enabled;
         tc.shield_available = shield_available;
+        tc.voice_available = voice_on;
+        tc.voice_muted = !mic_live;
         tc.context_use = tc.settings.contextual_interact && context_use;
         tc.goy_rendered_by_ui = true;
         tc.break_progress = breaking;
@@ -321,6 +325,7 @@ impl Game<'_> {
         let perspective = std::mem::take(&mut tc.perspective_requested);
         let debug = std::mem::take(&mut tc.debug_requested);
         let settings = std::mem::take(&mut tc.settings_requested);
+        let voice = std::mem::take(&mut tc.voice_requested);
         if let Some(held_use) = tap {
             if self.pick_entity_hit().is_some()
                 && self.using.is_none()
@@ -342,6 +347,9 @@ impl Game<'_> {
         if debug {
             self.debug_key(KeyCode::F3, KeyAction::Press);
             self.debug_key(KeyCode::F3, KeyAction::Release);
+        }
+        if voice {
+            self.voice_toggle_mic();
         }
         if settings {
             self.mobile.ui.floating_menu = false;

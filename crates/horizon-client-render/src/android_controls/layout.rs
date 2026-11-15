@@ -52,9 +52,11 @@ pub enum Control {
     Perspective,
     Offhand,
     Shield,
+    /// Voice chat's microphone, on or muted (a shared world's; shown while voice chat is on).
+    Voice,
 }
 impl Control {
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 15] = [
         Self::Move,
         Self::Sprint,
         Self::Jump,
@@ -69,6 +71,7 @@ impl Control {
         Self::Perspective,
         Self::Offhand,
         Self::Shield,
+        Self::Voice,
     ];
     pub fn name(self) -> &'static str {
         match self {
@@ -86,6 +89,7 @@ impl Control {
             Self::Perspective => "Camera perspective (F5)",
             Self::Offhand => "Swap hands",
             Self::Shield => "Raise shield",
+            Self::Voice => "Voice chat microphone",
         }
     }
 }
@@ -541,7 +545,7 @@ pub struct Settings {
     #[serde(default = "default_feedback_enabled")]
     pub show_control_hub: bool,
     #[serde(deserialize_with = "deserialize_visibility")]
-    pub button_visibility: [u8; 14],
+    pub button_visibility: [u8; 15],
     pub horizontal_margin: f32,
     pub vertical_margin: f32,
     /// Which factory defaults this file has had (`DEFAULTS_REV`): older files get the newer
@@ -571,7 +575,7 @@ pub struct Settings {
     #[serde(default)]
     pub snap_to_grid: bool,
     #[serde(deserialize_with = "deserialize_layouts")]
-    pub layouts: [[Placement; 14]; 3],
+    pub layouts: [[Placement; 15]; 3],
 }
 /// The factory defaults' revision. 1: toggle sprint and inventory walk controls on.
 pub const DEFAULTS_REV: u32 = 2;
@@ -602,11 +606,11 @@ fn default_res_scale() -> u32 {
 // Append new buttons without resetting a player's existing ten-button layout.
 fn deserialize_layouts<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
-) -> Result<[[Placement; 14]; 3], D::Error> {
+) -> Result<[[Placement; 15]; 3], D::Error> {
     let rows = Vec::<Vec<Placement>>::deserialize(deserializer)?;
-    if rows.len() != 3 || rows.iter().any(|r| !matches!(r.len(), 10 | 12 | 14)) {
+    if rows.len() != 3 || rows.iter().any(|r| !matches!(r.len(), 10 | 12 | 14 | 15)) {
         return Err(serde::de::Error::custom(
-            "expected three touch layouts of 10, 12 or 14 controls",
+            "expected three touch layouts of 10, 12, 14 or 15 controls",
         ));
     }
     let mut layouts = Settings::default().layouts;
@@ -615,14 +619,14 @@ fn deserialize_layouts<'de, D: serde::Deserializer<'de>>(
     }
     Ok(layouts)
 }
-fn deserialize_visibility<'de, D: serde::Deserializer<'de>>(d: D) -> Result<[u8; 14], D::Error> {
+fn deserialize_visibility<'de, D: serde::Deserializer<'de>>(d: D) -> Result<[u8; 15], D::Error> {
     let old = Vec::<u8>::deserialize(d)?;
-    if !matches!(old.len(), 12 | 14) {
+    if !matches!(old.len(), 12 | 14 | 15) {
         return Err(serde::de::Error::custom(
-            "expected 12 or 14 visibility values",
+            "expected 12, 14 or 15 visibility values",
         ));
     }
-    let mut values = [0; 14];
+    let mut values = [0; 15];
     values[..old.len()].copy_from_slice(&old);
     Ok(values)
 }
@@ -643,6 +647,8 @@ impl Default for Settings {
             Placement::new(0.58, 0.055, 0.075),
             Placement::new(0.80, 0.96, 0.075),
             Placement::new(0.92, 0.36, 0.12),
+            // The microphone: the leftmost of the top row, a place left of the debug button.
+            Placement::new(0.38, 0.055, 0.075),
         ];
         let mut layouts = [base; 3];
         layouts[2][Control::Sneak as usize] = Placement::new(0.13, 0.76, 0.10);
@@ -696,7 +702,7 @@ impl Default for Settings {
             vibrate: true,
             ui_vibrate: false,
             show_control_hub: true,
-            button_visibility: [0; 14],
+            button_visibility: [0; 15],
             horizontal_margin: 0.0,
             vertical_margin: 0.0,
             defaults_rev: DEFAULTS_REV,
@@ -1831,7 +1837,7 @@ impl Settings {
         self.control_style = style;
         match style {
             ControlStyle::Mcpe => {
-                self.button_visibility = [0; 14];
+                self.button_visibility = [0; 15];
                 self.custom_buttons.retain(|b| !b.layouts[0].use_goy_style);
             }
             ControlStyle::GoyControl => {
