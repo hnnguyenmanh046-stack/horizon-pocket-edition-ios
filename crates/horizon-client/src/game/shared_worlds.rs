@@ -1175,7 +1175,11 @@ impl Game<'_> {
                     } else if handing {
                         // Given to a player: they open it next (or, not coming, the next in line).
                         let next = seen.lease.successor.as_deref().and_then(|s| {
-                            seen.lease.players.iter().find(|p| p.uuid == s).map(|p| p.name.clone())
+                            seen.lease
+                                .players
+                                .iter()
+                                .find(|p| p.uuid == s)
+                                .map(|p| p.name.clone())
                         });
                         match next {
                             Some(name) => tr("handing_to", "%s takes over the world...")
