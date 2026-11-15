@@ -538,7 +538,14 @@ impl Game<'_> {
                     });
                     !cancel.load(Ordering::SeqCst)
                 };
-                let _ = tx.send(session::host(ctx, start, &recover_into, &mut progress));
+                // Nobody to take it any more (the session ended meanwhile): the world is let
+                // go, not left looking opened by this device.
+                if let Err(std::sync::mpsc::SendError(Ok(hosting))) =
+                    tx.send(session::host(ctx, start, &recover_into, &mut progress))
+                    && let Err(e) = hosting.release()
+                {
+                    log::warn!("Shared worlds: the world wasn't let go: {e}");
+                }
             });
         match spawned {
             Ok(_) => shared.phase = Phase::Preparing(rx),
