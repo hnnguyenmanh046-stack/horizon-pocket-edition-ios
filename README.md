@@ -244,8 +244,8 @@ Talk to the players of a shared world from inside the game, without a call runni
   one is plugged in, and otherwise the device's own, so Bluetooth headphones keep playing in
   full quality. A Bluetooth headset's own microphone can be chosen, at a call's sound quality
   for everything (that is how Bluetooth works).
-- **Noise Filter** (the foot of the Voice Chat page) takes a room's steady noise, a fan or
-  traffic, out of your microphone. It is off unless you turn it on: it uses a little more battery.
+- **Noise Filter** (the foot of the Voice Chat page) turns down a room's steady noise, a fan or
+  traffic, in your microphone. It is off unless you turn it on: it uses a little more battery.
 - **Who is talking** shows in the top left corner while voice chat is on.
 - **It turns itself off** when your headphones disconnect, so nobody is suddenly heard out loud;
   your microphone goes off when a call or Siri takes the sound, and when the game leaves the

@@ -1196,7 +1196,7 @@ impl Game<'_> {
                     self.voice.note = Some((
                         tr(
                             "noise_note",
-                            "The noise filter takes a room's steady noise out of your microphone. It uses a little more battery.",
+                            "The noise filter turns down a room's steady noise in your microphone. It uses a little more battery.",
                         ),
                         Instant::now(),
                     ));
