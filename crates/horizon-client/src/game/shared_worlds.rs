@@ -1594,7 +1594,7 @@ impl Game<'_> {
                 let d = list::details(world);
                 Ok(Some(json!({
                     "read": d.read,
-                    "error": d.error,
+                    "problem": d.error,
                     "owner": d.owner.as_ref().and_then(|o| o.name().map(str::to_owned)),
                     "owner_is_me": d.owner_is_me(),
                     "backups": d.backups.iter().map(|b| json!({

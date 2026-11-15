@@ -240,7 +240,7 @@ pub fn list(remote: Remote<'_>) -> Result<Vec<Backup>> {
             }
         })
         .collect();
-    out.sort_by(|a, b| b.id.cmp(&a.id));
+    out.sort_by_key(|b| std::cmp::Reverse(b.id));
     Ok(out)
 }
 
