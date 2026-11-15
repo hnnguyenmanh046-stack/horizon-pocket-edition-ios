@@ -47,7 +47,9 @@ enum State {
     /// Nobody speaks.
     Idle,
     /// A stretch began: holding frames until there are enough (`waited` frames so far).
-    Filling { waited: usize },
+    Filling {
+        waited: usize,
+    },
     Playing,
 }
 

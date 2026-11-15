@@ -99,6 +99,7 @@ pub mod lan;
 pub mod landing;
 pub mod locator_bar;
 pub mod lod_net;
+pub mod voice_net;
 pub mod menu;
 pub mod merchant;
 pub mod mobs;

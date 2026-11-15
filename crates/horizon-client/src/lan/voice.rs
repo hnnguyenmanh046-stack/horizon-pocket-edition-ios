@@ -222,10 +222,7 @@ impl Relay {
                     .iter()
                     .filter(|p| p.conn != conn && p.mic_live)
                     .filter(|p| now.saturating_duration_since(p.last) < QUIET)
-                    .filter(|p| {
-                        p.since
-                            .is_some_and(|other| (other, p.conn) < (since, conn))
-                    })
+                    .filter(|p| p.since.is_some_and(|other| (other, p.conn) < (since, conn)))
                     .count();
                 if ahead >= TALKERS {
                     return;
@@ -311,7 +308,10 @@ mod tests {
             let prefix = packet(Vec::new());
             let mut messages = Vec::new();
             while let Ok(out) = self.out.try_recv() {
-                assert!(matches!(out, Out::Express), "voice went by the game's queue");
+                assert!(
+                    matches!(out, Out::Express),
+                    "voice went by the game's queue"
+                );
             }
             while let Some(body) = self.sender.take_express() {
                 assert!(body.starts_with(&prefix));
@@ -331,13 +331,10 @@ mod tests {
         }
 
         fn roster(&self) -> Option<Vec<Entry>> {
-            self.got()
-                .iter()
-                .rev()
-                .find_map(|m| match Down::decode(m) {
-                    Some(Down::Roster { entries }) => Some(entries),
-                    _ => None,
-                })
+            self.got().iter().rev().find_map(|m| match Down::decode(m) {
+                Some(Down::Roster { entries }) => Some(entries),
+                _ => None,
+            })
         }
     }
 
@@ -464,7 +461,13 @@ mod tests {
         assert_eq!(steve.frames().len(), RATE as usize);
         // A game of another version of the messages isn't welcomed, and isn't on the list.
         let old = Player::new(&relay, 5, "Old");
-        old.say(&relay, &Up::Join { version: VERSION + 1 }, start);
+        old.say(
+            &relay,
+            &Up::Join {
+                version: VERSION + 1,
+            },
+            start,
+        );
         assert!(old.got().is_empty());
         old.say(
             &relay,
@@ -501,7 +504,10 @@ mod tests {
         }
         let heard = listener.frames();
         assert_eq!(heard.len(), 40);
-        assert!(heard.iter().all(|(id, _)| *id < 4), "the fifth was passed on");
+        assert!(
+            heard.iter().all(|(id, _)| *id < 4),
+            "the fifth was passed on"
+        );
         // The first ends: from then on the fifth is heard.
         players[0].say(&relay, &frame(10, END), at(200));
         for tick in 11..15u16 {

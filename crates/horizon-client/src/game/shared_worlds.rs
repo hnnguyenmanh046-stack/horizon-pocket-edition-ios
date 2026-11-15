@@ -375,6 +375,11 @@ impl Game<'_> {
         };
         // The list must know which world this game hosts: that lease names this device
         // for a reason, and isn't a leftover.
+        // Only a world this session hosts carries voices; any other world opened after isn't
+        // one.
+        horizon_client::lan::voice::set_wanted(
+            keep && matches!(shared.phase, Phase::Preparing(_) | Phase::Hosting(_)),
+        );
         list::set_hosting(match (&shared.phase, keep) {
             (Phase::Preparing(_) | Phase::Hosting(_) | Phase::Leaving(_), true) => {
                 Some(shared.id.as_str())
@@ -603,6 +608,9 @@ impl Game<'_> {
             return Err(why.into());
         }
         CLOSED_UNCLEAN.store(false, Ordering::SeqCst);
+        // A shared world carries its players' voices: said before it opens, so that this
+        // game's own connection (the first) hears it too.
+        horizon_client::lan::voice::set_wanted(true);
         let opened: Result<()> = match list::set_world_player(shared.ctx.folder(), uuid) {
             Ok(()) => self.open_world(&folder, None, None, false, None),
             Err(e) => Err(e.into()),

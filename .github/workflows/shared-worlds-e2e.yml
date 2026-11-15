@@ -12,6 +12,10 @@ on:
       - crates/horizon-shared-worlds/**
       - crates/horizon-client/src/shared_worlds.rs
       - crates/horizon-client/src/game/shared_worlds.rs
+      - crates/horizon-voice/**
+      - crates/horizon-client/src/voice_net.rs
+      - crates/horizon-client/src/lan/voice.rs
+      - crates/horizon-client/src/game/voice.rs
   workflow_dispatch:
 permissions:
   contents: read

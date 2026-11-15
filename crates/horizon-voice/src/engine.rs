@@ -242,10 +242,7 @@ impl Playout {
         let level = (power / frames.max(1) as f32).sqrt();
         self.far.store(level.to_bits(), Ordering::SeqCst);
         // Everyone fell silent and all of it has played: nothing until the next frame comes.
-        if inner
-            .speakers
-            .values()
-            .all(|s| s.muted || s.jitter.idle())
+        if inner.speakers.values().all(|s| s.muted || s.jitter.idle())
             && inner.ready.iter().all(|s| *s == 0.0)
         {
             inner.ready.clear();
@@ -426,10 +423,7 @@ fn run(shared: &Shared, sink: &Sink, options: &CaptureOptions) {
         let rate = {
             let mut input = locked(&shared.input);
             while input.samples.is_empty() && !shared.stop.load(Ordering::SeqCst) {
-                input = shared
-                    .wake
-                    .wait(input)
-                    .unwrap_or_else(|e| e.into_inner());
+                input = shared.wake.wait(input).unwrap_or_else(|e| e.into_inner());
             }
             if shared.stop.load(Ordering::SeqCst) {
                 break;
@@ -673,7 +667,10 @@ mod tests {
     fn wait_for(what: &str, mut done: impl FnMut() -> bool) {
         let start = Instant::now();
         while !done() {
-            assert!(start.elapsed() < Duration::from_secs(10), "waited for {what}");
+            assert!(
+                start.elapsed() < Duration::from_secs(10),
+                "waited for {what}"
+            );
             std::thread::sleep(ms(5));
         }
     }
@@ -790,6 +787,8 @@ mod tests {
         for frame in tone(300.0, 0.2, 45) {
             pipe.feed(&frame, 1, RATE);
         }
-        wait_for("speech after the others stopped", || !locked(&sent).is_empty());
+        wait_for("speech after the others stopped", || {
+            !locked(&sent).is_empty()
+        });
     }
 }

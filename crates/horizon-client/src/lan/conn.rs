@@ -1929,7 +1929,44 @@ mod tests {
             Out::Packets(bodies) => bodies,
             Out::Disconnect(_) => vec![b"disconnect".to_vec()],
             Out::Close => vec![b"close".to_vec()],
+            Out::Express => Vec::new(),
         }
+    }
+
+    /// Voice chat's lane: beside the tick's held packets, never among them; first out; and
+    /// never more than half a second of it waiting.
+    #[test]
+    fn the_express_lane_goes_first_and_holds_only_so_much() {
+        let (tx, rx) = channel();
+        let pending = Arc::new(AtomicUsize::new(0));
+        let sender = PlayerSender::new(tx, pending.clone());
+        {
+            let _tick = Holding::start();
+            sender.send(vec![1, 1]);
+            // From another thread's point of view (voice never runs in the tick): the
+            // packet the tick holds stays held, and stays whole.
+            sender.send_now(vec![9]);
+            assert!(matches!(rx.try_recv(), Ok(Out::Express)));
+            assert!(rx.try_recv().is_err(), "the tick's packet left early");
+            assert_eq!(pending.load(Ordering::Relaxed), 3);
+        }
+        sender.flush();
+        assert_eq!(unpack(rx.try_recv().unwrap()), [vec![1, 1]]);
+        assert_eq!(sender.take_express(), Some(vec![9]));
+        assert_eq!(sender.take_express(), None);
+        // A connection that doesn't keep up: the oldest voice goes, and what is counted as
+        // waiting is what waits.
+        pending.store(0, Ordering::Relaxed);
+        for i in 0..100u8 {
+            sender.send_now(vec![i; 3]);
+        }
+        assert_eq!(pending.load(Ordering::Relaxed), EXPRESS_MOST * 3);
+        let mut left = Vec::new();
+        while let Some(body) = sender.take_express() {
+            left.push(body[0]);
+        }
+        let first = 100 - EXPRESS_MOST as u8;
+        assert_eq!(left, (first..100).collect::<Vec<u8>>());
     }
 
     fn bodies(rx: &Receiver<Out>) -> Vec<Vec<Vec<u8>>> {

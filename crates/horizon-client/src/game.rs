@@ -326,6 +326,7 @@ mod server_travel;
 mod setup;
 mod shader_packs;
 mod shared_worlds;
+mod voice;
 mod shelf;
 mod shield;
 mod shoulders;
@@ -3038,6 +3039,8 @@ struct Game<'a> {
     friends: Option<friends::Sharing>,
     /// A shared world this window plays, hosts or waits on (game/shared_worlds.rs).
     shared: Option<shared_worlds::Shared>,
+    /// Voice chat in a shared world (`game/voice.rs`).
+    voice: voice::Voice,
     /// A shared world's server thread: its checkpoints and its freeze (game/shared_worlds.rs).
     shared_host: Option<std::sync::Arc<horizon_shared_worlds::session::Hosting>>,
     /// A shared world's server thread: guests' messages for the window.
@@ -12556,6 +12559,8 @@ impl Game<'_> {
     }
 
     pub(super) fn save_for_exit(&mut self) -> Result<()> {
+        // What was chosen for voice chat, if it changed a moment ago.
+        self.voice_save_now();
         // Native application termination can bypass CloseRequested. Finish any
         // save screen synchronously here, before the process can go away.
         while self.pending_save.is_some() {
@@ -18864,6 +18869,7 @@ impl Game<'_> {
         horizon_client::spans::time("server_packs", || self.tick_server_packs());
         horizon_client::spans::time("control", || self.poll_control(event_loop));
         self.tick_shared();
+        self.tick_voice();
         if self.pending_save.is_some() {
             return;
         }
@@ -19426,6 +19432,7 @@ impl<'a> Game<'a> {
             game_tests: game_tests::GameTests::default(),
             friends: None,
             shared: None,
+            voice: voice::Voice::new(),
             shared_host: None,
             shared_inbox: None,
             social: Default::default(),

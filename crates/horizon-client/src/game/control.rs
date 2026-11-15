@@ -355,6 +355,9 @@ impl Game<'_> {
         if let Some(value) = self.shared_control(&words)? {
             return Ok(Some(value));
         }
+        if let Some(value) = self.voice_control(&words)? {
+            return Ok(Some(value));
+        }
         if let Some(value) = account_control(&words)? {
             return Ok(Some(value));
         }

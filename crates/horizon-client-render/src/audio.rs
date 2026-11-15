@@ -512,9 +512,54 @@ fn distance_gain(linear: Option<f32>, distance: f32) -> f32 {
         Some(_) => 0.0,
     }
 }
+/// A sound made as it plays (voice chat's voices), mixed in with the game's own: asked by the
+/// output for its next samples, at the output's pace.
+pub trait StreamSource: Send + Sync {
+    /// Adds its sound to `out` (`channels` interleaved, at `rate`); false when it had none.
+    fn render(&self, out: &mut [f32], channels: usize, rate: u32) -> bool;
+}
+
+/// The one stream source, when there is one (`set_stream_source`).
+static STREAM_SOURCE: std::sync::RwLock<Option<Arc<dyn StreamSource>>> =
+    std::sync::RwLock::new(None);
+/// How many times the output asked for sound, ever: an output that stopped asking (the
+/// system took it away and never gave it back) stands still (`output_callbacks`).
+static CALLBACKS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Mixes `source` into whatever the game plays, from the next buffer on (None: no more).
+pub fn set_stream_source(source: Option<Arc<dyn StreamSource>>) {
+    *STREAM_SOURCE.write().unwrap_or_else(|e| e.into_inner()) = source;
+}
+
+/// The stream source now.
+#[cfg_attr(not(feature = "audio"), allow(dead_code))]
+fn stream_source() -> Option<Arc<dyn StreamSource>> {
+    STREAM_SOURCE
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+}
+
+/// How many times the output has asked for sound since the game started.
+pub fn output_callbacks() -> u64 {
+    CALLBACKS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 // Only the output stream mixes; a build without one (no `audio` feature) never does.
 #[cfg_attr(not(feature = "audio"), allow(dead_code))]
 fn mix(mixer: &mut Mixer, data: &mut [f32], channels: usize, rate: u32) {
+    mix_with(mixer, data, channels, rate, None);
+}
+
+/// [`mix`], with a stream source's sound added before the limiter.
+#[cfg_attr(not(feature = "audio"), allow(dead_code))]
+fn mix_with(
+    mixer: &mut Mixer,
+    data: &mut [f32],
+    channels: usize,
+    rate: u32,
+    extra: Option<&dyn StreamSource>,
+) {
     data.fill(0.0);
     // The camera's forward and up vectors (`Camera.forwardVector`/`upVector`)
     // and OpenAL's right = forward x up.
@@ -641,6 +686,10 @@ fn mix(mixer: &mut Mixer, data: &mut [f32], channels: usize, rate: u32) {
             }
             c.position += step;
         }
+    }
+    // Voice chat's voices, with the game's sounds and under the same limiter.
+    if let Some(extra) = extra {
+        extra.render(data, channels, rate);
     }
     // Limit the whole buffer together, preserving waveform and stereo balance
     // instead of flattening each overloaded sample; release over 200 ms
@@ -800,8 +849,10 @@ fn build_stream<T: cpal::SizedSample + cpal::FromSample<f32>>(
         &config.config(),
         move |data: &mut [T], _| {
             scratch.resize(data.len(), 0.0f32);
+            CALLBACKS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let extra = stream_source();
             if let Ok(mut m) = mixer.lock() {
-                mix(&mut m, &mut scratch, channels, rate);
+                mix_with(&mut m, &mut scratch, channels, rate, extra.as_deref());
             } else {
                 scratch.fill(0.0);
             }
@@ -1613,6 +1664,45 @@ mod tests {
         assert_eq!(distance_gain(Some(16.0), 8.0), 0.5);
         assert_eq!(distance_gain(Some(16.0), 16.0), 0.0);
         assert_eq!(distance_gain(Some(16.0), 40.0), 0.0);
+    }
+
+    /// A stream source (voice chat) is heard with the game's sounds, on every channel, and
+    /// the two together stay under full scale.
+    #[test]
+    fn a_stream_source_is_mixed_in_under_the_same_limiter() {
+        struct Steady(f32);
+        impl StreamSource for Steady {
+            fn render(&self, out: &mut [f32], _channels: usize, _rate: u32) -> bool {
+                for s in out {
+                    *s += self.0;
+                }
+                true
+            }
+        }
+        let mut m = Mixer::default();
+        let mut data = [0.0; 16];
+        mix_with(&mut m, &mut data, 2, 48_000, Some(&Steady(0.5)));
+        assert_eq!(data, [0.5; 16]);
+        // Without one, nothing: as before.
+        mix(&mut m, &mut data, 2, 48_000);
+        assert_eq!(data, [0.0; 16]);
+        // Louder than full scale with the game's own sound: limited, not clipped.
+        let mut m = Mixer::default();
+        m.channels.insert(
+            1,
+            channel(vec![1.0; 9], None, [-1.0, 0.0, 0.0], false),
+        );
+        mix_with(&mut m, &mut data, 2, 48_000, Some(&Steady(0.9)));
+        assert!(data.iter().all(|s| s.abs() <= 1.0 + 1e-6), "{data:?}");
+        assert!(data.iter().any(|s| *s > 0.4));
+        // The registered source is what the output is given, until it is taken away.
+        set_stream_source(Some(Arc::new(Steady(0.25))));
+        let source = stream_source().unwrap();
+        let mut out = [0.0; 4];
+        assert!(source.render(&mut out, 2, 48_000));
+        assert_eq!(out, [0.25; 4]);
+        set_stream_source(None);
+        assert!(stream_source().is_none());
     }
 
     #[test]

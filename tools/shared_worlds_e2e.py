@@ -48,6 +48,8 @@ BASE_ENV = {
     'HORIZON_STUN_SERVERS': 'none',
     'HORIZON_FRIENDS_LOOPBACK': '1',
     'HORIZON_SHARED_TUNNEL': 'none',
+    # Voice chat with no microphone and no sound output: a tone in, and what is heard counted.
+    'HORIZON_VOICE_TEST': '1',
 }
 
 
@@ -198,12 +200,60 @@ def run(client, resources, work):
         alex.checkpoint('the checkpoint uploaded')
         print('join: Steve joined by the lease\'s code, saw the block; a checkpoint uploaded', flush=True)
 
+        # 3b. Voice chat. Off for both when they join; the host carries it and says so.
+        v = steve.wait('voice status', lambda v: v['offered'] and v['connected'], 60, 'voice chat offered to Steve')
+        assert not v['enabled'] and not v['mic'], v
+        alex.wait('voice status', lambda v: v['offered'] and v['connected'], 60, 'voice chat offered to Alex')
+        # Alex turns it on and the microphone with it (a 440 Hz tone stands for the microphone).
+        alex('voice tone 440')
+        v = alex('voice enable')
+        assert v['enabled'] and not v['mic'], v
+        alex('voice mic on')
+        alex.wait('voice status', lambda v: v['mic'] and v['speaking'], 30, 'the microphone of Alex live')
+        # Steve has it off: told so in chat, and hears nothing.
+        v = steve.wait('voice status', lambda v: any('Alex is using voice chat' in line for line in v['lines']),
+                       30, 'the line in the chat of Steve')
+        assert not v['enabled'] and v['heard']['blocks'] == 0, v
+        assert [p['name'] for p in v['people'] if p['mic']] == ['Alex'], v
+        # On, Steve hears Alex's tone within a moment, with his own microphone still off.
+        steve('voice enable')
+        v = steve.wait('voice status', lambda v: v['heard']['blocks'] >= 25 and abs(v['heard']['hz'] - 440) < 15,
+                       30, 'the voice of Alex on Steve')
+        assert not v['mic'] and v['people'][0]['talking'] and v['people'][0]['delay_ms'] <= 400, v
+        assert alex('voice status')['heard']['blocks'] == 0, 'Alex heard their own voice'
+        # Muted by Steve: not heard, and back when unmuted.
+        steve('voice mute Alex')
+        steve.wait('voice status', lambda v: v['heard']['quiet_blocks'] >= 50, 30, 'Alex muted on Steve')
+        steve('voice unmute Alex')
+        steve.wait('voice status', lambda v: v['heard']['quiet_blocks'] == 0 and v['people'][0]['talking'],
+                   30, 'Alex unmuted on Steve')
+        # The other way, to the host's own game.
+        steve('voice tone 660')
+        steve('voice mic on')
+        alex.wait('voice status', lambda v: v['heard']['blocks'] >= 25 and abs(v['heard']['hz'] - 660) < 20,
+                  30, 'the voice of Steve on Alex')
+        steve('voice mic off')
+        print('voice: off on joining, the line in chat, heard once on, muted and unmuted, both ways', flush=True)
+
         # 4. Alex gives the world to Steve.
         alex(f'shared give {steve.uuid}')
         hosting = steve.wait_hosting(300, 'Steve hosting after the handoff')
         steve.block(first, 'minecraft:diamond_block', 'the block of Alex in the world Steve hosts')
         alex.wait_joined(300, 'Alex joined Steve by itself')
         print(f'give: Steve hosts (epoch {hosting["epoch"]}) with the block, and Alex joined Steve', flush=True)
+        # Voice chat follows the world to its new host by itself: still on for both, and Alex is
+        # heard again (the microphone is turned on again if the change took too long to keep it).
+        before = steve('voice status')['heard']['blocks']
+        alex.wait('voice status', lambda v: v['connected'] and v['enabled'], 60, 'voice chat on Alex after the handoff')
+        steve.wait('voice status', lambda v: v['connected'] and v['enabled'], 60, 'voice chat on Steve after the handoff')
+        if not alex('voice status')['mic']:
+            alex('voice mic on')
+        steve.wait('voice status', lambda v: v['heard']['blocks'] >= before + 25 and abs(v['heard']['hz'] - 440) < 15,
+                   60, 'the voice of Alex on Steve after the handoff')
+        alex('voice disable')
+        alex.wait('voice status', lambda v: not v['enabled'] and not v['mic'], 30, 'voice chat off on Alex')
+        steve.wait('voice status', lambda v: not any(p['enabled'] for p in v['people']), 30, 'Alex off on Steve')
+        print('voice: followed the world to its new host, and went off when asked', flush=True)
 
         # 5. Steve's game dies after a checkpoint: Alex's takes the world from it.
         second = [first[0], first[1] + 2, first[2]]

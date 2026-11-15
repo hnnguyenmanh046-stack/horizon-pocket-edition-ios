@@ -114,6 +114,8 @@ pub struct Session {
     debug: bool,
     /// The far terrain requests waiting for the server (`lod_net`).
     far: Arc<crate::lod_net::Inbox>,
+    /// Voice chat on this connection (`voice_net`).
+    pub voice: Arc<crate::voice_net::Link>,
 }
 impl Session {
     /// Start connecting in the background, as `auth`'s account when there is one.
@@ -209,10 +211,14 @@ impl Session {
         let thread_configuring = configuring.clone();
         let far = Arc::new(crate::lod_net::Inbox::default());
         let thread_far = far.clone();
+        let voice = Arc::new(crate::voice_net::Link::default());
+        let thread_voice = voice.clone();
         let (address_owned, name_owned) = (address.to_owned(), name.to_owned());
         let thread = std::thread::Builder::new()
             .name("horizon-net".into())
             .spawn(move || {
+                // Voice chat is taken off this thread as it arrives (voice_net).
+                crate::voice_net::read_here(thread_voice);
                 let result = run(
                     local,
                     &address_owned,
@@ -255,6 +261,14 @@ impl Session {
             cookies,
             debug,
             far,
+            voice,
+        }
+    }
+    /// Sends voice chat's messages on this connection, from any thread.
+    pub fn voice_sender(&self) -> crate::voice_net::Sender {
+        crate::voice_net::Sender {
+            writer: self.writer.clone(),
+            configuring: self.configuring.clone(),
         }
     }
     /// Everything received since the last poll.
@@ -913,6 +927,10 @@ fn receive_play(
             play::Clientbound::CustomPayload(p) if p.channel == crate::lod_net::CHANNEL => {
                 far.deliver(p.data);
             }
+            // A voice, straight to the engine the sound output pulls from.
+            play::Clientbound::CustomPayload(p) if p.channel == horizon_voice::wire::CHANNEL => {
+                crate::voice_net::received(&p.data);
+            }
             other => {
                 if send.send(Event::Packet(Box::new(other))).is_err() {
                     return Ok(Reason::plain("Disconnected"));
@@ -1052,6 +1070,8 @@ fn receive_brand(payload: &cfg::CustomPayload, send: &Sender<Event>) {
         && let Some(offer) = crate::lod_net::Offer::decode(&payload.data)
     {
         let _ = send.send(Event::FarTerrain(offer));
+    } else if payload.channel == horizon_voice::wire::CHANNEL {
+        crate::voice_net::offered(&payload.data);
     }
 }
 
@@ -1483,6 +1503,7 @@ mod tests {
                 cookies: Cookies::default(),
                 debug: false,
                 far: Arc::default(),
+                voice: Arc::default(),
             };
             let started = std::time::Instant::now();
             if explicit_disconnect {
@@ -1584,6 +1605,7 @@ mod tests {
             cookies: Cookies::default(),
             debug: false,
             far: Arc::default(),
+            voice: Arc::default(),
         };
         let (thread_writer, thread_configuring) =
             (session.writer.clone(), session.configuring.clone());
