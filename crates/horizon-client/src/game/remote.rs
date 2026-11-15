@@ -1340,7 +1340,11 @@ impl Game<'_> {
         // Single player's server thread saves the world before the title shows.
         let single_player = match self.integrated.take() {
             Some(server) => {
-                server.stop()?;
+                let stopped = server.stop();
+                // A shared world uploads its files as they are on closing: only if they were
+                // saved cleanly (a server that panicked may have left one half-written).
+                super::shared_worlds::world_stopped(stopped.is_ok());
+                stopped?;
                 true
             }
             None => false,

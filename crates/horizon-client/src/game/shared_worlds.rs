@@ -60,7 +60,8 @@ impl Route {
     }
 }
 /// How long a world may take to open after its copy is ready.
-const OPEN_LIMIT: Duration = Duration::from_secs(180);
+/// How long an opening world may be neither running nor starting before it counts as failed.
+const OPEN_ENDED_GRACE: Duration = Duration::from_secs(3);
 /// Messages from guests, from the server thread to the window.
 pub(super) type Inbox = Arc<Mutex<Vec<(u128, Vec<u8>)>>>;
 
@@ -100,7 +101,6 @@ enum Phase {
 
 struct Host {
     hosting: Arc<Hosting>,
-    since: Instant,
     opened: bool,
     code: Option<String>,
     inbox: Inbox,
@@ -120,6 +120,8 @@ struct Host {
     paths: HashMap<u128, Route>,
     /// The owner approved loading a backup: the world closes for it then.
     load_at: Option<Instant>,
+    /// Since when the world, not open yet, is neither running nor starting.
+    ended: Option<Instant>,
 }
 
 struct Leaving {
@@ -130,7 +132,22 @@ struct Leaving {
     /// After a failed upload: when it is tried again, and the Cancel that keeps the world on
     /// this device instead.
     retry: Option<(Instant, Arc<AtomicBool>)>,
+    /// Uploads that failed in a row.
+    failures: u32,
 }
+
+/// The last world's server thread ended without its closing save (it panicked): the files on
+/// disk may be half-written, and are never uploaded as the world's copy.
+static CLOSED_UNCLEAN: AtomicBool = AtomicBool::new(false);
+
+/// The world's server thread ended: `clean` when it saved and stopped as it should.
+pub(super) fn world_stopped(clean: bool) {
+    CLOSED_UNCLEAN.store(!clean, Ordering::SeqCst);
+}
+
+/// Failed uploads in a row (one every 10 s) after which the world stays on this device by
+/// itself, as Cancel does: the others aren't kept waiting by an upload that won't go.
+const UPLOAD_TRIES: u32 = 6;
 
 struct Guest {
     watcher: Watcher,
@@ -146,6 +163,9 @@ struct Guest {
     /// The newest copy this device holds or is fetching, and the fetch under way.
     fetched: Option<horizon_shared_worlds::manifest::GenId>,
     prefetch: Option<Receiver<()>>,
+    /// Stops the fetch under way (before anything in the world's folder is replaced): taking
+    /// the world doesn't wait for it, hosting brings the rest with its progress shown.
+    prefetch_stop: Arc<AtomicBool>,
     /// The last join's path isn't known yet: the player is told once it is, if it is the
     /// public tunnel.
     tunnel_note: bool,
@@ -170,6 +190,7 @@ fn watch(ctx: &Arc<Context>, from: Option<Watch>) -> Result<Box<Guest>> {
         cancel: list::new_cancel(),
         fetched: None,
         prefetch: None,
+        prefetch_stop: Arc::new(AtomicBool::new(false)),
         tunnel_note: false,
         path_sent: false,
     }))
@@ -543,6 +564,32 @@ impl Game<'_> {
             .and_then(|n| n.to_str())
             .map(str::to_owned)
             .ok_or("the world's folder has no name")?;
+        // A world for other mods than the ones running would start the game again and open it
+        // there as a plain world, out of the session: it isn't opened, and the world is let go
+        // at once (nobody is left waiting for a host that won't come).
+        use super::world_content::{Entry, entry, names};
+        let mods = match entry(&folder) {
+            Entry::Open => None,
+            Entry::Restart(set) => Some(
+                tr(
+                    "other_mods",
+                    "This world plays with other mods (%s): turn them on in Options > Mods, then Start it again.",
+                )
+                .replacen("%s", &names(&set), 1),
+            ),
+            Entry::Missing(missing) => Some(
+                tr(
+                    "missing_mods",
+                    "This world plays with %s, which did not load: put it back in the mods folder, then Start it again.",
+                )
+                .replacen("%s", &names(&missing), 1),
+            ),
+        };
+        if let Some(why) = mods {
+            let _ = hosting.release();
+            return Err(why.into());
+        }
+        CLOSED_UNCLEAN.store(false, Ordering::SeqCst);
         let opened: Result<()> = match list::set_world_player(shared.ctx.folder(), uuid) {
             Ok(()) => self.open_world(&folder, None, None, false, None),
             Err(e) => Err(e.into()),
@@ -551,10 +598,18 @@ impl Game<'_> {
             let _ = hosting.release();
             return Err(e);
         }
+        // Not under way (its level data doesn't read, say, and the recovery screen is up):
+        // the world is let go now, not after the open's time limit.
+        let started = self.integrated.is_some()
+            || self.integrated_starting.is_some()
+            || self.pending_entry.is_some();
+        if !started {
+            let _ = hosting.release();
+            return Err(tr("didnt_open", "The world didn't open.").into());
+        }
         list::set_task(Task::Idle);
         shared.phase = Phase::Hosting(Box::new(Host {
             hosting,
-            since: Instant::now(),
             opened: false,
             code: None,
             inbox: Arc::default(),
@@ -568,6 +623,7 @@ impl Game<'_> {
             tunneled_told: 0,
             paths: HashMap::new(),
             load_at: None,
+            ended: None,
         }));
         Ok(true)
     }
@@ -597,9 +653,17 @@ impl Game<'_> {
                         ),
                     ));
                 }
-            } else if !world_running && !world_starting && host.since.elapsed() > OPEN_LIMIT {
-                let _ = host.hosting.release();
-                return Err(tr("didnt_open", "The world didn't open.").into());
+            } else if !world_running && !world_starting {
+                // It was under way and stopped without opening (an error on loading): let the
+                // world go after a moment's grace, so nobody waits on an opening that ended.
+                let ended = *host.ended.get_or_insert_with(Instant::now);
+                if ended.elapsed() > OPEN_ENDED_GRACE {
+                    let _ = host.hosting.release();
+                    return Err(tr("didnt_open", "The world didn't open.").into());
+                }
+            } else {
+                // Still loading (a phone may take a while): someone really is opening it.
+                host.ended = None;
             }
             return Ok(true);
         }
@@ -610,6 +674,23 @@ impl Game<'_> {
                 list::set_task(Task::Failed(tr(
                     "taken",
                     "Another player took over this world while your game couldn't reach its storage. What you did since its last upload is kept on this device.",
+                )));
+                return Ok(false);
+            }
+            // Closed by an error, not saved: nothing from this device goes up. The world is let
+            // go at its last upload, for the others to carry on from; this device's progress
+            // since is kept as a world of its own when it next starts it.
+            if CLOSED_UNCLEAN.swap(false, Ordering::SeqCst) {
+                log::warn!(
+                    "Shared worlds: the world closed with an error: its files aren't uploaded"
+                );
+                if let Err(e) = host.hosting.release() {
+                    log::warn!("Shared worlds: the world wasn't let go: {e}");
+                    host.hosting.abandon();
+                }
+                list::set_task(Task::Failed(tr(
+                    "closed_unclean",
+                    "The world closed with an error, so it wasn't uploaded: your friends play from its last upload. What you did since is kept on this device as a world of its own the next time you Start it.",
                 )));
                 return Ok(false);
             }
@@ -782,6 +863,7 @@ impl Game<'_> {
             rejoin,
             done: rx,
             retry: None,
+            failures: 0,
         }
     }
 
@@ -800,12 +882,14 @@ impl Game<'_> {
                 return Ok(false);
             }
             if Instant::now() >= *at {
+                let failures = leaving.failures;
                 let next = self.shared_upload(
                     leaving.hosting.clone(),
                     leaving.successor.clone(),
                     leaving.rejoin,
                 );
                 **leaving = next;
+                leaving.failures = failures;
             }
             return Ok(true);
         }
@@ -833,8 +917,23 @@ impl Game<'_> {
                 )));
                 Ok(false)
             }
+            Ok(Err(e)) if leaving.failures + 1 >= UPLOAD_TRIES => {
+                log::warn!(
+                    "Shared worlds: the last copy didn't upload ({e}), {UPLOAD_TRIES} times: it stays on this device"
+                );
+                leaving.hosting.abandon();
+                list::set_task(Task::Failed(
+                    tr(
+                        "upload_gave_up",
+                        "Couldn't upload the world (%s). It stays on this device: open it again to upload it. Your friends can play from its last upload meanwhile.",
+                    )
+                    .replacen("%s", &e.to_string(), 1),
+                ));
+                Ok(false)
+            }
             Ok(Err(e)) => {
                 log::warn!("Shared worlds: the last copy didn't upload: {e}");
+                leaving.failures += 1;
                 let cancel = list::new_cancel();
                 list::set_task(Task::Working {
                     what: tr(
@@ -933,10 +1032,14 @@ impl Game<'_> {
             guest.fetched = seen.lease.generation;
             let (tx, rx) = channel();
             let ctx = shared.ctx.clone();
+            let stop = Arc::new(AtomicBool::new(false));
+            guest.prefetch_stop = stop.clone();
             let spawned = std::thread::Builder::new()
                 .name("shared-worlds-prefetch".into())
                 .spawn(move || {
-                    if let Err(e) = session::prefetch(&ctx, &mut |_, _| true) {
+                    if let Err(e) =
+                        session::prefetch(&ctx, &mut |_, _| !stop.load(Ordering::SeqCst))
+                    {
                         log::info!("Shared worlds: the copy wasn't brought up to date in the background: {e}");
                     }
                     let _ = tx.send(());
@@ -1020,7 +1123,10 @@ impl Game<'_> {
             }
             Next::Host(claim) => {
                 if guest.prefetch.is_some() {
-                    // The copy is still being brought up to date: hosting starts from it after.
+                    // The copy being brought up to date in the background stops (in a moment):
+                    // hosting brings the rest, and shows how far it is.
+                    guest.prefetch_stop.store(true, Ordering::SeqCst);
+                    working(tr("getting_ready", "Getting the world ready..."));
                     return Ok(true);
                 }
                 if connected {
@@ -1059,6 +1165,16 @@ impl Game<'_> {
                             "%s left the world and is uploading it. It opens for you once that's done.",
                         )
                         .replacen("%s", &host_name, 1)
+                    } else if handing {
+                        // Given to a player: they open it next (or, not coming, the next in line).
+                        let next = seen.lease.successor.as_deref().and_then(|s| {
+                            seen.lease.players.iter().find(|p| p.uuid == s).map(|p| p.name.clone())
+                        });
+                        match next {
+                            Some(name) => tr("handing_to", "%s takes over the world...")
+                                .replacen("%s", &name, 1),
+                            None => tr("handing", "The world is changing hosts..."),
+                        }
                     } else {
                         tr("waiting_host", "Waiting for %s to open the world...")
                             .replacen("%s", &host_name, 1)
