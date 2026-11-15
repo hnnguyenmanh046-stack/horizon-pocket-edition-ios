@@ -1,0 +1,13 @@
+[package]
+name = "horizon-voice"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Voice chat between the players of a world: the codec, the messages, the microphone's clean-up, each speaker's buffer, and the engine that ties them"
+
+[dependencies]
+# The codec: libopus (BSD), built with the crate (opusic-sys). 48 kHz mono speech at ~32 kbit/s.
+opus = "0.4"
+
+[lints]
+workspace = true

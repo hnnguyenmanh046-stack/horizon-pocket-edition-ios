@@ -39,6 +39,7 @@ members = [
     "crates/horizon-friends",
     # Shared worlds: a save its players keep in their own bucket and take turns hosting.
     "crates/horizon-shared-worlds",
+    "crates/horizon-voice",
     "crates/horizon-relay",
     "crates/horizon-mods",
     "crates/cargo-horizon-mod",
