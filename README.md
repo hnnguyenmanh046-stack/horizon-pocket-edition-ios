@@ -165,12 +165,12 @@ to the friends you play with. A second world can go in the same bucket: the game
   the world's invite, for a friend to add the world.
 - **Give Host / Ask to Host:** the host's world closes and opens on the other player's phone in a
   few seconds, and everyone follows by themselves.
-- **While you host,** the world's copy updates every 5 minutes, and whenever your app goes to the
-  background, without stopping play.
+- **While you host,** the world's copy updates every 5 minutes (or as often as the world's owner
+  chose), and whenever your app goes to the background, without stopping play.
 - **If the host's app goes to the background,** the list says so at once ("in the background"),
   and nobody is shown playing.
 - **If the host's phone dies or loses its connection,** the others wait about half a minute in case
-  it comes back, then one of them takes the world from its last copy (at most 5 minutes old). Nothing is damaged. What the old host did after that copy stays on their phone, as
+  it comes back, then one of them takes the world from its last copy (at most one backup interval old, 5 minutes unless the owner chose otherwise). Nothing is damaged. What the old host did after that copy stays on their phone, as
   a separate singleplayer world named "(my own progress)".
 - **If your phone can't reach the storage while you host,** the world pauses until it can, so
   nobody can take it over while you keep playing.
@@ -205,7 +205,10 @@ the tunnel, **Give Host** to a player marked "(faster)", whose network takes dir
 
 ### Backups
 
-A copy of the world goes up every few minutes while it is played, and when its host leaves. The
+A copy of the world goes up every 5 minutes while it is played, and when its host leaves. The
+player who shared the world can choose how often on its Backups page (**Backups: every ... min**:
+2, 5, 10, 15, 30 or 60 minutes): shorter loses less if a host's phone dies, longer pauses the
+world less often for the save. Every host follows the choice within a minute. The
 storage keeps, as backups: the last 20 copies (the last hour or so of play), one a day for 30
 days, and one a week for 26 weeks. Copies share what didn't change, so each backup costs only
 the blocks that did. The whole bucket (every world in it) is kept under 8 GB, well inside R2's
