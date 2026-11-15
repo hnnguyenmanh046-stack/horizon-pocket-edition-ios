@@ -1498,7 +1498,9 @@ mod tests {
         assert!(!hosting.backup_every_changed());
         // Chosen again by the owner elsewhere: the host follows within its next read.
         backups::set_every(remote, &alex.ctx.me, 2).unwrap();
-        wait_for("the host to read the new pace", || hosting.backup_every() == 2);
+        wait_for("the host to read the new pace", || {
+            hosting.backup_every() == 2
+        });
         assert!(hosting.backup_every_changed());
         assert!(!hosting.backup_every_changed());
         // On the host's own game: at once.

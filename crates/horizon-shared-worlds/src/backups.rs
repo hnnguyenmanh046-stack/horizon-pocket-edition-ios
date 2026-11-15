@@ -84,7 +84,9 @@ pub fn every(remote: Remote<'_>) -> Result<u32> {
 /// else, and for a world whose owner isn't recorded yet (its sharer's game records it first).
 pub fn set_every(remote: Remote<'_>, me: &Member, minutes: u32) -> Result<()> {
     if !EVERY.contains(&minutes) {
-        return Err(Error::Format(format!("{minutes} minutes isn't one of {EVERY:?}")));
+        return Err(Error::Format(format!(
+            "{minutes} minutes isn't one of {EVERY:?}"
+        )));
     }
     // A write between the read and this one (another field, or the same choice twice): again.
     for _ in 0..5 {
@@ -562,14 +564,23 @@ mod tests {
         let remote = remote(&store);
         // No record yet: the default, and nobody may choose.
         assert_eq!(every(remote).unwrap(), EVERY_DEFAULT);
-        assert!(matches!(set_every(remote, &member(1), 10), Err(Error::Refused)));
+        assert!(matches!(
+            set_every(remote, &member(1), 10),
+            Err(Error::Refused)
+        ));
         assert!(record_owner(remote, &member(1)).unwrap());
         assert_eq!(every(remote).unwrap(), EVERY_DEFAULT);
         // Someone else: refused, nothing changes.
-        assert!(matches!(set_every(remote, &member(2), 30), Err(Error::Refused)));
+        assert!(matches!(
+            set_every(remote, &member(2), 30),
+            Err(Error::Refused)
+        ));
         assert_eq!(every(remote).unwrap(), EVERY_DEFAULT);
         // Not a choice the game offers: refused.
-        assert!(matches!(set_every(remote, &member(1), 7), Err(Error::Format(_))));
+        assert!(matches!(
+            set_every(remote, &member(1), 7),
+            Err(Error::Format(_))
+        ));
         for minutes in EVERY {
             set_every(remote, &member(1), minutes).unwrap();
             assert_eq!(every(remote).unwrap(), minutes);

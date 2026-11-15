@@ -1026,8 +1026,11 @@ impl Screen {
                     h - 27.0,
                     150.0,
                     if details.read {
-                        tr("every_button", "Backups: every %d min")
-                            .replacen("%d", &details.every.to_string(), 1)
+                        tr("every_button", "Backups: every %d min").replacen(
+                            "%d",
+                            &details.every.to_string(),
+                            1,
+                        )
                     } else {
                         tr("every_unread", "Backups: ...")
                     },
