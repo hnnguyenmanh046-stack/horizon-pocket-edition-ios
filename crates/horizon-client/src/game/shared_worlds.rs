@@ -15,9 +15,8 @@ use horizon_client::{
     text::Text,
 };
 use horizon_shared_worlds::{
-    Error,
+    Error, backups,
     lease::{Claim, Member, Watch, turn},
-    backups,
     session::{self, Context, Hosting, Next, RequestWatch, Start, Watcher, next_step},
 };
 use std::{
@@ -1237,8 +1236,7 @@ impl Game<'_> {
             }
             Phase::Preparing(_) | Phase::Leaving(_) => {}
         }
-        if let Some((Some(seen), owner)) = shared.requests.as_ref().and_then(RequestWatch::latest)
-        {
+        if let Some((Some(seen), owner)) = shared.requests.as_ref().and_then(RequestWatch::latest) {
             let r = seen.request;
             let when = list::when_id(&list::details(&shared.id), r.backup);
             match r.state {

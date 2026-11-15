@@ -21,7 +21,6 @@ fn grey() -> u32 {
     rgba(170, 170, 170, 255)
 }
 
-
 const PLAY: u8 = 200;
 const COPY: u8 = 201;
 const ADD: u8 = 202;
@@ -114,7 +113,10 @@ fn storage_address(text: &str) -> (String, Option<String>) {
     let text = text.trim();
     if text.len() == 32 && text.bytes().all(|b| b.is_ascii_hexdigit()) {
         return (
-            format!("https://{}.r2.cloudflarestorage.com", text.to_ascii_lowercase()),
+            format!(
+                "https://{}.r2.cloudflarestorage.com",
+                text.to_ascii_lowercase()
+            ),
             None,
         );
     }
@@ -171,10 +173,13 @@ fn backup_lines(details: &shared_worlds::Details) -> Vec<String> {
         .unwrap_or_default();
     match details.request.as_ref().map(|s| &s.request) {
         Some(r) if r.state == backups::State::Asked => out.push(
-            tr("asked_load", "%a asks to load the backup from %t. %o decides.")
-                .replacen("%a", &r.by.name, 1)
-                .replacen("%t", &shared_worlds::when_id(details, r.backup), 1)
-                .replacen("%o", &owner, 1),
+            tr(
+                "asked_load",
+                "%a asks to load the backup from %t. %o decides.",
+            )
+            .replacen("%a", &r.by.name, 1)
+            .replacen("%t", &shared_worlds::when_id(details, r.backup), 1)
+            .replacen("%o", &owner, 1),
         ),
         Some(r) if r.state == backups::State::Approved => out.push(
             tr(
@@ -206,9 +211,9 @@ fn backup_lines(details: &shared_worlds::Details) -> Vec<String> {
             "you_own",
             "You shared it: loads others ask for need your approval.",
         )),
-        Some(_) => out.push(
-            tr("owner_is", "%s shared it and approves loads.").replacen("%s", &owner, 1),
-        ),
+        Some(_) => {
+            out.push(tr("owner_is", "%s shared it and approves loads.").replacen("%s", &owner, 1))
+        }
         None => {}
     }
     out
@@ -593,9 +598,16 @@ impl Screen {
                 .replacen("%t", &when, 1);
                 let mut y = lines(batch, &text, 44.0, u32::MAX) + 6.0;
                 let note = if details.owner_is_me() {
-                    tr("you_approve", "You shared this world: it loads without asking anyone.")
+                    tr(
+                        "you_approve",
+                        "You shared this world: it loads without asking anyone.",
+                    )
                 } else {
-                    tr("owner_approves", "%s, who shared it, has to approve it first.").replacen(
+                    tr(
+                        "owner_approves",
+                        "%s, who shared it, has to approve it first.",
+                    )
+                    .replacen(
                         "%s",
                         details
                             .owner
@@ -895,7 +907,14 @@ impl Screen {
                     true,
                     HELP_OPEN,
                 );
-                push(cx - 100.0, h - 27.0, 200.0, tr("back", "Back"), true, HELP_BACK);
+                push(
+                    cx - 100.0,
+                    h - 27.0,
+                    200.0,
+                    tr("back", "Back"),
+                    true,
+                    HELP_BACK,
+                );
             }
             Page::Backups(id) => {
                 let details = shared_worlds::details(id);
@@ -940,14 +959,16 @@ impl Screen {
                         actions.push((tr("approve", "Approve Load"), APPROVE));
                         actions.push((tr("decline", "Decline"), DECLINE));
                     }
-                    Some(r)
-                        if details.owner_is_me() || me.is_some_and(|m| m.uuid == r.by.uuid) =>
-                    {
+                    Some(r) if details.owner_is_me() || me.is_some_and(|m| m.uuid == r.by.uuid) => {
                         actions.push((tr("withdraw", "Withdraw Request"), WITHDRAW));
                     }
                     Some(_) => {}
                     None => {
-                        if details.loaded.as_ref().is_some_and(|l| l.replaced.is_some()) {
+                        if details
+                            .loaded
+                            .as_ref()
+                            .is_some_and(|l| l.replaced.is_some())
+                        {
                             actions.push((tr("undo", "Undo Last Load"), UNDO));
                         }
                     }
@@ -963,7 +984,14 @@ impl Screen {
                     }
                     [] => {}
                 }
-                push(cx - 100.0, h - 27.0, 200.0, tr("back", "Back"), true, BACKUP_BACK);
+                push(
+                    cx - 100.0,
+                    h - 27.0,
+                    200.0,
+                    tr("back", "Back"),
+                    true,
+                    BACKUP_BACK,
+                );
             }
             Page::Load { world, .. } => {
                 let mine = shared_worlds::details(world).owner_is_me();
@@ -979,7 +1007,14 @@ impl Screen {
                     true,
                     LOAD_CONFIRM,
                 );
-                push(cx + 4.0, h - 27.0, 150.0, tr("cancel", "Cancel"), true, LOAD_CANCEL);
+                push(
+                    cx + 4.0,
+                    h - 27.0,
+                    150.0,
+                    tr("cancel", "Cancel"),
+                    true,
+                    LOAD_CANCEL,
+                );
             }
             Page::Storage { .. } => {
                 push(
@@ -1241,8 +1276,9 @@ mod tests {
 
     #[test]
     fn the_setup_help_fits_above_its_buttons_on_a_phone() {
-        let atlas = crate::hud::HudAtlas::build(std::path::Path::new("/nonexistent/horizon-test-assets"))
-            .unwrap();
+        let atlas =
+            crate::hud::HudAtlas::build(std::path::Path::new("/nonexistent/horizon-test-assets"))
+                .unwrap();
         for (w, h) in [(427.0f32, 240.0f32), (341.0, 256.0), (520.0, 240.0)] {
             let width = (w - 50.0).min(320.0);
             let mut y = 34.0;
@@ -1271,11 +1307,13 @@ mod tests {
         }
         // Six rows at most, inside their ids.
         assert!(BACKUP_ROW + 6 <= BACKUP_PREVIOUS);
-        assert!(usage_line(&shared_worlds::Details {
-            usage: Some((1_234_000_000, 250_000_000)),
-            ..Default::default()
-        })
-        .is_some_and(|l| l.chars().count() <= 50));
+        assert!(
+            usage_line(&shared_worlds::Details {
+                usage: Some((1_234_000_000, 250_000_000)),
+                ..Default::default()
+            })
+            .is_some_and(|l| l.chars().count() <= 50)
+        );
     }
 
     #[test]

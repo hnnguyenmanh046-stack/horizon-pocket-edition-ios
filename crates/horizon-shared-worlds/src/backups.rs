@@ -96,10 +96,11 @@ pub fn record_owner(remote: Remote<'_>, me: &Member) -> Result<bool> {
         owner: me.clone(),
         created: now(),
     };
-    match remote
-        .store
-        .put(&remote.key(META), &serde_json::to_vec(&meta)?, &Condition::Absent)
-    {
+    match remote.store.put(
+        &remote.key(META),
+        &serde_json::to_vec(&meta)?,
+        &Condition::Absent,
+    ) {
         Ok(_) => Ok(true),
         Err(Error::Refused) => Ok(false),
         Err(e) => Err(e),
@@ -220,11 +221,7 @@ pub fn list(remote: Remote<'_>) -> Result<Vec<Backup>> {
     let prefix = remote.key("");
     let mut stamps: BTreeMap<(u64, u32), (i64, Kind, String)> = BTreeMap::new();
     for object in remote.store.list(&remote.key(STAMPS))? {
-        if let Some((of, at, kind, by)) = object
-            .key
-            .strip_prefix(&prefix)
-            .and_then(parse_stamp)
-        {
+        if let Some((of, at, kind, by)) = object.key.strip_prefix(&prefix).and_then(parse_stamp) {
             stamps.insert(of, (at, kind, by));
         }
     }
@@ -320,9 +317,11 @@ pub fn request(remote: Remote<'_>) -> Result<Option<Seen>> {
 }
 
 fn write(remote: Remote<'_>, request: &Request, condition: &Condition) -> Result<Etag> {
-    remote
-        .store
-        .put(&remote.key(REQUEST), &serde_json::to_vec(request)?, condition)
+    remote.store.put(
+        &remote.key(REQUEST),
+        &serde_json::to_vec(request)?,
+        condition,
+    )
 }
 
 /// `me` asks to load `backup` (one of [`list`]'s); from the owner it is approved at once.
@@ -493,12 +492,19 @@ mod tests {
             seq: 4,
             day: 20261101,
         };
-        for kind in [Kind::First, Kind::Checkpoint, Kind::Left, Kind::Loaded(from)] {
+        for kind in [
+            Kind::First,
+            Kind::Checkpoint,
+            Kind::Left,
+            Kind::Loaded(from),
+        ] {
             for name in ["Alex", "Steve_2", "Ünïcode-name and spaces", ""] {
                 let key = stamp_key(id, kind, name, 1_763_100_000);
                 let (of, at, back, by) = parse_stamp(&key).unwrap();
                 assert_eq!((of, at, back), ((7, 12), 1_763_100_000, kind), "{key}");
-                assert!(!by.is_empty() && by.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'));
+                assert!(
+                    !by.is_empty() && by.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+                );
             }
         }
         assert_eq!(parse_stamp("stamp/x-1-2-c-A"), None);

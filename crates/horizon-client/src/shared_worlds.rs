@@ -767,7 +767,11 @@ pub fn when(backup: &Backup) -> String {
         .map(|time| {
             let today = chrono::Local::now().date_naive();
             if time.date_naive() == today {
-                format!("{} {}", tr("horizon.shared.today", "Today"), time.format("%H:%M"))
+                format!(
+                    "{} {}",
+                    tr("horizon.shared.today", "Today"),
+                    time.format("%H:%M")
+                )
             } else if time.date_naive() + chrono::Days::new(1) == today {
                 format!(
                     "{} {}",
@@ -791,14 +795,17 @@ pub fn when(backup: &Backup) -> String {
 
 /// When the copy `id` was made, from what is known of the world's backups.
 pub fn when_id(details: &Details, id: GenId) -> String {
-    details
-        .backups
-        .iter()
-        .find(|b| b.id == id)
-        .map_or_else(
-            || when(&Backup { id, at: None, by: None, kind: None }),
-            when,
-        )
+    details.backups.iter().find(|b| b.id == id).map_or_else(
+        || {
+            when(&Backup {
+                id,
+                at: None,
+                by: None,
+                kind: None,
+            })
+        },
+        when,
+    )
 }
 
 /// Runs `work` on a thread of its own as the list's task, then reads the world's backups again.
@@ -941,7 +948,10 @@ pub fn withdraw(world: &str) {
                 ),
                 e => e.to_string(),
             })?;
-            Ok(tr("horizon.shared.withdrawn", "Taken back. Nothing changes."))
+            Ok(tr(
+                "horizon.shared.withdrawn",
+                "Taken back. Nothing changes.",
+            ))
         },
     );
 }

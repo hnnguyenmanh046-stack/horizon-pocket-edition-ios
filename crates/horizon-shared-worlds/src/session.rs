@@ -1118,7 +1118,9 @@ impl RequestWatch {
                             if owner.is_none() || (!known && reads.is_multiple_of(6)) {
                                 match backups::owner(ctx.remote()) {
                                     Ok(o) => owner = Some(o),
-                                    Err(e) => log::info!("Shared worlds: the owner wasn't read: {e}"),
+                                    Err(e) => {
+                                        log::info!("Shared worlds: the owner wasn't read: {e}")
+                                    }
                                 }
                             }
                             match (backups::request(ctx.remote()), &owner) {
@@ -1366,10 +1368,21 @@ mod tests {
         alex.write("data/new.dat", b"new");
         let third = checkpoint(&hosting);
         hosting.leave(None, &mut go).unwrap();
-        let newest = alex.ctx.status().unwrap().unwrap().lease.generation.unwrap();
+        let newest = alex
+            .ctx
+            .status()
+            .unwrap()
+            .unwrap()
+            .lease
+            .generation
+            .unwrap();
         assert!(newest > third);
         let listed = backups::list(remote).unwrap();
-        assert!(listed.iter().any(|b| b.id == second && b.kind == Some(backups::Kind::Checkpoint)));
+        assert!(
+            listed
+                .iter()
+                .any(|b| b.id == second && b.kind == Some(backups::Kind::Checkpoint))
+        );
         assert_eq!(listed[0].id, newest);
         assert_eq!(listed[0].kind, Some(backups::Kind::Left));
         // Steve asks for the second copy: it waits for Alex, and nothing loads meanwhile.
@@ -1441,7 +1454,14 @@ mod tests {
         let alex = new_world(&store);
         let remote = alex.ctx.remote();
         let owner = backups::owner(remote).unwrap();
-        let first = alex.ctx.status().unwrap().unwrap().lease.generation.unwrap();
+        let first = alex
+            .ctx
+            .status()
+            .unwrap()
+            .unwrap()
+            .lease
+            .generation
+            .unwrap();
         let hosting = alex.host(Start::Free).unwrap();
         alex.write("level.dat", b"level 2");
         checkpoint(&hosting);

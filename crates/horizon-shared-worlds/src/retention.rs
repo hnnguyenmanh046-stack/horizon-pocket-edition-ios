@@ -140,9 +140,8 @@ pub fn sweep(
     }
     // A pack of a copy older than the current one: the only kind ever removed (one being
     // uploaded now is newer; one whose name this game doesn't know is left alone).
-    let older = |name: &str| {
-        GenId::of_pack(name).is_some_and(|made| made < (current.epoch, current.seq))
-    };
+    let older =
+        |name: &str| GenId::of_pack(name).is_some_and(|made| made < (current.epoch, current.seq));
     // What stays whatever is kept: the lease and the world's other small objects, and packs
     // that are never removed here.
     let fixed: u64 = sizes
@@ -360,7 +359,14 @@ mod tests {
         let listed = crate::backups::list(remote).unwrap();
         assert_eq!(listed.len(), keep.len());
         assert!(listed.iter().all(|b| b.at == Some(1)));
-        assert_eq!(store.keys().iter().filter(|k| k.contains("/stamp/")).count(), keep.len());
+        assert_eq!(
+            store
+                .keys()
+                .iter()
+                .filter(|k| k.contains("/stamp/"))
+                .count(),
+            keep.len()
+        );
         // Every kept copy still reads whole, the first pack (the file that never changed) with it.
         for kept_id in &keep {
             let manifest = remote.manifest(*kept_id).unwrap();
@@ -374,7 +380,10 @@ mod tests {
             store.get(&in_flight).unwrap().is_some(),
             "an upload under way is left alone"
         );
-        assert!(store.get(&unknown).unwrap().is_some(), "an unknown object is left alone");
+        assert!(
+            store.get(&unknown).unwrap().is_some(),
+            "an unknown object is left alone"
+        );
         // Nothing more to remove.
         let again = sweep(remote, newest.id, &[], u64::MAX).unwrap();
         assert_eq!((again.manifests, again.packs), (0, 0));
