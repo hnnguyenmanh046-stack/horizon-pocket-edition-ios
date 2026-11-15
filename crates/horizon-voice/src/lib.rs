@@ -1,14 +1,21 @@
 //! Voice chat between the players of a world.
 //!
 //! No game code and nothing unsafe: the game gives it microphone samples and asks it for the
-//! others' voices; in between are the codec ([`codec`]) and, as they come, the messages, the
-//! microphone's clean-up, each speaker's buffer and the engine that ties them.
+//! others' voices ([`engine`]); in between are the codec ([`codec`]), the messages ([`wire`]),
+//! the microphone's clean-up ([`dsp`]), each speaker's buffer ([`jitter`]) and the change of
+//! rate ([`resample`]). What a player chose is kept by [`settings`].
 //!
 //! One voice is 48 kHz mono in frames of 20 ms ([`FRAME`] samples), whatever the microphone
 //! and the sound output run at.
 #![deny(unsafe_code)]
 
 pub mod codec;
+pub mod dsp;
+pub mod engine;
+pub mod jitter;
+pub mod resample;
+pub mod settings;
+pub mod wire;
 
 /// The rate voices are coded at.
 pub const RATE: u32 = 48_000;

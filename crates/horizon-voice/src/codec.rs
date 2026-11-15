@@ -212,7 +212,9 @@ pub(crate) mod tests {
         decoder.reset().unwrap();
         let mut encoder = Encoder::new().unwrap();
         let mut packet = [0u8; MAX_PACKET];
-        let n = encoder.encode(&tone(440.0, 0.5, 1)[0], &mut packet).unwrap();
+        let n = encoder
+            .encode(&tone(440.0, 0.5, 1)[0], &mut packet)
+            .unwrap();
         decoder.decode(&packet[..n], &mut out).unwrap();
         assert!(!version().is_empty());
     }
