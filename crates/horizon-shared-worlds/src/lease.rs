@@ -616,7 +616,10 @@ impl Watch {
         if self.doubted {
             return here;
         }
-        here.max(seen.age.map_or(Duration::ZERO, |a| a.saturating_sub(AGE_MARGIN)))
+        here.max(
+            seen.age
+                .map_or(Duration::ZERO, |a| a.saturating_sub(AGE_MARGIN)),
+        )
     }
 
     /// Notes the lease as read at `now`, and returns how long it has been the same write.
@@ -991,10 +994,7 @@ mod tests {
         let later = start + Duration::from_secs(1);
         assert_eq!(watch.observe_seen(&fresh, later), Duration::ZERO);
         let again = later + Duration::from_secs(5);
-        assert_eq!(
-            watch.observe_seen(&fresh, again),
-            Duration::from_secs(5)
-        );
+        assert_eq!(watch.observe_seen(&fresh, again), Duration::from_secs(5));
         // Believed, a new write called as old as the time since the last look allows.
         let mut fair = Watch::new(start);
         fair.observe_seen(&seen, start);

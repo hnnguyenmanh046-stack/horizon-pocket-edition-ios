@@ -1510,7 +1510,14 @@ mod tests {
         let hosting = alex.host(Start::Free).unwrap();
         hosting.open("CODE", None);
         wait_for("the code in the lease", || {
-            alex.ctx.leases().read().unwrap().unwrap().lease.code.is_some()
+            alex.ctx
+                .leases()
+                .read()
+                .unwrap()
+                .unwrap()
+                .lease
+                .code
+                .is_some()
         });
         // The game ends without a word (its heartbeat with it).
         hosting.abandon();
@@ -1538,7 +1545,7 @@ mod tests {
             .leases()
             .claim(Some(&seen), &steve.ctx.me, "x", Claim::Takeover)
             .unwrap();
-        held.heartbeat(&[steve.ctx.me.clone()]).unwrap();
+        held.heartbeat(std::slice::from_ref(&steve.ctx.me)).unwrap();
         let fresh = alex.ctx.leases().read().unwrap().unwrap();
         assert!(fresh.age.unwrap() < Duration::from_secs(5));
         let mut watch = Watch::new(Instant::now());
@@ -1555,7 +1562,14 @@ mod tests {
         let hosting = alex.host(Start::Free).unwrap();
         hosting.open("CODE", None);
         wait_for("the code in the lease", || {
-            alex.ctx.leases().read().unwrap().unwrap().lease.code.is_some()
+            alex.ctx
+                .leases()
+                .read()
+                .unwrap()
+                .unwrap()
+                .lease
+                .code
+                .is_some()
         });
         hosting.abandon();
         drop(hosting);

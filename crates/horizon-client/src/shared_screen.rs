@@ -286,7 +286,7 @@ mod tests {
                     .unwrap_or_else(|| panic!("{size:?}: no line with {text}"))
             };
             assert!(at("Island") < at("You host") && at("You host") < at("Steve"));
-            assert!(at("Steve") < at("bore.pub (slower)"));
+            assert!(at("Steve") < at("Friends elsewhere"));
             let copy = &buttons[buttons.len() - 2];
             let done = &buttons[buttons.len() - 1];
             assert_eq!(

@@ -822,10 +822,10 @@ mod tests {
         assert!(d.discord_presence);
         assert_eq!(d.wheel_cycles_settings, !cfg!(target_os = "ios"));
         // A file from before the phones' defaults: as it says, except the wheel on iOS.
-        let old = d.serialize().replace("phoneDefaults:1\n", "").replace(
-            "wheelCyclesSettings:false",
-            "wheelCyclesSettings:true",
-        );
+        let old = d
+            .serialize()
+            .replace("phoneDefaults:1\n", "")
+            .replace("wheelCyclesSettings:false", "wheelCyclesSettings:true");
         assert_eq!(
             Extras::parse(&old).wheel_cycles_settings,
             !cfg!(target_os = "ios")
