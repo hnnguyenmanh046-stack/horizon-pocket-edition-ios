@@ -1,4 +1,6 @@
 <p align="center">
+  <a href="https://github.com/shopifygav222/horizon-pocket-edition-ios/releases/tag/v1.0.0"><img src="https://img.shields.io/badge/download-1.0.0-2EA043" alt="Download 1.0.0"></a>
+  <a href="https://github.com/shopifygav222/horizon-pocket-edition-ios/releases/tag/v1.0.0-shared-worlds"><img src="https://img.shields.io/badge/download-1.0.0%20Shared%20Worlds-8250DF" alt="Download 1.0.0 Shared Worlds"></a>
   <img src="https://img.shields.io/badge/Minecraft-Java%2026.3-5D9C3F" alt="Minecraft Java 26.3">
   <img src="https://img.shields.io/badge/platform-iOS%20%26%20iPadOS%2016%2B-1C1C1E?logo=apple&logoColor=white" alt="iOS and iPadOS 16 or newer">
   <a href="https://github.com/ludovic111/horizon"><img src="https://img.shields.io/badge/port%20of-Horizon-F0795A" alt="Port of Horizon"></a>
@@ -31,8 +33,80 @@ Metal: no Java, no emulation.
   </tr>
 </table>
 
-**Contents:** [Install](#install) · [Controls](#controls) · [Shader packs](#shader-packs) ·
-[Native mods](#native-mods) · [Help](#help) · [For developers](#for-developers) · [Credits](#credits)
+## Contents
+
+| Start here | Playing | More |
+| --- | --- | --- |
+| [Download](#download) | [Controls](#controls) | [Help](#help) |
+| [Which one should I get?](#which-one-should-i-get) | [Shader packs](#shader-packs) | [For developers](#for-developers) |
+| [Features](#features) | [Shared worlds and voice chat](#shared-worlds-and-voice-chat) | [Credits](#credits) |
+| [Install](#install) | [Native mods](#native-mods) | [License](#license) |
+
+## Download
+
+There are two editions of Horizon PE. Both are the same game; one adds shared worlds and voice chat.
+
+| | **Horizon PE** | **Horizon PE: Shared Worlds** |
+| --- | --- | --- |
+| **Latest stable** | **[1.0.0](https://github.com/shopifygav222/horizon-pocket-edition-ios/releases/tag/v1.0.0)** | **[1.0.0 Shared Worlds](https://github.com/shopifygav222/horizon-pocket-edition-ios/releases/tag/v1.0.0-shared-worlds)** |
+| **Direct download** | [HorizonPE-1.0.0.ipa](https://github.com/shopifygav222/horizon-pocket-edition-ios/releases/download/v1.0.0/HorizonPE-1.0.0.ipa) | [HorizonPE-1.0.0-SharedWorlds.ipa](https://github.com/shopifygav222/horizon-pocket-edition-ios/releases/download/v1.0.0-shared-worlds/HorizonPE-1.0.0-SharedWorlds.ipa) |
+| **Source branch** | [`main`](https://github.com/shopifygav222/horizon-pocket-edition-ios/tree/main) | [`shared-worlds`](https://github.com/shopifygav222/horizon-pocket-edition-ios/tree/shared-worlds) |
+
+### Which one should I get?
+
+| | Horizon PE | Horizon PE: Shared Worlds |
+| --- | :---: | :---: |
+| The whole game: single player, servers, LAN, Play with Friends | Yes | Yes |
+| Touch controls, controllers, keyboard and mouse | Yes | Yes |
+| Shader packs, resource packs, skins, mods and native mods | Yes | Yes |
+| **Shared worlds:** a world your group owns, hosted by whoever is playing, with no server | No | **Yes** |
+| **Backups** of shared worlds that anyone can ask to load | No | **Yes** |
+| **Voice chat** in shared worlds, with a volume for each player | No | **Yes** |
+| Asks for the microphone | Never | Only when you turn your microphone on |
+| Needs a free Cloudflare account | No | Only for the one who shares a world |
+
+- **Get Horizon PE** if you play alone, on servers, or with friends through an invite code. It is
+  the simplest build and has the fewest moving parts.
+- **Get Horizon PE: Shared Worlds** if your group wants one world that any of you can open at any
+  time, and to talk in it. Everything else in it is the same as Horizon PE.
+
+**Switching is safe.** Both editions are the same app to iOS: install either one over the other and
+your worlds, settings, accounts and mods stay. A shared world stays in its storage if you go back to
+Horizon PE, and is there again when you return.
+
+## Features
+
+**The game**
+
+- Minecraft: Java Edition 26.3, natively: the same worlds, terrain, mobs, redstone and rules.
+- Single player, Java Edition servers, LAN worlds, and **Play with Friends** (an invite code, no
+  server or port forwarding).
+- Sign in with Microsoft or Ely.by, or play offline.
+- Java Edition worlds open as they are: copy a world in through the Files app and play it.
+
+**Made for a phone**
+
+- Two touch styles, **MCPE** and **GoyControl**, with an editor that moves, resizes, recolours, hides
+  and rebinds every button.
+- Game controllers, keyboards and mice; gyroscope aiming; a virtual mouse for menus.
+- Portrait and landscape, iPhone and iPad.
+- Performance defaults chosen for your device, and a render resolution slider.
+
+**Looks and mods**
+
+- Iris and OptiFine **shader packs**, translated to Metal on the phone. Starling Visuals is included.
+- Resource packs and skins.
+- A built-in **catalog** of mods, shader packs and resource packs.
+- **Native mods** built into the app for you by GitHub: [Native mods](#native-mods).
+
+**Only in the Shared Worlds edition**
+
+- **Shared worlds:** one world for your group. Whoever opens it hosts it; when they leave it moves
+  to someone still playing, and everyone follows by themselves.
+- **Backups** every few minutes (you choose how often), kept for up to 26 weeks, loaded and undone
+  from inside the game.
+- **Voice chat:** off until you turn it on, a mute button in the touch controls, a volume and a mute
+  for each player, a choice of microphone, and an optional noise filter.
 
 ## Install
 
@@ -40,26 +114,31 @@ Metal: no Java, no emulation.
 sideloading app: [SideStore](https://sidestore.io), [AltStore](https://altstore.io),
 [Sideloadly](https://sideloadly.io) (from a computer) or [LiveContainer](https://github.com/LiveContainer/LiveContainer).
 
-1. **Download the app.** Open [Actions > ios](../../actions/workflows/ios.yml), pick the newest run
-   that has a `horizon-pe-ios-<number>` artifact, and download it (GitHub asks you to sign in). Unzip it
-   to get `HorizonPE-iOS-unsigned.ipa`.
-   *Want native mods? Build the app in your own fork instead: [Native mods](#native-mods), step 1.*
+1. **Download the `.ipa`** of the edition you want from [Download](#download).
 2. **Install it** with your sideloading app. It signs the app with your Apple ID; with a free Apple ID,
    refresh it every 7 days (SideStore and AltStore do it for you). Nothing is lost.
 3. **Start it.** Sign in with Microsoft (the account that owns Java Edition) or Ely.by, or play
    offline. The first start downloads the game's files from Mojang, so stay on Wi-Fi.
 
-**Updating:** install the newer `.ipa` over the old one. Worlds, settings, accounts and mods stay.
+**Updating or switching edition:** install the newer `.ipa` over the old one. Worlds, settings,
+accounts and mods stay.
 
-**Had a build from before the rename?** Older builds used the app ID `dev.horizon.starling`; now it is
-`dev.horizon.pocketedition`, so iOS installs the new one as a separate app. Start the new app once,
-then in the Files app copy `saves` (and `resourcepacks`, `shaderpacks` if you like) from the old app's
-**Horizon PE** folder into the new one's (the nearly empty one), and delete the old app. Sign in again
-in the new app.
+**Want native mods?** They need the app built in your own fork instead of a release:
+[Native mods](#native-mods), step 1.
 
 **Your files** are in the Files app under **On My iPhone > Horizon PE**: `saves` (worlds),
 `resourcepacks`, `shaderpacks`, `mods`, `screenshots` and `logs`. Open a world, pack, skin or mod
 (`.zip`, `.mrpack`, `.hmod`, `.hnmod`, `.png`) with Horizon PE from Files or Safari to add it.
+
+<details>
+<summary><b>Had a build from before the rename?</b></summary>
+
+Older builds used the app ID `dev.horizon.starling`; now it is `dev.horizon.pocketedition`, so iOS
+installs the new one as a separate app. Start the new app once, then in the Files app copy `saves`
+(and `resourcepacks`, `shaderpacks` if you like) from the old app's **Horizon PE** folder into the new
+one's (the nearly empty one), and delete the old app. Sign in again in the new app.
+
+</details>
 
 ## Controls
 
@@ -117,153 +196,64 @@ Visuals**, made for phones, comes with the app.
 Metal and compiled, once, as it loads. Big packs take longer and cost more frame rate and battery;
 Starling Visuals and the **Auto** profile are the light options.
 
-## Shared worlds
+## Shared worlds and voice chat
 
-A shared world belongs to your group, not to one of you. Whoever opens it while nobody is
-playing hosts it on their own phone; friends join them with no server. When the host leaves,
-the world moves to a player who is still in it, and everyone else follows by themselves. The
-title screen's **Shared Worlds** (where Realms was) lists your shared worlds and how many are in
-each one right now.
+*Only in [Horizon PE: Shared Worlds](#download).* The full guide, with every detail, is
+**[docs/shared-worlds.md](docs/shared-worlds.md)**.
 
-The world always runs on the host's phone, as single player does, so it plays as fast. A copy
-of it lives in a storage bucket your group owns, which is how the next host gets the newest
-version. Sign in with a **Microsoft account** if you can: the host's game checks it, so your
-inventory, pets and stats stay yours whoever hosts, and nobody can play as you. Friends who
-aren't signed in (Play Offline) can join and host too, under their name: their things are kept
-by that name, so anyone with the world invite could use the same name.
+A shared world belongs to your group, not to one of you. Whoever opens it while nobody is playing
+hosts it on their own phone, and friends join them with no server. When the host leaves, the world
+moves to a player who is still in it, and everyone else follows by themselves. A copy of the world
+lives in a storage bucket your group owns, which is how the next host gets the newest version.
 
-### Set up the storage once (about 10 minutes, on your phone)
+**Set it up once (about 10 minutes, one person, on a phone)**
 
-The world's copy goes in **Cloudflare R2**: 10 GB free, which holds many worlds. R2 asks for a
-payment card when you turn it on; nothing is charged within the free amounts, and a group's
-playing stays far inside them.
+1. Make a free [Cloudflare](https://dash.cloudflare.com) account, turn on **R2 Object Storage** and
+   create a bucket. R2 asks for a payment card; a group's playing stays far inside the free 10 GB.
+2. Create an **API token** with **Object Read & Write** on that bucket.
+3. In the game: **Shared Worlds** on the title screen, **Share a World...**, pick the world, paste the
+   endpoint, the bucket's name and the two keys, then **Share World**.
+4. Open the world in the list, **Copy World Invite**, and send it to your friends privately. They tap
+   **Add with Invite...**, **Paste**, **Add World**.
 
-1. Open **dash.cloudflare.com** in your phone's browser and sign up (free).
-2. Go to **R2 Object Storage**, turn it on, then **Create bucket**. Any name (`horizon-worlds`),
-   location Automatic.
-3. In R2, open **Manage API tokens** (API, Manage API tokens) and **Create API token**: permission
-   **Object Read & Write**, applied to that bucket only. Create it, and keep the page open: it shows
-   the **Access Key ID**, the **Secret Access Key** and the **S3 endpoint** (`https://...r2.cloudflarestorage.com`)
-   once.
-4. In the game: **Shared Worlds**, **Share a World...**, pick the world, then paste the endpoint, the
-   bucket's name and the two keys (copy each from the browser, then **Paste** in the game), and
-   **Share World**. The game first checks that the bucket keeps a world safe, then uploads it.
-5. Open the world in the list, **Copy World Invite**, and send it to your friends in a private
-   message. They tap **Add with Invite...**, **Paste**, **Add World**.
+The game's own **How to Set Up...** page has these steps too. The invite holds the bucket's key:
+send it only to friends you trust with the world.
+[Step by step](docs/shared-worlds.md#set-up-the-storage-once-about-10-minutes-on-your-phone)
 
-The invite holds the bucket's key: anyone who has it can play and change the world. Send it only
-to the friends you play with. A second world can go in the same bucket: the game remembers it.
+**Playing**
 
-### Playing
+| You want to | Do this |
+| --- | --- |
+| Play | **Start** when nobody is playing (you host), **Join** when someone is |
+| Stop hosting | Save and Quit, and keep the app open until the upload finishes. The world moves to another player |
+| Hand the world over | Game Menu > **Friends** > **Give Host to ...** (a guest can **Ask to Host**) |
+| Let someone in who doesn't have the world | Game Menu > **Friends** shows an invite code, with **Copy Code** |
+| Go back in time | Shared Worlds > the world > **Backups...** > pick one. The player who shared the world approves it; **Undo Last Load** brings back what it replaced |
+| Change how often backups are made | The world's Backups page, **Backups: every ... min** (2 to 60; the player who shared the world) |
 
-- **Start** when nobody is playing: you host. **Join** when someone is: you join them.
-- **Leaving as the host:** Save and Quit. The world uploads (a moment; keep the app open until it
-  says so) and passes to a player who is still in it. Their game takes it and the others follow.
-- **The Friends button** (Game Menu), for everyone in the world: who hosts, who is in it and how
-  each one connects, anything going on (a slow route and why, a backup to load), the buttons to
-  answer, **Give Host to** a player (the host) or **Ask to Host** (a guest), and **Copy Invite**:
-  the world's invite, for a friend to add the world.
-- **Give Host / Ask to Host:** the host's world closes and opens on the other player's phone in a
-  few seconds, and everyone follows by themselves.
-- **While you host,** the world's copy updates every 5 minutes (or as often as the world's owner
-  chose), and whenever your app goes to the background, without stopping play.
-- **If the host's app goes to the background,** the list says so at once ("in the background"),
-  and nobody is shown playing.
-- **If the host's phone dies or loses its connection,** the others wait about half a minute in case
-  it comes back, then one of them takes the world from its last copy (at most one backup interval old, 5 minutes unless the owner chose otherwise). Nothing is damaged. What the old host did after that copy stays on their phone, as
-  a separate singleplayer world named "(my own progress)".
-- **If your phone can't reach the storage while you host,** the world pauses until it can, so
-  nobody can take it over while you keep playing.
+If the host's phone dies, the others wait about a minute and a half, then one of them takes the
+world from its last copy. Nothing is damaged.
+[More about playing](docs/shared-worlds.md#playing) ·
+[How friends reach the host](docs/shared-worlds.md#reaching-the-host) ·
+[Backups](docs/shared-worlds.md#backups)
 
-### Reaching the host
+**Voice chat**
 
-Each friend's game connects straight to the host's whenever it can, which is the fastest way:
+| | |
+| --- | --- |
+| **Off until you turn it on** | Joining a world never plays anyone's voice and never touches your microphone. A gold line in chat says when others are using it |
+| **Turn it on** | Game Menu > **Friends** > **Voice Chat** > **Voice Chat: On**. You hear everyone, wherever they are in the world. Your microphone is still off |
+| **Your microphone** | The microphone button at the left of the top row of the touch controls: red while muted. Place it in the controls editor like the others |
+| **Each player** | A volume slider from 0 to 200 % and a **Mute** button, remembered for that player in every world |
+| **Which microphone** | **Mic** on the Voice Chat page. Automatic keeps Bluetooth headphones in full quality by using the device's own microphone |
+| **Noise Filter** | Turns down steady noise (a fan, traffic) in your microphone. Off unless you turn it on |
+| **Turns itself off** | When your headphones disconnect, so nobody is suddenly heard out loud |
 
-1. **Directly:** on the same Wi-Fi or hotspot, through a router that opens a port (the game asks
-   it by UPnP or NAT-PMP), or over a VPN such as Tailscale.
-2. **Both at once:** when the host can't be called into (UPnP is off, or the host is on mobile
-   data), the two games reach each other through **bore.pub**, a free public tunnel, and from
-   there both dial the other at the same moment. Over IPv6 (most mobile networks and many home
-   connections have it) and through most home routers, the two connections meet and the game goes
-   straight between the phones: that friend leaves bore.pub at once.
-3. **UDP, only when TCP found nothing:** the two games try once more over UDP, the kind of
-   connection video calls use, which gets through far more routers and mobile networks. Each
-   sends small signed probes to the other at the same time; when they meet, QUIC (the
-   connection layer browsers use) carries the game straight between the phones, encrypted with
-   the world's own key as well as QUIC's. This adds a few seconds to that friend's join, and
-   nothing at all for anyone who connected directly before it.
-4. **bore.pub:** only when none of that works (both behind a carrier's shared address that gives
-   a new port for every destination) does a friend play through the tunnel. It can be slower,
-   and it is run by volunteers. That friend and the host are told. The world stays encrypted
-   between the host and each friend either way.
+[More about voice chat](docs/shared-worlds.md#voice-chat)
 
-The Friends screen (Game Menu, Friends) always says how each connection goes: the host sees
-every player as "(direct)", "(direct, UDP)" or "(bore.pub)", and each guest sees its own.
-
-Faster for everyone: a host on home Wi-Fi with UPnP on in the router; or, when the host is behind
-the tunnel, **Give Host** to a player marked "(faster)", whose network takes direct connections.
-
-### Backups
-
-A copy of the world goes up every 5 minutes while it is played, and when its host leaves. The
-player who shared the world can choose how often on its Backups page (**Backups: every ... min**:
-2, 5, 10, 15, 30 or 60 minutes): shorter loses less if a host's phone dies, longer pauses the
-world less often for the save. Every host follows the choice within a minute. The
-storage keeps, as backups: the last 20 copies (the last hour or so of play), one a day for 30
-days, and one a week for 26 weeks. Copies share what didn't change, so each backup costs only
-the blocks that did. The whole bucket (every world in it) is kept under 8 GB, well inside R2's
-free 10 GB: when it would go over, the oldest backups go first (never the newest few, the world
-as it is now, or the copy a load could be undone to).
-
-- **Load a backup:** Shared Worlds, the world, **Backups...**, pick one. Anyone in the world can
-  ask; the player who shared it approves it (Backups..., **Approve Load**, or in the world: Game
-  Menu, Friends). Their own requests need no approval.
-- **When it loads:** at once if nobody is playing. If someone is, their game warns everyone,
-  closes the world, loads the backup and opens it again; the others join again by themselves.
-- **Undo:** the copy a load replaced is always kept: **Undo Last Load** brings it back, the
-  same way (asked, then approved).
-- What was played after a backup is never lost by loading it: it stays a backup itself.
-
-### Voice chat
-
-Talk to the players of a shared world from inside the game, without a call running beside it.
-
-- **Off until you turn it on.** Joining a world never plays anyone's voice and never touches
-  your microphone. When others are in the world, a gold line in chat says voice chat is there;
-  when one of them turns it on, another says who.
-- **Turn it on:** Game Menu, **Friends**, **Voice Chat**, **Voice Chat: On**. You hear everyone who
-  has it on, wherever they are in the world. Your microphone is still off.
-- **Your microphone:** the microphone button at the left of the top row of the touch controls
-  (red while muted), or **Microphone** on the Voice Chat page. The first time, iOS asks whether
-  the game may use the microphone. Move, resize or hide the button in the controls editor like
-  the others.
-- **Each player's volume:** on the Voice Chat page every player has a slider from 0 to 200 % and
-  a **Mute** button; **Voices** sets everyone together. What you choose is remembered for that
-  player in every world.
-- **Which microphone:** **Mic** on the same page. Automatic uses a wired headset's microphone when
-  one is plugged in, and otherwise the device's own, so Bluetooth headphones keep playing in
-  full quality. A Bluetooth headset's own microphone can be chosen, at a call's sound quality
-  for everything (that is how Bluetooth works).
-- **Noise Filter** (the foot of the Voice Chat page) turns down a room's steady noise, a fan or
-  traffic, in your microphone. It is off unless you turn it on: it uses a little more battery.
-- **Who is talking** shows in the top left corner while voice chat is on.
-- **It turns itself off** when your headphones disconnect, so nobody is suddenly heard out loud;
-  your microphone goes off when a call or Siri takes the sound, and when the game leaves the
-  screen. It follows the world to its next host by itself.
-- **While your microphone is on,** the ring/silent switch doesn't silence the game: iOS treats a
-  live microphone like a call. It does again a few seconds after you mute.
-- **What it costs:** nothing while nobody talks, and about 60 kbit/s for each person talking.
-  Voices travel on the connection the game already has, encrypted like the world.
-
-### Good to know
-
-- 8 players at most in a world.
-- Removing a world from your list leaves it in the storage for the others; your copy becomes a
-  normal singleplayer world.
-- Backups: see below. The game's own **How to Set Up...** page (on Share a World's storage page)
-  has these setup steps too, with an **Open Cloudflare** button.
-- Shared worlds are between phones running this app. Friends on PC (official Horizon) are planned
-  for later.
+**Good to know:** 8 players at most; shared worlds are between phones running the Shared Worlds
+edition (friends on PC are planned for later); friends who aren't signed in can join and host under
+their name.
 
 ## Native mods
 
@@ -274,11 +264,14 @@ can start them, so you need **your own fork** and the app built from it.
 
 **1. Your own copy (once)**
 
-1. On [GitHub](https://github.com) (signed in), open this repository and tap **Fork** > **Create
-   fork**. Keep it public: then GitHub's build machines are free.
+1. On [GitHub](https://github.com) (signed in), open this repository and tap **Fork**. For the
+   Shared Worlds edition, untick **Copy the `main` branch only**. Then **Create fork**. Keep it
+   public: then GitHub's build machines are free.
 2. In your fork, open **Actions** and enable workflows (GitHub asks once).
-3. **Actions > ios > Run workflow**, tick **Make and keep the unsigned .ipa**, run it. In about an hour
-   the run has a `horizon-pe-ios-<number>` artifact: install that `.ipa` ([Install](#install)).
+3. **Actions > ios > Run workflow**. Under **Use workflow from**, leave `main` for Horizon PE or pick
+   `shared-worlds` for the Shared Worlds edition. Tick **Make and keep the unsigned .ipa**, run it.
+   In about an hour the run has a `horizon-pe-ios-<number>` artifact: install that `.ipa`
+   ([Install](#install)). The app remembers the branch it was built from, and builds its mods there.
 
 **2. A token (once a year)**
 
@@ -296,7 +289,8 @@ can start them, so you need **your own fork** and the app built from it.
    and pick your sideloading app in the share sheet.
 
 To **remove** a native mod, remove it and build again, or just turn it off in **Options > Mods**.
-To **update**, tap **Sync fork > Update branch** on your fork's GitHub page, then build again.
+To **update**, tap **Sync fork > Update branch** on your fork's GitHub page (on the branch your app
+was built from), then build again.
 
 <details>
 <summary><b>If a build fails</b></summary>
@@ -306,7 +300,8 @@ To **update**, tap **Sync fork > Update branch** on your fork's GitHub page, the
 - **"Mods build failed":** open the run in your fork's **Actions** tab to see why. Usually a mod made
   for another game version; build again without it.
 - **Token expired** (after a year): **Make a token**, then **Paste new token**.
-- **Nothing starts:** workflows aren't enabled in your fork (step 1.2).
+- **Nothing starts:** workflows aren't enabled in your fork (step 1.2), or the fork doesn't have the
+  branch your app was built from (step 1.1).
 - **Without the game:** **Actions > ios > Run workflow** with mod ids in **Native mods to build in**
   (for example `wrench fps_overlay`).
 
@@ -314,25 +309,34 @@ To **update**, tap **Sync fork > Update branch** on your fork's GitHub page, the
 
 Every mod is checked against the registry's size and SHA-256 before it is built, and every build is
 started once in the iOS Simulator before you get it. Builds are kept in your fork's Actions for 30
-days. More detail: [docs/ios.md](docs/ios.md#native-mods).
+days. Not every mod in the catalog builds for this port yet: a mod made for another version of the
+game can fail, and the build says which. More detail: [docs/ios.md](docs/ios.md#native-mods).
 
 ## Help
 
-- **The app won't open after a week:** a free Apple ID signs apps for 7 days. Refresh it in SideStore
-  or AltStore, or install the `.ipa` again. Nothing is lost.
-- **Low frame rate or a hot phone:** lower the render distance (Options > Video Settings), use Starling
-  Visuals or no shader pack, and close other apps.
-- **Reset the touch layout:** Horizon menu > Controls > presets > **Default**.
-- **Something crashed or looks wrong:** Options > Diagnostics > **Export diagnostic ZIP**, then
-  [open an issue](../../issues/new/choose) with it and what you were doing.
+| Problem | What to do |
+| --- | --- |
+| **The app won't open after a week** | A free Apple ID signs apps for 7 days. Refresh it in SideStore or AltStore, or install the `.ipa` again. Nothing is lost |
+| **Low frame rate or a hot phone** | Lower the render distance (Options > Video Settings), use Starling Visuals or no shader pack, and close other apps |
+| **The touch layout is a mess** | Horizon menu > Controls > presets > **Default** |
+| **Friends hear an echo of themselves in voice chat** | Use headphones, or turn your microphone off while you aren't talking |
+| **Something crashed or looks wrong** | Options > Diagnostics > **Export diagnostic ZIP**, then [open an issue](https://github.com/shopifygav222/horizon-pocket-edition-ios/issues/new/choose) with it, the edition you use, and what you were doing |
 
 ## For developers
 
-No Mac needed: GitHub builds the app. Every push to `main` compiles the game for iOS, lints it, prepares
-the game files and checks the phone lays them out the same, bundles the app (checking it carries none
-of Mojang's files) and starts it in the iOS Simulator ([`ios.yml`](.github/workflows/ios.yml));
-[`ios-guard.yml`](.github/workflows/ios-guard.yml) checks Starling's desktop and Android builds still
-compile. A run dispatched with **Make and keep the unsigned .ipa** keeps the app.
+No Mac needed: GitHub builds the app.
+
+| Branch | What it is | Release |
+| --- | --- | --- |
+| [`main`](https://github.com/shopifygav222/horizon-pocket-edition-ios/tree/main) | Horizon PE | `v1.0.0` |
+| [`shared-worlds`](https://github.com/shopifygav222/horizon-pocket-edition-ios/tree/shared-worlds) | `main` plus shared worlds and voice chat | `v1.0.0-shared-worlds` |
+
+| Workflow | What it does |
+| --- | --- |
+| [`ios.yml`](.github/workflows/ios.yml) | Compiles the game for iOS, lints it, prepares the game files, bundles the app (checking it carries none of Mojang's files) and starts it in the iOS Simulator. Dispatched with **Make and keep the unsigned .ipa**, it keeps the app |
+| [`ios-guard.yml`](.github/workflows/ios-guard.yml) | Formatting, and Starling's desktop and Android builds still compile |
+| [`native-mods-check.yml`](.github/workflows/native-mods-check.yml) | Builds every native mod of the catalog against this source, one job each |
+| `shared-worlds.yml`, `shared-worlds-e2e.yml`, `voice.yml` | On `shared-worlds` only: the shared worlds and voice crates' tests, and two games sharing one world end to end |
 
 On a Mac with Xcode: `rustup target add aarch64-apple-ios`, `python3 tools/ios_prepare.py` (needs Java
 25), then `brew install xcodegen && cd packaging/ios && xcodegen generate` and open
@@ -340,7 +344,7 @@ On a Mac with Xcode: `rustup target add aarch64-apple-ios`, `python3 tools/ios_p
 
 [docs/ios.md](docs/ios.md) covers the iOS app in depth; [IOS-SYNC.md](IOS-SYNC.md) lists the Starling
 version this is based on, the repository layout, every change to Starling's files, and how to take in
-a new Starling release.
+a new Starling release. The rest of `docs/` is Horizon's and Starling's own documentation.
 
 ## Credits
 
@@ -352,6 +356,8 @@ a new Starling release.
   are Starling's.
 - **[horizon-iOS](https://github.com/meehandaniel4/horizon-iOS)**: the first native mod builds for iOS
   on GitHub Actions.
+- **[Opus](https://opus-codec.org)** and **[RNNoise](https://github.com/xiph/rnnoise)** (Xiph.Org):
+  the voice codec and the noise filter of the Shared Worlds edition.
 
 ## License
 

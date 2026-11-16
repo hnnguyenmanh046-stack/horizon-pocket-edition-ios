@@ -3314,4 +3314,35 @@ mod tests {
         touch.poll_state(); // consume the queued tap
         assert!(!touch.poll_state().held(Button::LeftStick));
     }
+
+    /// An iPad's screen is nearer square than a phone's: the factory top row spreads from its
+    /// middle until its buttons stand apart, on the screen. A phone's row is where it always was.
+    #[test]
+    fn the_top_row_stands_apart_on_an_ipad_and_stays_put_on_a_phone() {
+        let top = [
+            Control::Debug,
+            Control::Chat,
+            Control::Pause,
+            Control::Settings,
+            Control::Perspective,
+        ];
+        let mut pad = TouchControls::default();
+        pad.viewport(2048, 1536);
+        let rects: Vec<_> = top
+            .iter()
+            .map(|c| pad.placement(*c).rect(pad.aspect()))
+            .collect();
+        for pair in rects.windows(2) {
+            assert!(pair[0][0] + pair[0][2] < pair[1][0], "{rects:?}");
+        }
+        assert!(
+            rects[0][0] >= 0.0 && rects[4][0] + rects[4][2] <= 1.0,
+            "{rects:?}"
+        );
+        assert_eq!(pad.placement(Control::Pause).center[0], 0.5);
+        let mut wide = TouchControls::default();
+        wide.viewport(1920, 1080);
+        assert_eq!(wide.placement(Control::Debug).center[0], 0.42);
+        assert_eq!(wide.placement(Control::Perspective).center[0], 0.58);
+    }
 }

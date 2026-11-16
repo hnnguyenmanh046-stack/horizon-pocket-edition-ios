@@ -6,6 +6,10 @@ how it follows Starling). It has Starling's phone features: the same setup, titl
 Diagnostics as the Android app. GitHub Actions builds it (`.github/workflows/ios.yml`); the IPA is
 unsigned, so install it with a sideloading tool that signs it for your device.
 
+It comes in two editions, both listed with their downloads in the README: **Horizon PE** (branch
+`main`) and **Horizon PE: Shared Worlds** (branch `shared-worlds`), which adds shared worlds and
+voice chat ([shared-worlds.md](shared-worlds.md)). Everything on this page is true of both.
+
 What differs from Android, because iOS does not allow it or does it another way:
 
 - **Native mods** can't be downloaded into the app and loaded later: iOS runs no code the app

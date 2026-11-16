@@ -6,6 +6,11 @@ port. The older Horizon
 Android iOS port is kept under `archive/horizon-android-ios`, and `main`'s history holds it as a parent; this app was
 developed on `starling-ios` until it moved to `main`.
 
+- **Branches and releases:** `main` is Horizon PE (release tags `v1.0.0`, ...). `shared-worlds` is `main` plus
+  shared worlds and voice chat (release tags `v1.0.0-shared-worlds`, ...): a fix that isn't about those goes to
+  `main` first and is merged into `shared-worlds`. The README is the same file on both, and names each edition's
+  latest release.
+
 - **Base:** starling-client/starling `starling` @ `ac874422ed` (tag `v0.8.0`, "the first release of Starling and
   Horizon Android together"). Remote: `starling`. Starling 0.8.0 took Horizon Android's control system, account
   profiles with Ely.by, skins, catalog and Diagnostics itself, so this port carries none of its own: the work on the
