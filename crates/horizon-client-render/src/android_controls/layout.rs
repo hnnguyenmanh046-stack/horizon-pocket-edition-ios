@@ -631,6 +631,12 @@ fn deserialize_layouts<'de, D: serde::Deserializer<'de>>(
     for (output, input) in layouts.iter_mut().zip(rows) {
         let known = input.len().min(output.len());
         output[..known].copy_from_slice(&input[..known]);
+        // 1.0.0's zoom button was at the left edge under the hub, over the Coordinates HUD:
+        // one still exactly there was never placed by the player, and joins the top row.
+        let zoom = &mut output[Control::Zoom as usize];
+        if zoom.center == [0.035, 0.17] && zoom.size == 0.075 {
+            zoom.center = [0.34, 0.055];
+        }
     }
     Ok(layouts)
 }
@@ -665,8 +671,8 @@ impl Default for Settings {
             Placement::new(0.92, 0.36, 0.12),
             // The microphone: the leftmost of the top row, a place left of the debug button.
             Placement::new(0.38, 0.055, 0.075),
-            // Zoom: at the left edge, under the hub's button.
-            Placement::new(0.035, 0.17, 0.075),
+            // Zoom: the top row's first, a place left of the microphone's.
+            Placement::new(0.34, 0.055, 0.075),
             // Waymap's two: the top row goes on to the right with them.
             Placement::new(0.62, 0.055, 0.075),
             Placement::new(0.66, 0.055, 0.075),

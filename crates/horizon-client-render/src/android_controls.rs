@@ -10,6 +10,9 @@ use std::{
     time::{Duration, Instant},
 };
 const HOLD_DELAY: Duration = Duration::from_millis(350);
+/// The zoom button let go sooner than this was tapped: the zoom stays on until the next tap.
+/// Held longer, it zooms only for as long.
+const ZOOM_TAP: Duration = Duration::from_millis(300);
 
 static LAST_HUD_OPACITY_BITS: AtomicU32 = AtomicU32::new(0x3f80_0000);
 
@@ -186,8 +189,9 @@ enum Role {
 }
 
 /// The factory top row from left to right, each control with its place (a fraction of the
-/// screen's width): the microphone, the five that were always there, and Waymap's two.
-const TOP_ROW: [(Control, f32); 8] = [
+/// screen's width): Zoom's, the microphone, the five that were always there, and Waymap's two.
+const TOP_ROW: [(Control, f32); 9] = [
+    (Control::Zoom, 0.34),
     (Control::Voice, 0.38),
     (Control::Debug, 0.42),
     (Control::Chat, 0.46),
@@ -244,7 +248,9 @@ pub struct TouchControls {
     pub waypoints_requested: bool,
     pub add_waypoint_requested: bool,
     /// The finger on the zoom button: zoomed in for as long as it stays down.
-    zoom_finger: Option<u64>,
+    zoom_finger: Option<(u64, Instant)>,
+    /// Zoom left on by a tap of its button, until the next.
+    zoom_latched: bool,
     pub clicked: bool,
     pub context_use: bool,
     pub vertical_movement: bool,
@@ -300,6 +306,7 @@ impl Default for TouchControls {
             waypoints_requested: false,
             add_waypoint_requested: false,
             zoom_finger: None,
+            zoom_latched: false,
             clicked: false,
             context_use: false,
             vertical_movement: false,
@@ -473,6 +480,7 @@ impl TouchControls {
         {
             if ended {
                 self.fingers.remove(&id);
+                self.zoom_release(id);
             }
             return true;
         }
@@ -588,7 +596,10 @@ impl TouchControls {
                 .filter(|(control, _)| {
                     !matches!(
                         control,
-                        Control::Voice | Control::Waypoints | Control::AddWaypoint
+                        Control::Zoom
+                            | Control::Voice
+                            | Control::Waypoints
+                            | Control::AddWaypoint
                     ) || self.visible(*control)
                 })
                 .collect();
@@ -891,7 +902,10 @@ impl TouchControls {
                         region(b, a, "gui", [236.0, 46.0, 18.0, 18.0], bounds, color)
                     }
                     Control::Voice => mic_button(b, a, bounds, self.voice_muted, color),
-                    Control::Zoom => zoom_button(b, a, bounds, color),
+                    Control::Zoom => {
+                        let on = self.zoom_held() && self.editor.is_none();
+                        zoom_button(b, a, bounds, on, color);
+                    }
                     Control::Waypoints => waypoint_button(b, a, bounds, false, color),
                     Control::AddWaypoint => waypoint_button(b, a, bounds, true, color),
                     Control::Offhand | Control::Shield => {
@@ -1014,6 +1028,7 @@ impl TouchControls {
         }
         if ended {
             self.passthrough_fingers.remove(&id);
+            self.zoom_release(id);
             if let Some((
                 Role::Look {
                     start,
@@ -1039,6 +1054,12 @@ impl TouchControls {
             return [0.0; 2];
         }
         if started {
+            // A new finger is never the one that was on the zoom button: the system gives a
+            // finger's number to the next one, and an end that wasn't heard would leave the
+            // zoom on under a finger that walks or looks.
+            if self.zoom_finger.is_some_and(|(finger, _)| finger == id) {
+                self.zoom_finger = None;
+            }
             let mut control = self.control_at(point);
             let has_move = self
                 .fingers
@@ -1126,7 +1147,12 @@ impl TouchControls {
                     Role::Ignore
                 }
                 Some(Control::Zoom) => {
-                    self.zoom_finger = Some(id);
+                    if self.zoom_latched {
+                        // Left on by a tap: this one turns it off.
+                        self.zoom_latched = false;
+                    } else {
+                        self.zoom_finger = Some((id, Instant::now()));
+                    }
                     Role::Ignore
                 }
                 Some(Control::Waypoints) => {
@@ -1267,11 +1293,25 @@ impl TouchControls {
         self.waypoints_requested = false;
         self.add_waypoint_requested = false;
         self.zoom_finger = None;
+        self.zoom_latched = false;
     }
-    /// A finger is on the zoom button: the Zoom mod's key is down for as long.
+    /// Finger `id` came up: if it was the one on the zoom button, a tap leaves the zoom on
+    /// (the next tap turns it off) and a longer hold ends it.
+    fn zoom_release(&mut self, id: u64) {
+        if let Some((finger, since)) = self.zoom_finger
+            && finger == id
+        {
+            self.zoom_finger = None;
+            self.zoom_latched = since.elapsed() < ZOOM_TAP;
+        }
+    }
+    /// Zoomed by the button: left on by a tap, or a finger still on it. The Zoom mod's key is
+    /// down for as long.
     pub fn zoom_held(&self) -> bool {
-        self.zoom_finger
-            .is_some_and(|finger| self.fingers.contains_key(&finger))
+        self.zoom_latched
+            || self
+                .zoom_finger
+                .is_some_and(|(finger, _)| self.fingers.contains_key(&finger))
     }
     /// A short world tap never holds a mouse button into the next tick.
     /// Its item-use intent is resolved against the current entity target.
@@ -1683,9 +1723,9 @@ fn mic_button(b: &mut HudBatch, a: &HudAtlas, [x, y, w, h]: [f32; 4], muted: boo
     }
 }
 
-/// The Zoom mod's button: the plate of its neighbours with a magnifying glass on it. Held, it
-/// is the mod's zoom key held.
-fn zoom_button(b: &mut HudBatch, a: &HudAtlas, [x, y, w, h]: [f32; 4], color: u32) {
+/// The Zoom mod's button: the plate of its neighbours with a magnifying glass on it, gold
+/// while it zooms. A tap turns the zoom on until the next tap; held, it zooms for as long.
+fn zoom_button(b: &mut HudBatch, a: &HudAtlas, [x, y, w, h]: [f32; 4], on: bool, color: u32) {
     const GLASS: [&str; 12] = [
         "...####.....",
         "..#....#....",
@@ -1700,9 +1740,12 @@ fn zoom_button(b: &mut HudBatch, a: &HudAtlas, [x, y, w, h]: [f32; 4], color: u3
         "..........##",
         "...........#",
     ];
+    // The same opacity as the plate was asked for; the glass in gold while zoomed.
+    let alpha = color & 0xFF00_0000;
+    let gold = (rgba(255, 208, 64, 255) & 0x00FF_FFFF) | alpha;
     menu_frame(b, a, [x, y, w, h], color);
     let inner = [x + w * 0.2, y + h * 0.2, w * 0.6, h * 0.6];
-    pixel_glyph(b, a, inner, &GLASS, color);
+    pixel_glyph(b, a, inner, &GLASS, if on { gold } else { color });
 }
 
 /// Waymap's two buttons: the plate of their neighbours with a map pin on it, and a mark in
@@ -1993,7 +2036,7 @@ pub fn draw_single_mcpe_control(
             region(b, a, "gui", [236.0, 46.0, 18.0, 18.0], bounds, color)
         }
         Control::Voice => mic_button(b, a, bounds, tc.voice_muted, color),
-        Control::Zoom => zoom_button(b, a, bounds, color),
+        Control::Zoom => zoom_button(b, a, bounds, false, color),
         Control::Waypoints => waypoint_button(b, a, bounds, false, color),
         Control::AddWaypoint => waypoint_button(b, a, bounds, true, color),
         Control::Offhand | Control::Shield => {
@@ -3499,8 +3542,8 @@ mod tests {
         assert_eq!(read.layouts[0], settings.layouts[0]);
     }
 
-    /// The mods' buttons of this edition: Zoom's under the hub, held like its key; Waymap's two
-    /// right of the top row, taps. Each is there only while its mod is (and in the editor), and
+    /// The mods' buttons of this edition: Zoom's left of the top row, a tap for on and a tap
+    /// for off (or held); Waymap's two right of the top row, taps. Each is there only while its mod is (and in the editor), and
     /// a layout saved before them loads whole with them at their places.
     #[test]
     fn the_zoom_and_waypoint_buttons_show_with_their_mods_and_join_old_layouts() {
@@ -3538,14 +3581,16 @@ mod tests {
             assert_eq!(pair[0][3], pair[1][3]);
         }
         assert!(rects[6][0] + rects[6][2] <= 1.0);
-        // The zoom button: under the hub at the left edge, on the screen, the row's size.
+        // The zoom button: in the row, left of the debug button with the microphone's place
+        // between them, on the screen, the row's size.
         let glass = touch.placement(Control::Zoom).rect(touch.aspect());
         assert!(
-            glass[0] >= 0.0 && glass[1] > rects[0][1] + rects[0][3],
+            glass[0] >= 0.0 && glass[0] + 2.0 * glass[2] <= rects[0][0] + 0.0001,
             "{glass:?}"
         );
+        assert_eq!(glass[1], rects[0][1]);
         assert_eq!(glass[3], rects[0][3]);
-        // Held: zoomed for as long as the finger is down, and nothing else's.
+        // A tap: zoomed until the next tap, and nothing else pressed.
         touch.update(1, zoom, true, false);
         assert!(touch.zoom_held());
         assert!(matches!(touch.fingers[&1].0, Role::Ignore));
@@ -3553,6 +3598,35 @@ mod tests {
         touch.update(1, [zoom[0] + 0.01, zoom[1]], false, false);
         assert!(touch.zoom_held());
         touch.update(1, zoom, false, true);
+        assert!(touch.zoom_held());
+        // The next finger gets the same number: looking around with it isn't the button.
+        touch.update(1, [0.5, 0.5], true, false);
+        touch.update(1, [0.5, 0.5], false, true);
+        touch.poll_state();
+        assert!(touch.zoom_held());
+        touch.update(2, zoom, true, false);
+        assert!(!touch.zoom_held());
+        touch.update(2, zoom, false, true);
+        assert!(!touch.zoom_held());
+        // Held longer than a tap: zoomed for as long as the finger is down.
+        touch.update(3, zoom, true, false);
+        let long_ago = Instant::now().checked_sub(Duration::from_secs(1)).unwrap();
+        touch.zoom_finger = Some((3, long_ago));
+        assert!(touch.zoom_held());
+        touch.update(3, zoom, false, true);
+        assert!(!touch.zoom_held());
+        // And the finger that walks or looks next, with that number, doesn't zoom.
+        touch.update(3, [0.5, 0.5], true, false);
+        assert!(!touch.zoom_held());
+        touch.update(3, [0.5, 0.5], false, true);
+        touch.poll_state();
+        // An end that was never heard: the number's next finger still isn't the button.
+        touch.update(4, zoom, true, false);
+        touch.fingers.remove(&4);
+        touch.update(4, [0.5, 0.5], true, false);
+        assert!(!touch.zoom_held());
+        touch.update(4, [0.5, 0.5], false, true);
+        touch.poll_state();
         assert!(!touch.zoom_held());
         // A finger left down when the controls are cleared (a screen opened) lets go.
         touch.update(2, zoom, true, false);
@@ -3590,10 +3664,11 @@ mod tests {
             .collect();
         assert_eq!(five, [0.18, 0.34, 0.50, 0.66, 0.82]);
         tall.waypoints_available = true;
+        tall.zoom_available = true;
         for voice in [false, true] {
             tall.voice_available = voice;
-            let shown: Vec<Control> = std::iter::once(Control::Voice)
-                .filter(|_| voice)
+            let shown: Vec<Control> = std::iter::once(Control::Zoom)
+                .chain(std::iter::once(Control::Voice).filter(|_| voice))
                 .chain(row)
                 .collect();
             let rects: Vec<_> = shown
@@ -3614,7 +3689,9 @@ mod tests {
         pad.viewport(2048, 1536);
         pad.voice_available = true;
         pad.waypoints_available = true;
-        let rects: Vec<_> = std::iter::once(Control::Voice)
+        pad.zoom_available = true;
+        let rects: Vec<_> = [Control::Zoom, Control::Voice]
+            .into_iter()
             .chain(row)
             .map(|c| pad.placement(c).rect(pad.aspect()))
             .collect();
@@ -3622,7 +3699,7 @@ mod tests {
             assert!(pair[0][0] + pair[0][2] < pair[1][0], "{rects:?}");
         }
         assert!(
-            rects[0][0] >= 0.0 && rects[7][0] + rects[7][2] <= 1.0,
+            rects[0][0] >= 0.0 && rects[8][0] + rects[8][2] <= 1.0,
             "{rects:?}"
         );
         // A layout saved with fifteen controls (Shared Worlds'): every one kept, the three
@@ -3661,7 +3738,18 @@ mod tests {
         );
         assert_eq!(
             settings.layouts[0][Control::Zoom as usize].center,
-            [0.035, 0.17]
+            [0.34, 0.055]
         );
+        // A layout saved by 1.0.0, whose zoom button was at the left edge under the hub and
+        // never moved: it joins the row. One the player placed stays.
+        let mut first = serde_json::to_value(&settings).unwrap();
+        first["layouts"][0][Control::Zoom as usize]["center"] = serde_json::json!([0.035, 0.17]);
+        first["layouts"][1][Control::Zoom as usize]["center"] = serde_json::json!([0.2, 0.3]);
+        let moved: Settings = serde_json::from_value(first).unwrap();
+        assert_eq!(
+            moved.layouts[0][Control::Zoom as usize].center,
+            [0.34, 0.055]
+        );
+        assert_eq!(moved.layouts[1][Control::Zoom as usize].center, [0.2, 0.3]);
     }
 }

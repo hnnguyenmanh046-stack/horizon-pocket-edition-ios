@@ -42,6 +42,8 @@ pub const FORMATS: [&str; 3] = [
 pub const SIZES: [u32; 10] = [50, 60, 70, 75, 80, 90, 100, 110, 125, 150];
 /// `SIZES`' 100%.
 pub const SIZE_FULL: usize = 6;
+/// The size until the player chooses: 80% (Horizon PE).
+pub const SIZE_DEFAULT: usize = 4;
 
 pub const HANDS: [&str; 4] = [
     "Main & off hand",
@@ -62,7 +64,7 @@ pub struct Settings {
     pub background: bool,
     /// Show stack count for items without durability (e.g. 64 torches).
     pub show_count: bool,
-    /// Index in `SIZES`. Default: `SIZE_FULL` (100%).
+    /// Index in `SIZES`. Default: `SIZE_DEFAULT` (80%).
     pub size: usize,
 }
 
@@ -74,7 +76,7 @@ impl Default for Settings {
             hands: 0,
             background: false,
             show_count: true,
-            size: SIZE_FULL,
+            size: SIZE_DEFAULT,
         }
     }
 }
@@ -96,7 +98,7 @@ impl Settings {
         // Kept as the percent itself: the nearest size there is.
         let size = get("size")
             .and_then(|v| v.trim().parse::<u32>().ok())
-            .map_or(SIZE_FULL, |percent| {
+            .map_or(SIZE_DEFAULT, |percent| {
                 (0..SIZES.len())
                     .min_by_key(|i| SIZES[*i].abs_diff(percent))
                     .unwrap_or(SIZE_FULL)
@@ -230,7 +232,7 @@ mod tests {
         assert_eq!(defaults, Settings::default());
         assert_eq!(defaults.position, 0); // Hotbar left
         assert!(!defaults.background);
-        assert_eq!(defaults.scale(), 1.0);
+        assert_eq!(defaults.scale(), 0.8);
 
         let custom = Settings::read(stored(&[
             ("position", "1"),
@@ -272,6 +274,7 @@ mod tests {
         assert_eq!(s.hands, 1);
         s.click(3); // background -> true
         assert!(s.background);
+        s.size = SIZE_FULL;
         s.click(5); // size -> 110%
         assert_eq!(s.labels()[5], "Size: 110%");
         for _ in 0..3 {

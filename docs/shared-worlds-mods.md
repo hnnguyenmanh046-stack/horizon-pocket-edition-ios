@@ -34,7 +34,7 @@ or open it to change its settings and keys. Their sources, as built, are in the 
 | ContinuityHorizon | 0.1.7 | Connected textures | tariksabanuz | MIT | [tariksabanuz/ContinuityHorizon](https://github.com/tariksabanuz/ContinuityHorizon) |
 | Better Dynamic Lights | 1.0.3 | Held and dropped light sources light the world | DeportedToHell | MIT | [DeportedToHell/MCRE-Mods](https://github.com/DeportedToHell/MCRE-Mods) |
 
-Six of them differ from their authors' releases here, each marked "Horizon PE" in its source:
+Nine of them differ from their authors' releases here, each marked "Horizon PE" in its source:
 Coordinates HUD, Armor Status and Enchantment Hints ([below](#what-was-changed-in-three-mods)), and
 the starting values of TreeFall, Status Effect HUD and Jade
 ([What is set for you](#what-is-set-for-you)). Jade is shared under the same licence as it came
@@ -48,7 +48,7 @@ the layout editor (**H** > **Controls** > the editor), like every other.
 
 | Button | Where it starts | What it does |
 | --- | --- | --- |
-| **Magnifying glass** | The left edge, under the **H** button | Zoom: zoomed in for as long as a finger is on it |
+| **Magnifying glass** | Left of the top row (before the microphone's place) | Zoom: tap to zoom in, tap again to zoom out. Held instead, it zooms for as long as the finger is on it. The glass is gold while it zooms |
 | **Map pin with three lines** | Right of the top row (after the camera button) | Waymap: opens the list of waypoints |
 | **Map pin with a plus** | Right of that one | Waymap: adds a waypoint where you stand |
 
@@ -81,6 +81,10 @@ already had keeps the settings you chose.
 | Options > Mods > TreeFall | Largest tree | 2048 logs |
 | Options > Mods > Armor Status | Position | Hotbar left |
 | | Box background | Off |
+| | Size | 80% |
+| Options > Mods > Coordinates HUD | Height | 58 from the top |
+| Options > Mods > Zoom | Starting zoom | 6x |
+| Options > Mods > Waymap | List panel | Off |
 | Options > Mods > Jade > Configuration > Appearance | Overlay Position X | Left |
 | | Overlay Position Y | Upper |
 | Options > Mods > Status Effect HUD | HUD Position | Bottom-Left |
@@ -91,9 +95,9 @@ already had keeps the settings you chose.
 
 So that nothing covers it, the box can sit at any height on the left edge.
 
-- **Options > Mods > Coordinates HUD.** **Height** says where it is: `Automatic` (the top left
-  corner, as the mod has it), or a number, the distance from the top of the screen. Tap it to switch
-  between the two. **Move up 1**, **Move down 1**, **Move up 10** and **Move down 10** move it; the
+- **Options > Mods > Coordinates HUD.** **Height** says where it is: a number, the distance from
+  the top of the screen (it starts at 58, under the **H** button), or `Automatic` (the top left
+  corner, as the mod has it). Tap it to switch between the two. **Move up 1**, **Move down 1**, **Move up 10** and **Move down 10** move it; the
   number changes as you tap.
 - **In chat, while you watch it move:** `/coords y 40` puts it 40 from the top; `/coords y auto`
   gives it back to the corner.
@@ -104,8 +108,8 @@ So that nothing covers it, the box can sit at any height on the left edge.
 ### Armor Status: its size
 
 **Options > Mods > Armor Status > Size** steps through 50%, 60%, 70%, 75%, 80%, 90%, 100%, 110%,
-125% and 150%. The icons and their numbers shrink or grow together, and it stays against the
-hotbar or its corner.
+125% and 150%; it starts at 80%. The icons and their numbers shrink or grow together, and it
+stays against the hotbar or its corner.
 
 ### Enchantment Hints: under the pointer, beside the item
 

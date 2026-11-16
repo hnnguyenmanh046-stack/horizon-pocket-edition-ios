@@ -334,7 +334,7 @@ impl Game<'_> {
         let voice = std::mem::take(&mut tc.voice_requested);
         let waypoints = std::mem::take(&mut tc.waypoints_requested);
         let add_waypoint = std::mem::take(&mut tc.add_waypoint_requested);
-        // Zoomed for as long as a finger is on the button, in play.
+        // Zoomed while the button says so (tapped on, or a finger on it), in play.
         let zoom = tc.zoom_held() && !in_menu && !editing && self.focused;
         if let Some(held_use) = tap {
             if self.pick_entity_hit().is_some()

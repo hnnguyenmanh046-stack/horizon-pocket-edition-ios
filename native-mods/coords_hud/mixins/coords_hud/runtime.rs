@@ -54,12 +54,18 @@ pub fn shown_label(shown: bool) -> String {
     format!("Shown: {}", if shown { "ON" } else { "OFF" })
 }
 
+/// Where the box is until the player says: 58 from the top, under the touch
+/// controls' hub button and clear of it (Horizon PE).
+pub const DEFAULT_Y: i32 = 58;
+
 /// The stored `y` value: the box's height from the top of the screen in GUI
-/// pixels; none (missing, `auto`, or not a number) is the corner's own place.
+/// pixels; none (`auto`, or not a number) is the corner's own place. Never
+/// stored: `DEFAULT_Y`.
 pub fn read_y(stored: Option<String>) -> Option<i32> {
-    stored
-        .and_then(|v| v.trim().parse::<i32>().ok())
-        .map(|y| y.max(0))
+    match stored {
+        None => Some(DEFAULT_Y),
+        Some(v) => v.trim().parse::<i32>().ok().map(|y| y.max(0)),
+    }
 }
 
 /// What to store for a height.
@@ -185,8 +191,8 @@ mod tests {
     }
 
     #[test]
-    fn the_height_is_automatic_until_set_and_says_where_it_is() {
-        assert_eq!(read_y(None), None);
+    fn the_height_starts_at_58_and_says_where_it_is() {
+        assert_eq!(read_y(None), Some(58));
         assert_eq!(read_y(Some("auto".into())), None);
         assert_eq!(read_y(Some("37\n".into())), Some(37));
         assert_eq!(read_y(Some("-4".into())), Some(0));

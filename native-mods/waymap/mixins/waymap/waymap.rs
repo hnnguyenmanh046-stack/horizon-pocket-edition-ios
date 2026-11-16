@@ -691,7 +691,8 @@ impl Default for State {
             settings_loaded: false,
             markers: true,
             labels: true,
-            panel: true,
+            // Horizon PE: the list on the HUD starts off (the mod's own: on).
+            panel: false,
             mode: Mode::Closed,
             filter: Filter::All,
             scroll: 0,
@@ -1882,7 +1883,7 @@ fn load_settings(game: &Game<'_>) {
         }
         s.markers = setting_bool(markers.as_deref(), true);
         s.labels = setting_bool(labels.as_deref(), true);
-        s.panel = setting_bool(panel.as_deref(), true);
+        s.panel = setting_bool(panel.as_deref(), false);
         s.settings_loaded = true;
     });
 }

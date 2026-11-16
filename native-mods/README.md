@@ -26,13 +26,16 @@ edition is built from exactly these sources.
 
 ## Changed here
 
-Six of them are not as their authors released them. Every change is marked "Horizon PE" in the
+Nine of them are not as their authors released them. Every change is marked "Horizon PE" in the
 source it is in.
 
 | Mod | Change |
 | --- | --- |
-| Coordinates HUD | The box's height on the screen is a setting (`y`): the settings page's Height and Move buttons, and `/coords y <number>` or `/coords y auto` |
-| Armor Status | A Size setting (50% to 150%); it starts left of the hotbar without its box (the mod's own: bottom right, with it) |
+| Coordinates HUD | The box's height on the screen is a setting (`y`): the settings page's Height and Move buttons, and `/coords y <number>` or `/coords y auto`. It starts 58 from the top (the mod's own: the corner) |
+| Armor Status | A Size setting (50% to 150%), starting at 80%; it starts left of the hotbar without its box (the mod's own: bottom right, with it) |
+| Zoom | The starting zoom is 6x (the mod's own: 4x) |
+| Waymap | The list panel on the HUD starts off (the mod's own: on) |
+| SmartF3 | Its copy of the game's HUD (`smartf3_hud`) has every step the game's has: the mod's own left out the touch controls, so F3 took every button off a phone's screen |
 | Enchantment Hints | The hints are added in the item tooltip's hook point (`native_tooltip`) instead of `stations::Game::stack_tooltip`, so every tooltip has them, the one under the pointer too |
 | TreeFall | Largest tree starts at 2048 logs (the mod's own: 256) |
 | Status Effect HUD | It starts bottom left (the mod's own: top right) |

@@ -34,12 +34,13 @@ pub struct Settings {
 }
 
 impl Settings {
-    /// From the stored values (`get` reads one key's file); the extra's
-    /// defaults (4x, smooth, slower turning) for the ones missing.
+    /// From the stored values (`get` reads one key's file); for the ones
+    /// missing, the extra's defaults (smooth, slower turning) and, Horizon PE,
+    /// 6x (the extra's: 4x).
     pub fn read(get: impl Fn(&str) -> Option<String>) -> Self {
         let level = get("level")
             .and_then(|v| v.trim().parse::<u8>().ok())
-            .map_or(4, |v| v.clamp(2, MAX as u8));
+            .map_or(6, |v| v.clamp(2, MAX as u8));
         let flag = |key: &str| get(key).is_none_or(|v| v.trim() != "false");
         Self {
             level,
@@ -152,7 +153,7 @@ mod tests {
         assert_eq!(
             Settings::read(stored(&[])),
             Settings {
-                level: 4,
+                level: 6,
                 smooth: true,
                 sensitivity: true
             }
@@ -207,9 +208,9 @@ mod tests {
         assert_eq!(view(), None, "not while a screen is open");
         assert!(!wheel(1.0));
         key(true, true, &none);
-        assert_eq!(view(), Some((4.0, true, 0.25)));
+        assert_eq!(view(), Some((6.0, true, 1.0 / 6.0)));
         assert!(wheel(1.0));
-        assert_eq!(view().map(|v| v.0), Some(5.0));
+        assert_eq!(view().map(|v| v.0), Some(7.5));
         assert!(wheel(40.0));
         assert_eq!(view().map(|v| v.0), Some(10.0));
         key(false, false, &none);
