@@ -1278,6 +1278,14 @@ impl Game<'_> {
         }
     }
 
+    /// The shared world in play, by its id in the list: the same for whoever hosts it and
+    /// everyone who joins. For the Mods edition's `native_world_key` (game/mod_keys.rs), so
+    /// not called by a build without it.
+    #[allow(dead_code)]
+    pub(super) fn shared_world_id(&self) -> Option<&str> {
+        self.shared.as_ref().map(|shared| shared.id.as_str())
+    }
+
     /// The pause menu's Friends button in a shared world.
     pub(super) fn shared_active(&self) -> bool {
         self.shared.is_some()

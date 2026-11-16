@@ -149,6 +149,8 @@ fn trim(v: f64) -> String {
 enum ContextKey {
     Multiplayer(String),
     Singleplayer(String),
+    /// Horizon PE: a shared world, by its id: the same list whoever hosts it.
+    Shared(String),
 }
 
 impl ContextKey {
@@ -162,6 +164,10 @@ impl ContextKey {
                 let safe = folder.replace(['/', '\\'], "_");
                 format!("world_{safe}.txt")
             }
+            ContextKey::Shared(id) => {
+                let safe = id.replace([':', '/', '\\'], "_");
+                format!("shared_{safe}.txt")
+            }
         }
     }
 
@@ -169,6 +175,7 @@ impl ContextKey {
         match self {
             ContextKey::Multiplayer(addr) => format!("Server: {addr}"),
             ContextKey::Singleplayer(folder) => format!("World: {folder}"),
+            ContextKey::Shared(_) => "Shared world".to_owned(),
         }
     }
 }
@@ -744,6 +751,16 @@ impl State {
         match &self.context {
             Some(ctx) => {
                 let path = self.dir.as_ref().unwrap().join(ctx.file_name());
+                // Horizon PE: every world of this device used to share one list
+                // (`server_local.txt`, see `current_context`). The first world
+                // opened that has no list of its own yet takes it over; the
+                // others start empty.
+                if !matches!(ctx, ContextKey::Multiplayer(_)) && !path.exists() {
+                    let shared_by_all = self.dir.as_ref().unwrap().join(LOCAL_FILE);
+                    if shared_by_all.exists() {
+                        let _ = fs::rename(&shared_by_all, &path);
+                    }
+                }
                 match WaypointFileIO::load_file(&path) {
                     Ok(waypoints) => {
                         self.waypoints = waypoints;
@@ -1866,14 +1883,23 @@ fn draw_panel(game: &Game<'_>, batch: &mut HudBatch, corners: &mut Corners, dim:
 
 // ---- Context, settings and lifecycle ---------------------------------------
 
+/// Horizon PE: the list every world of this device shared (the game joins
+/// its own worlds over a connection whose address is "local").
+const LOCAL_FILE: &str = "server_local.txt";
+
+/// Horizon PE: each world has its own waypoints. The game says which world
+/// is open (`native_world_key`): a world of this device by its folder, a
+/// shared world by its id, a server by its address. (The mod's own went by
+/// the connection's address first, which is "local" for every world of this
+/// device, so they all had one list; and by the world's name, which two
+/// worlds can share.)
 fn current_context(game: &Game<'_>) -> Option<ContextKey> {
-    if let Some(remote) = game.remote.as_ref() {
-        Some(ContextKey::Multiplayer(remote.session.address.clone()))
-    } else {
-        game.integrated
-            .as_ref()
-            .map(|i| ContextKey::Singleplayer(i.world_name.clone()))
-    }
+    let (kind, name) = game.native_world_key()?;
+    Some(match kind {
+        "shared" => ContextKey::Shared(name),
+        "world" => ContextKey::Singleplayer(name),
+        _ => ContextKey::Multiplayer(name),
+    })
 }
 
 fn update_context(game: &Game<'_>) {

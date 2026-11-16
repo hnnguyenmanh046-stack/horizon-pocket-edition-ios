@@ -74,6 +74,37 @@ impl Game<'_> {
         }
     }
 
+    /// Which world is open, for a mod that keeps something for each (Waymap's waypoints):
+    /// the kind and a name that is its alone. A shared world is ("shared", its id), the same
+    /// on every phone and whoever hosts it; a world of this device ("world", its folder in
+    /// `saves/`, where two worlds with one name still differ); a server ("server", its
+    /// address). None when no world is open.
+    ///
+    /// The game joins its own worlds over a connection too, whose address is "local" for
+    /// every one of them: a mod that went by the address kept one list for all of them.
+    /// Called by the mods built into this edition, so not by a build without them.
+    #[allow(dead_code)]
+    pub(super) fn native_world_key(&self) -> Option<(&'static str, String)> {
+        if self.integrated.is_none() && self.remote.is_none() {
+            return None;
+        }
+        if let Some(id) = self.shared_world_id() {
+            return Some(("shared", id.to_owned()));
+        }
+        if let Some(server) = &self.integrated {
+            // A server started without a save folder of its own goes by its world's name.
+            let name = if server.folder.is_empty() {
+                &server.world_name
+            } else {
+                &server.folder
+            };
+            return Some(("world", name.clone()));
+        }
+        let address = &self.remote.as_ref()?.session.address;
+        // The game's own world, on its way out: no world of its own any more.
+        (address != "local").then(|| ("server", address.clone()))
+    }
+
     /// Whether the open screen is a mod's own with one of its text fields being typed in.
     pub(super) fn mod_screen_typing(&mut self) -> bool {
         if self.screen != Screen::Mod {
