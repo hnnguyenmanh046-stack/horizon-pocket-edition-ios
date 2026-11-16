@@ -311,7 +311,7 @@ them off, or change its settings, in **Options > Mods**.
 
 | Button | Where | What it does | On a controller |
 | --- | --- | --- | --- |
-| **Magnifying glass** | Left edge, under the **H** button | Hold to zoom in | Hold **View** |
+| **Magnifying glass** | Left of the top row | Tap to zoom in, tap again to zoom out (or hold) | Hold **View** |
 | **Pin with lines** | Right of the top row | Opens the list of waypoints | D-pad **left** |
 | **Pin with a plus** | Right of that | Adds a waypoint where you stand | D-pad **down** |
 
