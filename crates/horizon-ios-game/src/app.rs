@@ -194,7 +194,8 @@ impl App {
     }
 
     /// After each callback: a game that asked to end (Quit) or to start again ends here, saving
-    /// what it holds, as the desktop's does when its loop returns.
+    /// what it holds, as the desktop's does when its loop returns. One that asked to end closes
+    /// the app with it.
     fn after_callback(&mut self, event_loop: &ActiveEventLoop) {
         let exit = winit::platform::ios::take_exit_request();
         let restart = horizon_client::ios::take_restart();
@@ -214,6 +215,13 @@ impl App {
         }
         if restart {
             self.start_game(event_loop);
+        } else {
+            // Quit Game: the game is over and saved, and iOS has no way for an app to ask to
+            // be closed, so the process ends here. Without this the app stayed open on an
+            // empty screen until it was swiped away.
+            log::info!("Horizon: the game ended (Quit Game): closing the app");
+            log::logger().flush();
+            std::process::exit(0);
         }
     }
 
