@@ -203,8 +203,7 @@ struct Mic {
 }
 
 /// Makes a pipe to the connection for a microphone treated as the options say.
-type MakePipe =
-    Box<dyn Fn(CaptureOptions) -> std::result::Result<Arc<CapturePipe>, String> + Send>;
+type MakePipe = Box<dyn Fn(CaptureOptions) -> std::result::Result<Arc<CapturePipe>, String> + Send>;
 
 /// How the microphone is to be opened.
 struct Plan {
@@ -358,7 +357,6 @@ struct Watched {
 /// turning it off and on again doesn't make the sound hiccup twice.
 #[cfg(target_os = "ios")]
 const SESSION_KEPT_FOR: Duration = Duration::from_secs(15);
-
 
 /// One player in voice chat's reach, for the screens.
 #[derive(Debug, Clone, PartialEq)]

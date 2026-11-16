@@ -265,9 +265,7 @@ impl Jitter {
                 && over
                 && skipped < 2
                 && packet.flags & END == 0
-                && (quiet
-                    || self.since_skip >= LOUD_EVERY
-                    || self.held.len() > self.target + FAR);
+                && (quiet || self.since_skip >= LOUD_EVERY || self.held.len() > self.target + FAR);
             if !skip {
                 break Some(packet);
             }
