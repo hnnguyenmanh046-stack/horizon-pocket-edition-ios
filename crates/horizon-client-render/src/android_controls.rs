@@ -596,10 +596,7 @@ impl TouchControls {
                 .filter(|(control, _)| {
                     !matches!(
                         control,
-                        Control::Zoom
-                            | Control::Voice
-                            | Control::Waypoints
-                            | Control::AddWaypoint
+                        Control::Zoom | Control::Voice | Control::Waypoints | Control::AddWaypoint
                     ) || self.visible(*control)
                 })
                 .collect();
