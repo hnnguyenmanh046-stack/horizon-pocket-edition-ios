@@ -3,10 +3,15 @@
 //! The connection loses nothing and keeps order, but it delivers in bursts (a frame every
 //! 20 ms leaves, three arrive together), and the sound output asks for sound at its own steady
 //! pace. So a few frames are held before a stretch of speech starts to play ([`Jitter::target`]):
-//! as few as the connection's bursts allow, more when they grow, fewer again when they calm.
-//! When too much is held (the connection stalled, then gave everything at once) the oldest is
-//! skipped, so the voice is never far behind; when nothing is there in time, the codec carries
-//! the voice on for a moment ([`crate::codec::Decoder::conceal`]).
+//! as few as the connection's usual bursts allow, more when they grow, fewer again when they
+//! calm. A hiccup that happens once isn't a reason to hold more: it is over, and holding more
+//! after it would only put the voice further behind.
+//!
+//! When more is held than is meant to be (the connection stalled, then gave everything at
+//! once), the voice catches up where it isn't heard: the pauses between words are skipped
+//! first, a frame of speech only now and then, and a real backlog at once. When nothing is
+//! there in time, the codec carries the voice on for a moment
+//! ([`crate::codec::Decoder::conceal`]).
 //!
 //! Frames are decoded when the output asks for them, never ahead.
 use crate::{
@@ -17,18 +22,27 @@ use crate::{
 };
 use std::{collections::VecDeque, time::Duration};
 
-/// Frames held before speech plays, at least: 40 ms.
-pub const MIN_TARGET: usize = 2;
-/// And at most: 400 ms.
-pub const MAX_TARGET: usize = 20;
-/// More than this held (a second) is a stall's backlog: all but the target is dropped.
-const MAX_HELD: usize = 50;
-/// Frames over the target before the oldest are skipped.
+/// Frames held before speech plays, at least: 60 ms, what a phone's Wi-Fi or mobile network
+/// needs not to run dry between two arrivals.
+pub const MIN_TARGET: usize = 3;
+/// And at most: 200 ms. Past that a conversation is talked over, and what the connection
+/// can't bring in time is better covered than waited for.
+pub const MAX_TARGET: usize = 10;
+/// More than this held (0.8 s) is a stall's backlog: all but the target is dropped.
+const MAX_HELD: usize = 40;
+/// Frames over the target before the voice starts to catch up.
 const SLACK: usize = 3;
+/// Frames over the target that are a backlog: caught up at once, heard or not.
+const FAR: usize = 10;
+/// A frame this quiet (RMS) is a pause between words: skipping it isn't heard.
+const QUIET: f32 = 0.01;
+/// While catching up through speech, one frame in this many is skipped: a tenth faster,
+/// which is hard to hear.
+const LOUD_EVERY: u32 = 10;
 /// Frames the codec carries a voice on for when nothing came.
 const CONCEAL: u32 = 3;
-/// Frames played without a gap before the target may come down by one: a second.
-const CALM: u32 = 50;
+/// Frames played without a gap before the target may come down: two seconds.
+const CALM: u32 = 100;
 /// The arrivals the bursts are measured over: three seconds of speech.
 const WINDOW: usize = 150;
 /// A stretch's first frames come together (the sender keeps a moment from before the gate
@@ -63,8 +77,12 @@ pub struct Jitter {
     at: usize,
     concealed: u32,
     calm: u32,
-    /// Skipping ahead, until no more is held than the target.
+    /// Skipping ahead, until no more is held than the target; frames played since a frame
+    /// of speech was last skipped.
     catching: bool,
+    since_skip: u32,
+    /// The frames to hold for the bursts seen lately, worked out as frames arrive.
+    wanted: usize,
     /// The last frame taken in.
     last: Option<u16>,
     /// Frames taken in since the stretch began.
@@ -89,6 +107,8 @@ impl Jitter {
             concealed: 0,
             calm: 0,
             catching: false,
+            since_skip: 0,
+            wanted: MIN_TARGET,
             last: None,
             since_start: 0,
             base: None,
@@ -115,6 +135,11 @@ impl Jitter {
         if start {
             self.since_start = 0;
             self.base = None;
+            // A new stretch with nothing playing: it starts as close behind as the bursts
+            // seen lately allow, whatever an earlier one had grown to.
+            if self.held.is_empty() && self.state == State::Idle {
+                self.target = self.wanted;
+            }
         }
         self.since_start += 1;
         if self.since_start == TIMED_FROM {
@@ -127,7 +152,8 @@ impl Jitter {
                 self.late.pop_front();
             }
             // Bursts grew: hold more from now on.
-            self.target = self.target.max(self.wanted());
+            self.wanted = self.wanted_now();
+            self.target = self.target.max(self.wanted);
         }
         let mut data = [0u8; MAX_PACKET];
         data[..opus.len()].copy_from_slice(opus);
@@ -149,13 +175,18 @@ impl Jitter {
         }
     }
 
-    /// The frames to hold for the bursts seen lately.
-    fn wanted(&self) -> usize {
-        let (Some(most), Some(least)) = (self.late.iter().max(), self.late.iter().min()) else {
+    /// The frames to hold for the bursts seen lately: enough for nine arrivals in ten. The
+    /// latest tenth are hiccups: what happens once is covered when it happens, not waited
+    /// for ever after.
+    fn wanted_now(&self) -> usize {
+        if self.late.is_empty() {
             return MIN_TARGET;
-        };
-        let spread = usize::try_from(most.saturating_sub(*least)).unwrap_or(0);
-        (spread.div_ceil(FRAME_MS as usize) + 1).clamp(MIN_TARGET, MAX_TARGET)
+        }
+        let mut sorted: Vec<i64> = self.late.iter().copied().collect();
+        sorted.sort_unstable();
+        let usual = sorted[(sorted.len() - 1) * 9 / 10];
+        let spread = usize::try_from(usual.saturating_sub(sorted[0])).unwrap_or(0);
+        (spread.div_ceil(FRAME_MS as usize) + 2).clamp(MIN_TARGET, MAX_TARGET)
     }
 
     /// Fills `out` with this speaker's voice at 48 kHz (silence when they don't speak).
@@ -213,22 +244,41 @@ impl Jitter {
     }
 
     fn play(&mut self) {
-        // Too far behind: skip the oldest (decoded all the same, so the codec keeps its
-        // thread), two a frame at most, until no more is held than is meant to be.
+        // More held than is meant to be: the voice catches up until it isn't.
         if self.held.len() > self.target + SLACK {
             self.catching = true;
         } else if self.held.len() <= self.target {
             self.catching = false;
         }
         let mut skipped = 0;
-        while self.catching && self.held.len() > self.target && skipped < 2 {
-            if let Some(packet) = self.held.pop_front() {
-                self.decode(&packet);
+        let packet = loop {
+            let Some(packet) = self.held.pop_front() else {
+                break None;
+            };
+            self.decode(&packet);
+            // Skipped (decoded all the same, so the codec keeps its thread): a pause between
+            // words, a frame of speech now and then, anything while far behind. Two a frame
+            // at most, and never a stretch's last.
+            let over = self.held.len() > self.target;
+            let quiet = rms(&self.pcm) < QUIET;
+            let skip = self.catching
+                && over
+                && skipped < 2
+                && packet.flags & END == 0
+                && (quiet
+                    || self.since_skip >= LOUD_EVERY
+                    || self.held.len() > self.target + FAR);
+            if !skip {
+                break Some(packet);
+            }
+            if !quiet {
+                self.since_skip = 0;
             }
             skipped += 1;
             self.skipped += 1;
-        }
-        let Some(packet) = self.held.pop_front() else {
+        };
+        self.since_skip = self.since_skip.saturating_add(1);
+        let Some(packet) = packet else {
             // Nothing came in time: the codec carries the voice on for a moment, and more
             // is held from now on; then silence until frames come again.
             if self.concealed < CONCEAL {
@@ -252,13 +302,11 @@ impl Jitter {
             self.calm = 0;
             // The bursts calmed: hold less, half the way down at a time (the catch-up
             // brings the voice that much closer).
-            let wanted = self.wanted();
-            if wanted < self.target {
-                self.target -= ((self.target - wanted) / 2).max(1);
+            if self.wanted < self.target {
+                self.target -= ((self.target - self.wanted) / 2).max(1);
                 self.catching = true;
             }
         }
-        self.decode(&packet);
         self.level = rms(&self.pcm);
         if packet.flags & END != 0 {
             self.state = State::Idle;
@@ -318,6 +366,7 @@ impl Jitter {
         self.at = FRAME;
         self.concealed = 0;
         self.catching = false;
+        self.since_skip = 0;
         self.level = 0.0;
         self.last = None;
         self.base = None;
@@ -432,7 +481,7 @@ mod tests {
         // Playing within 100 ms of the first arrival, then no gap until the end.
         assert_eq!(line.gaps(240, 4_100), 0, "gaps in a steady voice");
         assert!(amplitude_at(&line.heard[48 * 400..48 * 4_000], 440.0) > 0.4);
-        // Never far behind: the two frames held and the one playing.
+        // Never far behind: the frames held and the one playing.
         assert!(line.delays.iter().all(|d| *d <= 80), "{:?}", line.delays);
         assert_eq!(line.jitter.target(), MIN_TARGET);
         // It ended: nothing more, and nothing held.
@@ -474,15 +523,62 @@ mod tests {
         assert!(line.gaps(2_200, 2_500) > 5);
         line.run(20_000);
         // Never more than the most held behind, and within half a second of the stall's end
-        // no more than half a second behind.
+        // no more than the most a voice is ever meant to be.
         let most = line.delays.iter().max().unwrap();
         assert!(*most <= (MAX_HELD as u32 + 2) * 20, "{most} ms behind");
-        assert!(line.delays[225..].iter().all(|d| *d <= 500));
+        assert!(
+            line.delays[225..]
+                .iter()
+                .all(|d| *d <= (MAX_TARGET + FAR + 1) as u32 * 20),
+            "{:?}",
+            &line.delays[225..300]
+        );
         assert!(line.jitter.skipped() > 40);
         // Whole again right after, and close again once it has been calm a while.
         assert_eq!(line.gaps(4_200, 19_900), 0);
         assert!(line.delays[900..].iter().all(|d| *d <= 80));
         assert_eq!(line.jitter.target(), MIN_TARGET);
+    }
+
+    /// One hiccup (a packet a quarter of a second late, once) is covered when it happens and
+    /// doesn't put the voice further behind afterwards; and what piled up behind it is caught
+    /// up in the pauses, where it isn't heard.
+    #[test]
+    fn a_hiccup_is_covered_and_not_waited_for_ever_after() {
+        let (mut line, mut encoder) = line();
+        // Sentences of a second with pauses of 300 ms, steady but for one stall of 260 ms.
+        for sentence in 0..10u64 {
+            let from = sentence * 1_300;
+            line.speak(
+                &mut encoder,
+                (sentence * 100) as u16,
+                from,
+                50,
+                true,
+                move |sent| {
+                    if (3_200..3_460).contains(&sent) {
+                        3_460 + 30
+                    } else {
+                        sent + 30
+                    }
+                },
+            );
+        }
+        line.run(13_500);
+        // The stall is heard as a moment's gap in that sentence, and nowhere else.
+        assert_eq!(line.gaps(200, 900), 0);
+        for sentence in 4..10u64 {
+            let from = sentence * 1_300;
+            assert_eq!(line.gaps(from + 200, from + 900), 0, "sentence {sentence}");
+        }
+        // No further behind afterwards than before: from the next sentence on, as close as
+        // a steady connection is.
+        assert_eq!(line.jitter.target(), MIN_TARGET);
+        assert!(
+            line.delays[(5_200 / 20)..].iter().all(|d| *d <= 80),
+            "{:?}",
+            &line.delays[(5_200 / 20)..(5_200 / 20) + 60]
+        );
     }
 
     #[test]

@@ -184,28 +184,163 @@ impl Drop for Tone {
     }
 }
 
-/// What feeds the microphone's pipe: held for as long as the microphone is live (dropping
-/// it stops the device).
-#[allow(dead_code)]
-enum Source {
-    /// The checks' tone.
-    Tone(Tone),
-    /// An iPhone's or iPad's microphone, through the audio session.
-    #[cfg(target_os = "ios")]
-    Phone(phone::Capture),
-    /// The microphone the game's sound library opened.
-    #[cfg(not(target_os = "ios"))]
-    Device(horizon_client::audio_capture::Capture),
-}
+/// The device that feeds the microphone's pipe: held by the microphone's own thread for as
+/// long as the microphone is live (dropping it stops the device).
+#[cfg(target_os = "ios")]
+type Device = phone::Capture;
+#[cfg(not(target_os = "ios"))]
+type Device = horizon_client::audio_capture::Capture;
 
-/// The microphone while it is live: its pipe to the connection, and what feeds it.
+/// The microphone while it is live: its pipe to the connection.
 struct Mic {
     pipe: Arc<CapturePipe>,
-    _source: Source,
+    /// The checks' tone, when that is what feeds it.
+    _tone: Option<Tone>,
     /// Where sound came out when it started: on another output the microphone is started
     /// again (the speaker needs the echo kept out, headphones don't).
     #[cfg(target_os = "ios")]
     output: Option<phone::Output>,
+}
+
+/// Makes a pipe to the connection for a microphone treated as the options say.
+type MakePipe =
+    Box<dyn Fn(CaptureOptions) -> std::result::Result<Arc<CapturePipe>, String> + Send>;
+
+/// How the microphone is to be opened.
+struct Plan {
+    make: MakePipe,
+    /// The microphone chosen (the settings' `mic`).
+    mic: String,
+    noise_filter: bool,
+    #[cfg(target_os = "ios")]
+    echo: horizon_voice::settings::Echo,
+    #[cfg(target_os = "ios")]
+    playout: Arc<Playout>,
+}
+
+/// The microphone, opened.
+struct Opened {
+    pipe: Arc<CapturePipe>,
+    #[cfg(target_os = "ios")]
+    output: Option<phone::Output>,
+}
+
+/// What the microphone's thread is asked to do.
+enum Job {
+    Open(Plan),
+    /// Let go of the microphone, and of this pipe with it (its last hold is dropped there,
+    /// where waiting for its thread to end holds nothing up).
+    Close(Option<Arc<CapturePipe>>),
+    /// The audio session back to playing only.
+    #[cfg(target_os = "ios")]
+    Rest,
+}
+
+/// The microphone's own thread. Opening and closing a microphone, and on an iPhone
+/// switching the audio session between playing and recording, are calls into the system
+/// that take a moment (a noticeable one on a phone): made here, the game's frames never wait
+/// for them. The device is opened, held and dropped on this thread alone.
+struct Worker {
+    jobs: std::sync::mpsc::Sender<Job>,
+    opened: std::sync::mpsc::Receiver<std::result::Result<Opened, String>>,
+}
+
+impl Worker {
+    fn start() -> Option<Self> {
+        let (jobs, asked) = std::sync::mpsc::channel::<Job>();
+        let (answer, opened) = std::sync::mpsc::channel();
+        std::thread::Builder::new()
+            .name("horizon-voice-device".into())
+            .spawn(move || {
+                let mut device: Option<Device> = None;
+                for job in asked {
+                    match job {
+                        Job::Open(plan) => {
+                            // One microphone at a time: the one before goes first.
+                            device = None;
+                            let _ = answer.send(match open(plan) {
+                                Ok((opened, held)) => {
+                                    device = Some(held);
+                                    Ok(opened)
+                                }
+                                Err(e) => Err(e),
+                            });
+                        }
+                        Job::Close(pipe) => {
+                            device = None;
+                            drop(pipe);
+                        }
+                        #[cfg(target_os = "ios")]
+                        Job::Rest => phone::end_recording(),
+                    }
+                }
+                drop(device);
+            })
+            .ok()?;
+        Some(Self { jobs, opened })
+    }
+}
+
+/// The iPhone's microphone: the audio session set to record from the one chosen, and the
+/// echo of the others' voices kept out when they come from the speaker (the system's echo
+/// canceller, or failing that the microphone turned down while they talk).
+#[cfg(target_os = "ios")]
+fn open(plan: Plan) -> std::result::Result<(Opened, Device), String> {
+    use horizon_voice::settings::Echo;
+    let choice = match plan.mic.as_str() {
+        "builtin" => phone::Choice::BuiltIn,
+        "wired" => phone::Choice::Wired,
+        "bluetooth" => phone::Choice::Bluetooth,
+        _ => phone::Choice::Automatic,
+    };
+    phone::begin_recording(choice)?;
+    let output = phone::route().map(|r| r.output);
+    let open_air = output.is_none_or(|o| o.open_air());
+    let (system, guard) = match plan.echo {
+        Echo::Auto => (open_air, false),
+        Echo::System => (true, false),
+        Echo::Guard => (false, open_air),
+        Echo::Off => (false, false),
+    };
+    let attempt = |system: bool, guard: bool| -> std::result::Result<(Opened, Device), String> {
+        let pipe = (plan.make)(CaptureOptions {
+            echo_guard: guard.then(|| plan.playout.clone()),
+            // The system's voice processing levels the microphone itself, and filters its
+            // noise.
+            level_as_is: system,
+            noise_filter: plan.noise_filter && !system,
+        })?;
+        let feed = pipe.clone();
+        let capture = phone::start_capture(
+            system,
+            Box::new(move |samples, channels, rate| feed.feed(samples, channels, rate)),
+        )?;
+        Ok((Opened { pipe, output }, capture))
+    };
+    attempt(system, guard).or_else(|e| {
+        if !system {
+            return Err(e);
+        }
+        // Without the system's echo canceller: the microphone turned down while the others
+        // are heard on the speaker.
+        log::warn!("Voice chat: the system's voice processing didn't start ({e})");
+        attempt(false, open_air)
+    })
+}
+
+/// The microphone the game's sound library opens (a desktop, Android).
+#[cfg(not(target_os = "ios"))]
+fn open(plan: Plan) -> std::result::Result<(Opened, Device), String> {
+    let pipe = (plan.make)(CaptureOptions {
+        noise_filter: plan.noise_filter,
+        ..CaptureOptions::default()
+    })?;
+    let feed = pipe.clone();
+    let capture = horizon_client::audio_capture::open(
+        &plan.mic,
+        Box::new(move |samples, channels, rate| feed.feed(samples, channels, rate)),
+    )?;
+    Ok((Opened { pipe }, capture))
 }
 
 /// The sound output being watched after the system touched the audio session: when it stops
@@ -224,8 +359,6 @@ struct Watched {
 #[cfg(target_os = "ios")]
 const SESSION_KEPT_FOR: Duration = Duration::from_secs(15);
 
-/// Makes a pipe to the connection for a microphone treated as the options say.
-type MakePipe<'a> = &'a dyn Fn(CaptureOptions) -> std::result::Result<Arc<CapturePipe>, String>;
 
 /// One player in voice chat's reach, for the screens.
 #[derive(Debug, Clone, PartialEq)]
@@ -279,6 +412,17 @@ pub(super) struct Voice {
     held: Option<Held>,
     first: usize,
     note: Option<(String, Instant)>,
+    /// The microphone's own thread, once a microphone was ever asked for, and whether it
+    /// is opening one now.
+    worker: Option<Worker>,
+    opening: bool,
+    /// Who is talking, for the HUD: looked up a few times a second, not every frame.
+    talkers: Vec<String>,
+    talkers_at: Option<Instant>,
+    /// Where sound comes out, for the microphones to offer: asked of the system once a
+    /// second at most.
+    #[cfg(target_os = "ios")]
+    route_seen: std::cell::Cell<Option<(Instant, Option<phone::Output>)>>,
     /// The player was asked for the microphone this session (the system asks once ever).
     #[cfg(target_os = "ios")]
     asked: bool,
@@ -332,6 +476,12 @@ impl Voice {
             held: None,
             first: 0,
             note: None,
+            worker: None,
+            opening: false,
+            talkers: Vec::new(),
+            talkers_at: None,
+            #[cfg(target_os = "ios")]
+            route_seen: std::cell::Cell::new(None),
             #[cfg(target_os = "ios")]
             asked: false,
             told_switch: false,
@@ -469,9 +619,7 @@ impl Voice {
             self.settings.mic = name.to_owned();
             self.unsaved.get_or_insert_with(Instant::now);
             // The microphone in use changes with the choice.
-            if self.mic.is_some() {
-                self.mic = None;
-            }
+            self.close_mic();
         }
     }
 
@@ -484,11 +632,55 @@ impl Voice {
             return;
         }
         self.unsaved = None;
-        if let Err(e) =
-            horizon_shared_worlds::scan::write_atomic(&file(), self.settings.to_json().as_bytes())
+        let text = self.settings.to_json();
+        let write = move || {
+            if let Err(e) = horizon_shared_worlds::scan::write_atomic(&file(), text.as_bytes()) {
+                log::warn!("Voice chat: its settings weren't written: {e}");
+            }
+        };
+        // Written to the disk for good (synced): not something a frame waits for, unless
+        // the game is closing.
+        if now {
+            write();
+        } else if let Err(e) = std::thread::Builder::new()
+            .name("horizon-voice-save".into())
+            .spawn(write)
         {
             log::warn!("Voice chat: its settings weren't written: {e}");
         }
+    }
+
+    /// Asks the microphone's thread to let go of the microphone, and of `pipe` with it.
+    fn close(&mut self, pipe: Option<Arc<CapturePipe>>) {
+        match &self.worker {
+            Some(worker) => {
+                if worker.jobs.send(Job::Close(pipe)).is_err() {
+                    self.worker = None;
+                }
+            }
+            // No device was ever opened: only a pipe (the checks' tone's) to drop.
+            None => drop(pipe),
+        }
+    }
+
+    /// The microphone goes off, at once as far as anyone hears (the host stops passing it
+    /// on as soon as it is told); the device is let go on its own thread. True when it was
+    /// live.
+    fn close_mic(&mut self) -> bool {
+        let Some(mic) = self.mic.take() else {
+            return false;
+        };
+        let pipe = mic.pipe.clone();
+        // The tone's thread, and this hold of the pipe.
+        drop(mic);
+        self.close(Some(pipe));
+        true
+    }
+
+    /// The microphone is meant to be on (it is, or is being opened): what the button and
+    /// the page show, the moment it is asked for.
+    pub(super) fn mic_on(&self) -> bool {
+        self.mic_wanted
     }
 
     /// The sound output hears the voices, or doesn't.
@@ -514,7 +706,7 @@ impl Voice {
 
     /// Forgets the connection (it ended, or the session did).
     fn disconnected(&mut self) {
-        if self.mic.take().is_some() {
+        if self.close_mic() {
             self.mic_lost = Some(Instant::now());
         }
         if let Some(link) = self.link.take() {
@@ -588,7 +780,7 @@ impl Game<'_> {
             ));
         } else {
             self.voice.mic_wanted = false;
-            self.voice.mic = None;
+            self.voice.close_mic();
             self.voice.mic_lost = None;
             self.voice_line(tr("off", "Voice chat is off."));
         }
@@ -602,7 +794,7 @@ impl Game<'_> {
         self.voice.mic_wanted = live;
         self.voice.mic_lost = None;
         if !live {
-            self.voice.mic = None;
+            self.voice.close_mic();
         }
     }
 
@@ -636,28 +828,94 @@ impl Game<'_> {
         let Some(sender) = self.voice.sender.clone() else {
             return;
         };
-        let make = move |options: CaptureOptions| {
+        let make: MakePipe = Box::new(move |options: CaptureOptions| {
             let sender = sender.clone();
             CapturePipe::start(Box::new(move |message| sender.send(message)), options)
                 .map(Arc::new)
                 .map_err(|e| e.to_string())
+        });
+        // The checks' tone is no device: nothing to wait for.
+        if let Some(hz) = self.voice.tone {
+            match make(CaptureOptions::default()) {
+                Ok(pipe) => {
+                    self.voice.mic = Some(Mic {
+                        _tone: Some(Tone::start(pipe.clone(), hz)),
+                        pipe,
+                        #[cfg(target_os = "ios")]
+                        output: None,
+                    });
+                }
+                Err(e) => self.voice_mic_failed(&e),
+            }
+            return;
+        }
+        // The device is opened on the microphone's own thread; the game goes on meanwhile.
+        if self.voice.worker.is_none() {
+            self.voice.worker = Worker::start();
+        }
+        let plan = Plan {
+            make,
+            mic: self.voice.settings.mic.clone(),
+            noise_filter: self.voice.settings.noise_filter,
+            #[cfg(target_os = "ios")]
+            echo: self.voice.settings.echo,
+            #[cfg(target_os = "ios")]
+            playout: self.voice.playout.clone(),
         };
-        let started = match self.voice.tone {
-            Some(hz) => make(CaptureOptions::default()).map(|pipe| Mic {
-                _source: Source::Tone(Tone::start(pipe.clone(), hz)),
-                pipe,
-                #[cfg(target_os = "ios")]
-                output: None,
-            }),
-            None => self.voice_open_microphone(&make),
+        let sent = self
+            .voice
+            .worker
+            .as_ref()
+            .is_some_and(|w| w.jobs.send(Job::Open(plan)).is_ok());
+        if !sent {
+            self.voice.worker = None;
+            self.voice_mic_failed("the game couldn't start a thread for it");
+            return;
+        }
+        self.voice.opening = true;
+        #[cfg(target_os = "ios")]
+        {
+            self.voice.recording = true;
+            self.voice.idle = None;
+        }
+    }
+
+    fn voice_mic_failed(&mut self, why: &str) {
+        self.voice.mic_wanted = false;
+        self.voice_line(
+            tr("mic_failed", "The microphone couldn't be started: %s").replacen("%s", why, 1),
+        );
+    }
+
+    /// What the microphone's thread has to say: the microphone is open (and is this game's,
+    /// if it is still wanted), or couldn't be opened.
+    fn voice_mic_opened(&mut self) {
+        let Some(answer) = self
+            .voice
+            .worker
+            .as_ref()
+            .and_then(|w| w.opened.try_recv().ok())
+        else {
+            return;
         };
-        match started {
-            Ok(mic) => {
-                self.voice.mic = Some(mic);
+        self.voice.opening = false;
+        #[cfg(target_os = "ios")]
+        self.voice_watch_output();
+        match answer {
+            Ok(opened) => {
+                // Turned off again while it was being opened, or the connection went.
+                if !(self.voice.enabled && self.voice.mic_wanted && self.voice.id.is_some()) {
+                    self.voice.close(Some(opened.pipe));
+                    return;
+                }
+                self.voice.mic = Some(Mic {
+                    pipe: opened.pipe,
+                    _tone: None,
+                    #[cfg(target_os = "ios")]
+                    output: opened.output,
+                });
                 // An iPhone with its microphone live plays through the ring switch.
-                if cfg!(target_os = "ios")
-                    && !std::mem::replace(&mut self.voice.told_switch, true)
-                    && self.voice.tone.is_none()
+                if cfg!(target_os = "ios") && !std::mem::replace(&mut self.voice.told_switch, true)
                 {
                     self.voice_line(tr(
                         "ring_switch",
@@ -665,95 +923,15 @@ impl Game<'_> {
                     ));
                 }
             }
-            Err(e) => {
-                self.voice.mic_wanted = false;
-                self.voice_line(
-                    tr("mic_failed", "The microphone couldn't be started: %s")
-                        .replacen("%s", &e, 1),
-                );
-            }
+            Err(e) => self.voice_mic_failed(&e),
         }
-    }
-
-    /// The iPhone's microphone: the audio session set to record from the one chosen, and
-    /// the echo of the others' voices kept out when they come from the speaker (the
-    /// system's echo canceller, or failing that the microphone turned down while they talk).
-    #[cfg(target_os = "ios")]
-    fn voice_open_microphone(&mut self, make: MakePipe<'_>) -> std::result::Result<Mic, String> {
-        use horizon_voice::settings::Echo;
-        let choice = match self.voice.settings.mic.as_str() {
-            "builtin" => phone::Choice::BuiltIn,
-            "wired" => phone::Choice::Wired,
-            "bluetooth" => phone::Choice::Bluetooth,
-            _ => phone::Choice::Automatic,
-        };
-        phone::begin_recording(choice)?;
-        self.voice.recording = true;
-        self.voice.idle = None;
-        self.voice_watch_output();
-        let output = phone::route().map(|r| r.output);
-        let open_air = output.is_none_or(|o| o.open_air());
-        let (system, guard) = match self.voice.settings.echo {
-            Echo::Auto => (open_air, false),
-            Echo::System => (true, false),
-            Echo::Guard => (false, open_air),
-            Echo::Off => (false, false),
-        };
-        let playout = self.voice.playout.clone();
-        let noise_filter = self.voice.settings.noise_filter;
-        let attempt = |system: bool, guard: bool| -> std::result::Result<Mic, String> {
-            let pipe = make(CaptureOptions {
-                echo_guard: guard.then(|| playout.clone()),
-                // The system's voice processing levels the microphone itself, and filters
-                // its noise.
-                level_as_is: system,
-                noise_filter: noise_filter && !system,
-            })?;
-            let feed = pipe.clone();
-            let capture = phone::start_capture(
-                system,
-                Box::new(move |samples, channels, rate| feed.feed(samples, channels, rate)),
-            )?;
-            Ok(Mic {
-                pipe,
-                _source: Source::Phone(capture),
-                output,
-            })
-        };
-        attempt(system, guard).or_else(|e| {
-            if !system {
-                return Err(e);
-            }
-            // Without the system's echo canceller: the microphone turned down while the
-            // others are heard on the speaker.
-            log::warn!("Voice chat: the system's voice processing didn't start ({e})");
-            attempt(false, open_air)
-        })
-    }
-
-    /// The microphone the game's sound library opens (a desktop, Android).
-    #[cfg(not(target_os = "ios"))]
-    fn voice_open_microphone(&mut self, make: MakePipe<'_>) -> std::result::Result<Mic, String> {
-        let pipe = make(CaptureOptions {
-            noise_filter: self.voice.settings.noise_filter,
-            ..CaptureOptions::default()
-        })?;
-        let feed = pipe.clone();
-        let capture = horizon_client::audio_capture::open(
-            &self.voice.settings.mic,
-            Box::new(move |samples, channels, rate| feed.feed(samples, channels, rate)),
-        )?;
-        Ok(Mic {
-            pipe,
-            _source: Source::Device(capture),
-        })
     }
 
     /// The app left the screen: the microphone goes off, and stays off when it comes back.
     pub(super) fn voice_backgrounded(&mut self) {
         if self.voice.mic_wanted || self.voice.mic.is_some() {
             self.voice.mic_wanted = false;
-            self.voice.mic = None;
+            self.voice.close_mic();
             self.voice.mic_lost = None;
         }
     }
@@ -785,7 +963,7 @@ impl Game<'_> {
                 phone::Event::Interrupted => {
                     if self.voice.mic_wanted || self.voice.mic.is_some() {
                         self.voice.mic_wanted = false;
-                        self.voice.mic = None;
+                        self.voice.close_mic();
                         self.voice_line(tr(
                             "mic_interrupted",
                             "Your microphone was turned off: a call or another app took the sound.",
@@ -795,7 +973,7 @@ impl Game<'_> {
                 }
                 phone::Event::Resumed | phone::Event::Reset => {
                     // Started again from scratch when it is still wanted.
-                    self.voice.mic = None;
+                    self.voice.close_mic();
                     self.voice_watch_output();
                 }
                 phone::Event::OutputLost => {
@@ -811,19 +989,22 @@ impl Game<'_> {
                 phone::Event::RouteChanged => {
                     let now = phone::route().map(|r| r.output);
                     if self.voice.mic.as_ref().is_some_and(|m| m.output != now) {
-                        self.voice.mic = None;
+                        self.voice.close_mic();
                     }
                     self.voice_watch_output();
                 }
             }
         }
         // The microphone has been off a while: the session goes back to playing only.
-        if self.voice.mic.is_some() || !self.voice.recording {
+        if self.voice.mic.is_some() || self.voice.opening || !self.voice.recording {
             self.voice.idle = None;
         } else {
             let since = *self.voice.idle.get_or_insert_with(Instant::now);
             if since.elapsed() >= SESSION_KEPT_FOR || !self.voice.enabled {
-                phone::end_recording();
+                // On the microphone's thread, as every change of the session is.
+                if let Some(worker) = &self.voice.worker {
+                    let _ = worker.jobs.send(Job::Rest);
+                }
                 self.voice.recording = false;
                 self.voice.idle = None;
                 self.voice_watch_output();
@@ -858,6 +1039,7 @@ impl Game<'_> {
     pub(super) fn tick_voice(&mut self) {
         #[cfg(target_os = "ios")]
         self.voice_platform();
+        self.voice_talkers();
         // Only in a shared world, and only while its session lasts.
         if !self.shared_active() {
             if self.voice.enabled || self.voice.link.is_some() {
@@ -930,7 +1112,12 @@ impl Game<'_> {
             return;
         }
         // The microphone, as it is meant to be.
-        if self.voice.enabled && self.voice.mic_wanted && self.voice.mic.is_none() {
+        self.voice_mic_opened();
+        if self.voice.enabled
+            && self.voice.mic_wanted
+            && self.voice.mic.is_none()
+            && !self.voice.opening
+        {
             match self.voice_mic_allowed() {
                 Some(true) => {
                     self.voice.mic_lost = None;
@@ -961,6 +1148,29 @@ impl Game<'_> {
             self.voice.told_state = Some(state);
         }
         self.voice.save(false);
+    }
+
+    /// Who is talking, looked up for the HUD a few times a second.
+    fn voice_talkers(&mut self) {
+        if !self.voice.enabled {
+            self.voice.talkers.clear();
+            return;
+        }
+        if self
+            .voice
+            .talkers_at
+            .is_some_and(|at| at.elapsed() < Duration::from_millis(100))
+        {
+            return;
+        }
+        self.voice.talkers_at = Some(Instant::now());
+        self.voice.talkers = self
+            .voice
+            .people()
+            .into_iter()
+            .filter(|p| p.talking && !p.muted)
+            .map(|p| p.name)
+            .collect();
     }
 
     /// The lines that say voice chat is there, to a player who has it off: once that it is,
@@ -1006,7 +1216,15 @@ impl Game<'_> {
     fn voice_mics(&self) -> Vec<(String, String)> {
         #[cfg(target_os = "ios")]
         {
-            let output = phone::route().map(|r| r.output);
+            // Asked of the system once a second at most: the page draws every frame.
+            let output = match self.voice.route_seen.get() {
+                Some((at, output)) if at.elapsed() < Duration::from_secs(1) => output,
+                _ => {
+                    let output = phone::route().map(|r| r.output);
+                    self.voice.route_seen.set(Some((Instant::now(), output)));
+                    output
+                }
+            };
             let mut mics = vec![("builtin".to_owned(), tr("mic_builtin", "This Device"))];
             if output == Some(phone::Output::Headphones) {
                 mics.push(("wired".to_owned(), tr("mic_wired", "Wired Headset")));
@@ -1041,7 +1259,7 @@ impl Game<'_> {
         voice_screen::View {
             offered: self.voice_offered(),
             enabled: self.voice.enabled(),
-            mic_live: self.voice.mic_live(),
+            mic_live: self.voice.mic_on(),
             mic_level,
             speaking,
             mic_name: self
@@ -1191,7 +1409,7 @@ impl Game<'_> {
                 self.voice.settings.noise_filter = on;
                 self.voice.unsaved.get_or_insert_with(Instant::now);
                 // The microphone starts again with it (or without).
-                self.voice.mic = None;
+                self.voice.close_mic();
                 if on {
                     self.voice.note = Some((
                         tr(
@@ -1218,16 +1436,8 @@ impl Game<'_> {
         if !self.voice.enabled() || !visible {
             return;
         }
-        let mut names: Vec<String> = self
-            .voice
-            .people()
-            .into_iter()
-            .filter(|p| p.talking && !p.muted)
-            .map(|p| p.name)
-            .collect();
-        if self.voice.mic_level().1 {
-            names.insert(0, tr("you", "You"));
-        }
+        let you = self.voice.mic_level().1.then(|| tr("you", "You"));
+        let names: Vec<&String> = you.iter().chain(&self.voice.talkers).collect();
         if names.is_empty() {
             return;
         }
@@ -1272,7 +1482,7 @@ impl Game<'_> {
             // The checks' microphone: a tone of this pitch, from the next time it is live.
             (Some("tone"), Some(hz)) => {
                 self.voice.tone = Some(hz.parse().map_err(|_| "voice tone HZ")?);
-                self.voice.mic = None;
+                self.voice.close_mic();
             }
             (Some("mute"), Some(name)) | (Some("unmute"), Some(name)) => {
                 let muted = words.get(1) == Some(&"mute");

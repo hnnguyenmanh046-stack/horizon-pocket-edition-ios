@@ -267,7 +267,8 @@ impl Game<'_> {
             .any(|s| self.blocks_attacks(s).is_some());
         let breaking = self.touch_mining_progress();
         // Voice chat's microphone button: there while voice chat is on, red while muted.
-        let (voice_on, mic_live) = (self.voice.enabled(), self.voice.mic_live());
+        // (Red or not the moment it is tapped: what is asked for, not the device's state.)
+        let (voice_on, mic_live) = (self.voice.enabled(), self.voice.mic_on());
         let tc = &mut self.mobile.controls;
         tc.auxiliary_only = self.settings.keypad.enabled;
         tc.shield_available = shield_available;
