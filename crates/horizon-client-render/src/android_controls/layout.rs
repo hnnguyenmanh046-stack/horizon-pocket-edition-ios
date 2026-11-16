@@ -516,6 +516,10 @@ pub struct Settings {
     pub keyboard_button: bool,
     /// Explicit Mouse-button hide override, retained across launches.
     pub virtual_mouse_hidden: bool,
+    /// Where the player dragged the virtual mouse's LMB and RMB over a menu: the pair's top
+    /// left corner, as fractions of the screen. None: their factory place.
+    #[serde(default)]
+    pub mouse_buttons_pos: Option<[f32; 2]>,
     #[serde(default)]
     pub disable_game_animations: bool,
     #[serde(default = "default_res_scale")]
@@ -690,6 +694,7 @@ impl Default for Settings {
             virtual_mouse_enabled: cfg!(target_os = "ios"),
             keyboard_button: false,
             virtual_mouse_hidden: true,
+            mouse_buttons_pos: None,
             disable_game_animations: false,
             resolution_scale_percent: default_res_scale(),
             virtual_mouse_sensitivity: 1.0,

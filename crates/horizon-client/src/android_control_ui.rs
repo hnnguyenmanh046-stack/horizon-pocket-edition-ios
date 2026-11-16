@@ -29,6 +29,11 @@ pub struct TouchUi {
     pub expanded: bool,
     pub floating_menu: bool,
     pub floating_drag: Option<(u64, [f32; 2], bool)>,
+    /// Where the player put the virtual mouse's LMB and RMB (the touch settings'
+    /// `mouse_buttons_pos`); none: their factory place.
+    pub mouse_buttons_pos: Option<[f32; 2]>,
+    /// The finger on the grip over LMB and RMB.
+    pub mouse_grip: Option<MouseGrip>,
     pub hub_tab: u8,
     pub hub_scroll: f32,
     pub hub_max_scroll: Cell<f32>,
@@ -90,6 +95,8 @@ impl Default for TouchUi {
             expanded: false,
             floating_menu: false,
             floating_drag: None,
+            mouse_buttons_pos: None,
+            mouse_grip: None,
             hub_tab: 0,
             hub_scroll: 0.0,
             hub_max_scroll: Cell::new(0.0),
@@ -341,6 +348,8 @@ pub enum Action {
     Keyboard,
     VirtualMouse,
     MouseButton(bool),
+    /// The grip over LMB and RMB: a drag moves the pair.
+    MouseGrip,
     More,
 }
 
@@ -375,27 +384,97 @@ const KEYS: [(&str, KeyCode); 28] = [
     ("F3+T", KeyCode::KeyT),
 ];
 
-/// The virtual mouse's LMB and RMB buttons over a menu, in the bottom right corner: each as
-/// it is drawn, and whether it is the right button. Horizon PE: 64 x 30 (they were 48 x 20,
-/// easy to miss with a thumb), with the same margin from the corner.
-fn mouse_button_rects(w: f32, h: f32) -> [([f32; 4], bool); 2] {
+/// A finger on the grip over LMB and RMB. It moves the pair only after resting on the grip
+/// for [`MOUSE_GRIP_HOLD`]: a tap, or a finger sweeping across it, moves nothing.
+#[derive(Clone, Copy, Debug)]
+pub struct MouseGrip {
+    id: u64,
+    /// Where the finger came down.
+    start: [f32; 2],
+    since: Instant,
+    /// Held long enough: where on the pair the finger holds it. The pair follows.
+    held: Option<[f32; 2]>,
+    /// It moved before it had rested: it will move nothing.
+    swept: bool,
+}
+
+/// How long a finger rests on the grip before the pair follows it.
+const MOUSE_GRIP_HOLD: Duration = Duration::from_millis(400);
+/// How far a resting finger may wander meanwhile.
+const MOUSE_GRIP_SLOP: f32 = 6.0;
+
+impl MouseGrip {
+    /// The finger has rested on the grip: the pair is the finger's to move (the bar says so).
+    fn ready(&self) -> bool {
+        self.held.is_some() || (!self.swept && self.since.elapsed() >= MOUSE_GRIP_HOLD)
+    }
+}
+
+/// The virtual mouse's LMB and RMB over a menu: each button's size (Horizon PE: they were
+/// 48 x 20, easy to miss with a thumb), the gap between the two, and the height of the grip
+/// over them with its gap.
+const MOUSE_BUTTON: [f32; 2] = [64.0, 30.0];
+const MOUSE_BUTTON_GAP: f32 = 4.0;
+const MOUSE_GRIP: f32 = 12.0;
+/// How far past what is drawn a finger still presses.
+const MOUSE_BUTTON_PAST: f32 = 5.0;
+
+/// The top left corner of the LMB and RMB pair on a `w` x `h` screen: where the player put
+/// it (`pos`, fractions of the screen), else at the right edge from the screen's middle down,
+/// under a resting thumb and clear of the bottom edge. Always whole on the screen, its grip
+/// too.
+fn mouse_buttons_origin(w: f32, h: f32, pos: Option<[f32; 2]>) -> [f32; 2] {
+    let [bw, bh] = MOUSE_BUTTON;
+    let tall = bh * 2.0 + MOUSE_BUTTON_GAP;
+    let [x, y] = match pos {
+        Some([x, y]) => [x * w, y * h],
+        None => [w - bw - 12.0, h * 0.5],
+    };
     [
-        ([w - 69.0, h - 69.0, 64.0, 30.0], false),
-        ([w - 69.0, h - 35.0, 64.0, 30.0], true),
+        x.clamp(2.0, (w - bw - 2.0).max(2.0)),
+        y.clamp(MOUSE_GRIP + 2.0, (h - tall - 2.0).max(MOUSE_GRIP + 2.0)),
     ]
 }
 
-/// Where a finger presses each of `mouse_button_rects`: a little past what is drawn, on
-/// every side but the one the two share, which is halved between them, and out to the
-/// screen's edge.
-fn mouse_button_touch_rects(w: f32, h: f32) -> [([f32; 4], bool); 2] {
-    const PAST: f32 = 5.0;
-    let [(lmb, _), (rmb, _)] = mouse_button_rects(w, h);
-    let middle = (lmb[1] + lmb[3] + rmb[1]) / 2.0;
-    let (left, top) = (lmb[0] - PAST, lmb[1] - PAST);
+/// LMB and RMB as they are drawn, and whether each is the right button.
+fn mouse_button_rects(w: f32, h: f32, pos: Option<[f32; 2]>) -> [([f32; 4], bool); 2] {
+    let [x, y] = mouse_buttons_origin(w, h, pos);
+    let [bw, bh] = MOUSE_BUTTON;
     [
-        ([left, top, w - left, middle - top], false),
-        ([left, middle, w - left, h - middle], true),
+        ([x, y, bw, bh], false),
+        ([x, y + bh + MOUSE_BUTTON_GAP, bw, bh], true),
+    ]
+}
+
+/// Where a finger presses each of `mouse_button_rects`: a little past what is drawn at the
+/// sides and under RMB; the gap between the two is halved between them, and over LMB is
+/// the grip's.
+fn mouse_button_touch_rects(w: f32, h: f32, pos: Option<[f32; 2]>) -> [([f32; 4], bool); 2] {
+    let [(lmb, _), (rmb, _)] = mouse_button_rects(w, h, pos);
+    let middle = (lmb[1] + lmb[3] + rmb[1]) / 2.0;
+    let (left, wide) = (lmb[0] - MOUSE_BUTTON_PAST, lmb[2] + 2.0 * MOUSE_BUTTON_PAST);
+    let bottom = rmb[1] + rmb[3] + MOUSE_BUTTON_PAST;
+    [
+        ([left, lmb[1], wide, middle - lmb[1]], false),
+        ([left, middle, wide, bottom - middle], true),
+    ]
+}
+
+/// The grip over LMB as it is drawn: a short bar, dragged to move the pair.
+fn mouse_grip_rect(w: f32, h: f32, pos: Option<[f32; 2]>) -> [f32; 4] {
+    let [x, y] = mouse_buttons_origin(w, h, pos);
+    [x + MOUSE_BUTTON[0] / 2.0 - 16.0, y - 8.0, 32.0, 4.0]
+}
+
+/// Where a finger takes hold of the grip: the strip over LMB, as wide as the buttons' own
+/// touch.
+fn mouse_grip_touch_rect(w: f32, h: f32, pos: Option<[f32; 2]>) -> [f32; 4] {
+    let [x, y] = mouse_buttons_origin(w, h, pos);
+    [
+        x - MOUSE_BUTTON_PAST,
+        y - MOUSE_GRIP - MOUSE_BUTTON_PAST,
+        MOUSE_BUTTON[0] + 2.0 * MOUSE_BUTTON_PAST,
+        MOUSE_GRIP + MOUSE_BUTTON_PAST,
     ]
 }
 
@@ -668,6 +747,52 @@ impl TouchUi {
         keys.dedup();
         keys
     }
+    /// Finger `id` came down on the grip over LMB and RMB at `p`.
+    pub fn mouse_grip_start(&mut self, id: u64, p: [f32; 2]) {
+        self.mouse_grip = Some(MouseGrip {
+            id,
+            start: p,
+            since: Instant::now(),
+            held: None,
+            swept: false,
+        });
+    }
+    /// Finger `id` moved or lifted at `p` on a `w` x `h` screen. None unless it is the finger
+    /// on the grip; then the pair's place to keep (fractions of the screen; none inside: the
+    /// factory place), which changes only once the finger has rested on the grip for
+    /// [`MOUSE_GRIP_HOLD`]: from then the pair follows it, kept whole on the screen. A tap,
+    /// or a finger that moved off before that, moves nothing. It lets go when `ended`.
+    pub fn mouse_grip_move(
+        &mut self,
+        id: u64,
+        p: [f32; 2],
+        [w, h]: [f32; 2],
+        ended: bool,
+    ) -> Option<Option<[f32; 2]>> {
+        let grip = self.mouse_grip.as_mut().filter(|grip| grip.id == id)?;
+        if grip.held.is_none() && !grip.swept {
+            if grip.since.elapsed() >= MOUSE_GRIP_HOLD {
+                // Rested: it holds the pair where it is now, so nothing jumps.
+                let [x, y] = mouse_buttons_origin(w, h, self.mouse_buttons_pos);
+                grip.held = Some([p[0] - x, p[1] - y]);
+            } else if (p[0] - grip.start[0]).hypot(p[1] - grip.start[1]) > MOUSE_GRIP_SLOP {
+                grip.swept = true;
+            }
+        }
+        let held = grip.held;
+        if ended {
+            self.mouse_grip = None;
+        }
+        if let Some(offset) = held {
+            let wanted = [
+                (p[0] - offset[0]) / w.max(1.0),
+                (p[1] - offset[1]) / h.max(1.0),
+            ];
+            let [x, y] = mouse_buttons_origin(w, h, Some(wanted));
+            self.mouse_buttons_pos = Some([x / w.max(1.0), y / h.max(1.0)]);
+        }
+        Some(self.mouse_buttons_pos)
+    }
     pub fn press_mouse(&mut self, id: u64, right: bool) -> bool {
         if let Some(touch) = &mut self.relative {
             touch.dragged = true;
@@ -698,6 +823,7 @@ impl TouchUi {
         buttons
     }
     pub fn cancel(&mut self) {
+        self.mouse_grip = None;
         self.gesture = None;
         self.pointer_drag = None;
         self.relative = None;
@@ -872,7 +998,12 @@ impl TouchUi {
         }
         if !self.goy_mode {
             if menu && self.virtual_mouse {
-                for ([x, y, width, height], right) in mouse_button_touch_rects(w, h) {
+                let pos = self.mouse_buttons_pos;
+                let [x, y, width, height] = mouse_grip_touch_rect(w, h, pos);
+                if (x..=x + width).contains(&p[0]) && (y..y + height).contains(&p[1]) {
+                    return Some(Action::MouseGrip);
+                }
+                for ([x, y, width, height], right) in mouse_button_touch_rects(w, h, pos) {
                     if (x..=x + width).contains(&p[0]) && (y..=y + height).contains(&p[1]) {
                         return Some(Action::MouseButton(right));
                     }
@@ -944,9 +1075,17 @@ impl TouchUi {
         if menu && !self.goy_mode && crate::android_controls::current_hud_opacity_scale() > 0.01 {
             button(b, a, "Back", b.width - 53.0, 3.0, 50.0);
             if self.virtual_mouse {
-                let [lmb, rmb] = mouse_button_rects(b.width, b.height);
+                let pos = self.mouse_buttons_pos;
+                let [lmb, rmb] = mouse_button_rects(b.width, b.height, pos);
                 mouse_button(b, a, "LMB", lmb.0);
                 mouse_button(b, a, "RMB", rmb.0);
+                // The grip: a bar over them, bright once a finger has rested on it and the
+                // pair is its to move.
+                let [x, y, w, h] = mouse_grip_rect(b.width, b.height, pos);
+                let held = self.mouse_grip.is_some_and(|grip| grip.ready());
+                b.fill(a, x - 1.0, y - 1.0, w + 2.0, h + 2.0, rgba(16, 18, 24, 180));
+                let bar = if held { 255 } else { 190 };
+                b.fill(a, x, y, w, h, rgba(245, 245, 245, bar));
             }
         }
         if !self.expanded {
@@ -8299,42 +8438,127 @@ mod tests {
             virtual_mouse: true,
             ..Default::default()
         };
+        // At the right edge from the screen's middle down, clear of its bottom: LMB is drawn
+        // at 351..415 x 133.5..163.5, RMB under it at 167.5..197.5.
+        let (w, h) = (427.0, 267.0);
+        let [(lmb, _), (rmb, _)] = mouse_button_rects(w, h, None);
+        assert_eq!(lmb, [351.0, 133.5, 64.0, 30.0]);
+        assert_eq!(rmb, [351.0, 167.5, 64.0, 30.0]);
+        assert!(rmb[1] + rmb[3] < h * 0.8);
         assert!(matches!(
-            ui.action(427.0, 267.0, [399.0, 226.0], true),
+            ui.action(w, h, [383.0, 150.0], true),
             Some(Action::MouseButton(false))
         ));
         assert!(matches!(
-            ui.action(427.0, 267.0, [399.0, 250.0], true),
+            ui.action(w, h, [383.0, 180.0], true),
             Some(Action::MouseButton(true))
         ));
-        assert!(ui.action(427.0, 267.0, [399.0, 226.0], false).is_none());
-        // Larger than they were, and a thumb a little past them, or at the screen's very
-        // edge, still presses: LMB is drawn at 358..422 x 198..228, RMB under it to 262.
+        assert!(ui.action(w, h, [383.0, 150.0], false).is_none());
+        // Larger than they were, and a thumb a little past them still presses.
         for (point, right) in [
-            ([360.0, 200.0], false),
-            ([354.0, 194.0], false),
-            ([427.0, 229.0], false),
-            ([354.0, 231.0], true),
-            ([427.0, 267.0], true),
+            ([352.0, 134.0], false),
+            ([347.0, 140.0], false),
+            ([419.0, 164.0], false),
+            ([347.0, 167.0], true),
+            ([419.0, 202.0], true),
         ] {
             assert!(
                 matches!(
-                    ui.action(427.0, 267.0, point, true),
+                    ui.action(w, h, point, true),
                     Some(Action::MouseButton(r)) if r == right
                 ),
                 "{point:?}"
             );
         }
-        // Left of them and above them is the menu's.
-        for point in [[350.0, 240.0], [400.0, 190.0]] {
+        // Beside them and under them is the menu's; over LMB is the grip.
+        for point in [
+            [340.0, 150.0],
+            [425.0, 150.0],
+            [383.0, 205.0],
+            [383.0, 110.0],
+        ] {
+            assert!(ui.action(w, h, point, true).is_none(), "{point:?}");
+        }
+        for point in [[383.0, 127.0], [347.0, 118.0], [419.0, 133.0]] {
             assert!(
-                !matches!(
-                    ui.action(427.0, 267.0, point, true),
-                    Some(Action::MouseButton(_))
-                ),
+                matches!(ui.action(w, h, point, true), Some(Action::MouseGrip)),
                 "{point:?}"
             );
         }
+        // Not by accident: a tap on the grip, or a finger sweeping across it, moves nothing.
+        ui.mouse_grip_start(5, [383.0, 127.0]);
+        assert_eq!(
+            ui.mouse_grip_move(5, [383.0, 127.0], [w, h], true),
+            Some(None)
+        );
+        assert!(ui.mouse_grip.is_none() && ui.mouse_buttons_pos.is_none());
+        ui.mouse_grip_start(6, [383.0, 127.0]);
+        assert_eq!(
+            ui.mouse_grip_move(6, [300.0, 90.0], [w, h], false),
+            Some(None)
+        );
+        // Even if it then lingers: it never rested on the grip.
+        let long_ago = Instant::now().checked_sub(Duration::from_secs(2)).unwrap();
+        ui.mouse_grip.as_mut().unwrap().since = long_ago;
+        assert!(!ui.mouse_grip.unwrap().ready());
+        assert_eq!(
+            ui.mouse_grip_move(6, [200.0, 60.0], [w, h], true),
+            Some(None)
+        );
+        assert!(ui.mouse_buttons_pos.is_none());
+        // A finger that rests on the grip takes hold: the pair follows it, whole on the
+        // screen, and the place to keep is handed back; another finger moves nothing.
+        ui.mouse_grip_start(7, [383.0, 127.0]);
+        assert!(!ui.mouse_grip.unwrap().ready());
+        assert_eq!(
+            ui.mouse_grip_move(7, [384.0, 128.0], [w, h], false),
+            Some(None)
+        );
+        ui.mouse_grip.as_mut().unwrap().since = long_ago;
+        assert!(ui.mouse_grip.unwrap().ready());
+        // Taking hold moves nothing by itself.
+        assert_eq!(ui.mouse_grip_move(8, [100.0, 100.0], [w, h], false), None);
+        let pos = ui
+            .mouse_grip_move(7, [383.0, 127.0], [w, h], false)
+            .unwrap()
+            .unwrap();
+        let [(lmb, _), _] = mouse_button_rects(w, h, Some(pos));
+        assert!(
+            (lmb[0] - 351.0).abs() < 0.01 && (lmb[1] - 133.5).abs() < 0.01,
+            "{lmb:?}"
+        );
+        let pos = ui
+            .mouse_grip_move(7, [183.0, 87.0], [w, h], false)
+            .unwrap()
+            .unwrap();
+        let [(lmb, _), _] = mouse_button_rects(w, h, Some(pos));
+        assert!(
+            (lmb[0] - 151.0).abs() < 0.01 && (lmb[1] - 93.5).abs() < 0.01,
+            "{lmb:?}"
+        );
+        assert!(matches!(
+            ui.action(w, h, [183.0, 110.0], true),
+            Some(Action::MouseButton(false))
+        ));
+        assert!(ui.action(w, h, [383.0, 150.0], true).is_none());
+        let pos = ui
+            .mouse_grip_move(7, [-50.0, 900.0], [w, h], true)
+            .unwrap()
+            .unwrap();
+        let [(lmb, _), (rmb, _)] = mouse_button_rects(w, h, Some(pos));
+        assert!(
+            lmb[0] >= 2.0 && rmb[1] + rmb[3] <= h - 2.0,
+            "{lmb:?} {rmb:?}"
+        );
+        assert!(ui.mouse_grip.is_none());
+        assert_eq!(ui.mouse_grip_move(7, [200.0, 100.0], [w, h], false), None);
+        // The same place on a screen of another size.
+        let [(wide, _), _] = mouse_button_rects(854.0, 534.0, ui.mouse_buttons_pos);
+        assert!((wide[0] / 854.0 - lmb[0] / w).abs() < 0.01, "{wide:?}");
+        // A place saved on a larger screen that would be off this one: back onto it.
+        let [(far, _), (low, _)] = mouse_button_rects(w, h, Some([0.99, 0.99]));
+        assert!(far[0] + far[2] <= w - 2.0 && low[1] + low[3] <= h - 2.0);
+        ui.mouse_buttons_pos = None;
         assert!(ui.press_mouse(1, false));
         assert!(!ui.press_mouse(2, false));
         assert!(ui.press_mouse(3, true));
