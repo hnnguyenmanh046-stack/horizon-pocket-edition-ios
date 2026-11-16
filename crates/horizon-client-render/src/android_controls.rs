@@ -3345,4 +3345,32 @@ mod tests {
         assert_eq!(wide.placement(Control::Debug).center[0], 0.42);
         assert_eq!(wide.placement(Control::Perspective).center[0], 0.58);
     }
+
+    /// A layout file written by an edition with more controls (they come after this one's)
+    /// reads whole: every control this app has is where the player put it, nothing is reset.
+    #[test]
+    fn a_layout_with_more_controls_than_this_app_has_keeps_the_ones_it_has() {
+        let settings = Settings::default();
+        let mut newer = serde_json::to_value(&settings).unwrap();
+        let extra = newer["layouts"][0][0].clone();
+        for row in newer["layouts"].as_array_mut().unwrap() {
+            for _ in 0..4 {
+                row.as_array_mut().unwrap().push(extra.clone());
+            }
+        }
+        for _ in 0..4 {
+            newer["button_visibility"]
+                .as_array_mut()
+                .unwrap()
+                .push(serde_json::json!(2));
+        }
+        newer["layouts"][1][Control::Jump as usize]["center"] = serde_json::json!([0.6, 0.7]);
+        newer["button_visibility"][Control::Chat as usize] = serde_json::json!(2);
+        newer["virtual_mouse_sensitivity"] = serde_json::json!(1.5);
+        let read: Settings = serde_json::from_value(newer).unwrap();
+        assert_eq!(read.layouts[1][Control::Jump as usize].center, [0.6, 0.7]);
+        assert_eq!(read.button_visibility[Control::Chat as usize], 2);
+        assert_eq!(read.virtual_mouse_sensitivity, 1.5);
+        assert_eq!(read.layouts[0], settings.layouts[0]);
+    }
 }

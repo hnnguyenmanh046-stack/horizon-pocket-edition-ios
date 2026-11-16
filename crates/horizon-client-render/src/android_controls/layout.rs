@@ -608,26 +608,30 @@ fn deserialize_layouts<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> Result<[[Placement; 15]; 3], D::Error> {
     let rows = Vec::<Vec<Placement>>::deserialize(deserializer)?;
-    if rows.len() != 3 || rows.iter().any(|r| !matches!(r.len(), 10 | 12 | 14 | 15)) {
+    // A file with more controls than this app has (another edition's, whose own controls come
+    // after these) reads too: the ones this app has are kept as they were placed.
+    if rows.len() != 3 || rows.iter().any(|r| r.len() < 10) {
         return Err(serde::de::Error::custom(
-            "expected three touch layouts of 10, 12, 14 or 15 controls",
+            "expected three touch layouts of 10 or more controls",
         ));
     }
     let mut layouts = Settings::default().layouts;
     for (output, input) in layouts.iter_mut().zip(rows) {
-        output[..input.len()].copy_from_slice(&input);
+        let known = input.len().min(output.len());
+        output[..known].copy_from_slice(&input[..known]);
     }
     Ok(layouts)
 }
 fn deserialize_visibility<'de, D: serde::Deserializer<'de>>(d: D) -> Result<[u8; 15], D::Error> {
     let old = Vec::<u8>::deserialize(d)?;
-    if !matches!(old.len(), 12 | 14 | 15) {
+    if old.len() < 12 {
         return Err(serde::de::Error::custom(
-            "expected 12, 14 or 15 visibility values",
+            "expected 12 or more visibility values",
         ));
     }
     let mut values = [0; 15];
-    values[..old.len()].copy_from_slice(&old);
+    let known = old.len().min(values.len());
+    values[..known].copy_from_slice(&old[..known]);
     Ok(values)
 }
 impl Default for Settings {
