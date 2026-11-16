@@ -12,6 +12,10 @@ pub const FILE: &str = "horizon-graphics.txt";
 /// Written beside it before HDR output is switched on and removed once the first HDR frame is
 /// presented. Found at the next start, it means HDR output took the game down, so HDR starts off.
 pub const HDR_MARKER: &str = "horizon-hdr-pending";
+/// Phones: written once [`Graphics::phone_savings`] was turned on in a graphics file saved
+/// before they were the default, so a player who turns one off later keeps it off. A dot file:
+/// the Files app doesn't show it.
+pub const PHONE_SAVINGS_MARKER: &str = ".horizon-phone-savings";
 
 /// What the system reports for the display HDR output goes to, in nits in HDR output's
 /// scale: where its SDR white sits (the desktop's white) and the peak.
@@ -690,6 +694,16 @@ impl Graphics {
 }
 impl Default for Graphics {
     fn default() -> Self {
+        let mut g = Self::desktop_default();
+        if crate::PHONE {
+            g.phone_savings();
+        }
+        g
+    }
+}
+impl Graphics {
+    /// The defaults a computer starts with; a phone's add [`Self::phone_savings`].
+    fn desktop_default() -> Self {
         Self {
             preset: Preset::Custom,
             lod_distance: 0,
@@ -743,10 +757,37 @@ fn bool_text(v: bool) -> &'static str {
     if v { "true" } else { "false" }
 }
 impl Graphics {
+    /// What skips work without changing the picture, on: entities behind terrain aren't drawn
+    /// (checked off the render thread, and only hidden while the check still holds), and block
+    /// entities that aren't moving keep their models. Phones start with them: less work for
+    /// each frame.
+    pub fn phone_savings(&mut self) {
+        self.entity_culling = EntityCullingMode::Asynchronous;
+        self.cache_shulker_boxes = true;
+        self.cache_signs = true;
+        self.cache_decorated_pots = true;
+        self.cache_bells = true;
+        self.cache_chests = true;
+        self.cache_banners = true;
+        self.cache_copper_golem_statues = true;
+    }
+    /// On a phone, [`Self::phone_savings`] once for a graphics file in `dir` saved before they
+    /// were the default, and saved with them; [`PHONE_SAVINGS_MARKER`] says it is done, so a
+    /// player who turns one off later keeps it off.
+    fn phone_savings_once(&mut self, dir: &Path, phone: bool) {
+        let marker = dir.join(PHONE_SAVINGS_MARKER);
+        if !phone || marker.exists() {
+            return;
+        }
+        self.phone_savings();
+        self.save(dir);
+        let _ = fs::write(marker, "");
+    }
     pub fn load(dir: &Path) -> Self {
         let mut g: Self = fs::read_to_string(dir.join(FILE))
             .map(|t| Self::parse(&t))
             .unwrap_or_default();
+        g.phone_savings_once(dir, crate::PHONE);
         g.blue_map.servers = match fs::read_to_string(dir.join(crate::bluemap::SERVERS_FILE)) {
             Ok(text) => crate::bluemap::Settings::parse_servers(&text),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
@@ -1095,6 +1136,45 @@ pub fn apply_mobile_defaults(tier: crate::system_stats::Tier, s: &mut crate::set
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_phone_turns_the_savings_on_once_and_a_later_choice_stays() {
+        let dir =
+            std::env::temp_dir().join(format!("horizon-phone-savings-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let read = || Graphics::parse(&fs::read_to_string(dir.join(FILE)).unwrap());
+        let old = Graphics {
+            entity_culling: EntityCullingMode::Off,
+            cache_chests: false,
+            ..Graphics::desktop_default()
+        };
+        old.save(&dir);
+        // Not a phone: the file stays as it is.
+        let mut g = read();
+        g.phone_savings_once(&dir, false);
+        assert_eq!(g.entity_culling, EntityCullingMode::Off);
+        assert!(!dir.join(PHONE_SAVINGS_MARKER).exists());
+        // A phone: on, and saved.
+        g.phone_savings_once(&dir, true);
+        let saved = read();
+        assert_eq!(saved.entity_culling, EntityCullingMode::Asynchronous);
+        assert!(saved.cache_chests && saved.cache_banners && saved.cache_signs);
+        assert!(dir.join(PHONE_SAVINGS_MARKER).exists());
+        // Nothing but what skips work was touched.
+        let mut expected = Graphics::desktop_default();
+        expected.phone_savings();
+        assert_eq!(saved, expected);
+        // Turned off by the player afterwards: it stays off.
+        let mut chosen = saved;
+        chosen.entity_culling = EntityCullingMode::Off;
+        chosen.save(&dir);
+        let mut later = read();
+        later.phone_savings_once(&dir, true);
+        assert_eq!(later.entity_culling, EntityCullingMode::Off);
+        assert_eq!(read().entity_culling, EntityCullingMode::Off);
+        let _ = fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn phones_start_lighter_by_tier() {

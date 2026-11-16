@@ -246,6 +246,10 @@ impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if !self.started {
             self.started = true;
+            // A 120 Hz screen runs an app at 60 unless the app asks for more.
+            if let Some(rate) = horizon_gamecontroller::request_high_frame_rate() {
+                log::info!("Horizon: asked iOS for {rate} frames a second");
+            }
             self.start_game(event_loop);
             self.after_callback(event_loop);
             return;
