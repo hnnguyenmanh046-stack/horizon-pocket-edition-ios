@@ -13,8 +13,8 @@
 ## The mods, their authors and licences
 
 All fifteen are in the app from the first start. **Options > Mods** lists them: turn one off there,
-or open it to change its settings and keys. Their sources, as built, are in this branch's
-[`native-mods/`](../native-mods).
+or open it to change its settings and keys. Their sources, as built, are in the edition's branch:
+[`native-mods/`](https://github.com/shopifygav222/horizon-pocket-edition-ios/tree/shared-worlds-mods/native-mods).
 
 | Mod | Version | What it does | Author | Licence | Source |
 | --- | --- | --- | --- | --- | --- |
