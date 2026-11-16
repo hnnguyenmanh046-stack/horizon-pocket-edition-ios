@@ -7,15 +7,19 @@ Android iOS port is kept under `archive/horizon-android-ios`, and `main`'s histo
 developed on `starling-ios` until it moved to `main`.
 
 - **Branches and releases:** `main` is Horizon PE (release tags `v1.0.0`, ...). `shared-worlds` is `main` plus
-  shared worlds and voice chat (release tags `v1.0.0-shared-worlds`, ...): a fix that isn't about those goes to
-  `main` first and is merged into `shared-worlds`. The README is the same file on both, and names each edition's
-  latest release.
+  shared worlds and voice chat (release tags `v1.0.0-shared-worlds`, ...). `shared-worlds-mods` is `shared-worlds`
+  plus fifteen native mods in its `native-mods/`, their touch buttons and controller binds, and its own defaults
+  (release tags `v1.0.0-shared-worlds-mods`, ...; `docs/shared-worlds-mods.md`): its .ipa is built with those
+  fifteen ids in `ios.yml`'s `mods`. A fix goes to the lowest branch it belongs to and is merged upwards
+  (`main` into `shared-worlds` into `shared-worlds-mods`). The README is the same file on all three, and names
+  each edition's latest release.
 - **Releasing:** set `MARKETING_VERSION` (`packaging/ios/project.yml`) on both branches, run `ios.yml` with
   `deliver` on each, and publish each .ipa as a release of this repository: tag `v<version>` from `main`,
-  `v<version>-shared-worlds` from `shared-worlds`, neither a draft nor a pre-release, with the .ipa as an asset.
+  `v<version>-shared-worlds` from `shared-worlds`, `v<version>-shared-worlds-mods` from `shared-worlds-mods`
+  (built with its mods), none a draft or a pre-release, with the .ipa as an asset.
   The apps find them there (`horizon_client::ios_releases`, `game/update_offer.rs`): each edition is offered
   only its own tags, and only a version above its own. `ios_releases::EDITION` is the one line that differs
-  between the branches. Then the README's links (the same file on both branches) name the new releases.
+  between the branches. Then the README's links (the same file on every branch) name the new releases.
 
 - **Base:** starling-client/starling `starling` @ `ac874422ed` (tag `v0.8.0`, "the first release of Starling and
   Horizon Android together"). Remote: `starling`. Starling 0.8.0 took Horizon Android's control system, account

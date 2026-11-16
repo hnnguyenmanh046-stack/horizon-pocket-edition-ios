@@ -1,6 +1,7 @@
 <p align="center">
   <a href="https://github.com/shopifygav222/horizon-pocket-edition-ios/releases/tag/v1.0.0"><img src="https://img.shields.io/badge/download-1.0.0-2EA043" alt="Download 1.0.0"></a>
   <a href="https://github.com/shopifygav222/horizon-pocket-edition-ios/releases/tag/v1.0.0-shared-worlds"><img src="https://img.shields.io/badge/download-1.0.0%20Shared%20Worlds-8250DF" alt="Download 1.0.0 Shared Worlds"></a>
+  <a href="https://github.com/shopifygav222/horizon-pocket-edition-ios/releases/tag/v1.0.0-shared-worlds-mods"><img src="https://img.shields.io/badge/download-1.0.0%20Shared%20Worlds%20%2B%20Mods-BF8700" alt="Download 1.0.0 Shared Worlds + Mods"></a>
   <img src="https://img.shields.io/badge/Minecraft-Java%2026.3-5D9C3F" alt="Minecraft Java 26.3">
   <img src="https://img.shields.io/badge/platform-iOS%20%26%20iPadOS%2016%2B-1C1C1E?logo=apple&logoColor=white" alt="iOS and iPadOS 16 or newer">
   <a href="https://github.com/ludovic111/horizon"><img src="https://img.shields.io/badge/port%20of-Horizon-F0795A" alt="Port of Horizon"></a>
@@ -40,38 +41,44 @@ Metal: no Java, no emulation.
 | [Download](#download) | [Controls](#controls) | [Help](#help) |
 | [Which one should I get?](#which-one-should-i-get) | [Shader packs](#shader-packs) | [For developers](#for-developers) |
 | [Features](#features) | [Shared worlds and voice chat](#shared-worlds-and-voice-chat) | [Credits](#credits) |
-| [Install](#install) | [Native mods](#native-mods) | [License](#license) |
+| [Install](#install) | [The built-in mods](#the-built-in-mods) | [License](#license) |
+| | [Native mods](#native-mods) | |
 
 ## Download
 
-There are two editions of Horizon PE. Both are the same game; one adds shared worlds and voice chat.
+There are three editions of Horizon PE. All three are the same game; each one adds to the one before.
 
-| | **Horizon PE** | **Horizon PE: Shared Worlds** |
-| --- | --- | --- |
-| **Latest stable** | **[1.0.0](https://github.com/shopifygav222/horizon-pocket-edition-ios/releases/tag/v1.0.0)** | **[1.0.0 Shared Worlds](https://github.com/shopifygav222/horizon-pocket-edition-ios/releases/tag/v1.0.0-shared-worlds)** |
-| **Direct download** | [HorizonPE-1.0.0.ipa](https://github.com/shopifygav222/horizon-pocket-edition-ios/releases/download/v1.0.0/HorizonPE-1.0.0.ipa) | [HorizonPE-1.0.0-SharedWorlds.ipa](https://github.com/shopifygav222/horizon-pocket-edition-ios/releases/download/v1.0.0-shared-worlds/HorizonPE-1.0.0-SharedWorlds.ipa) |
-| **Source branch** | [`main`](https://github.com/shopifygav222/horizon-pocket-edition-ios/tree/main) | [`shared-worlds`](https://github.com/shopifygav222/horizon-pocket-edition-ios/tree/shared-worlds) |
+| | **Horizon PE** | **Horizon PE: Shared Worlds** | **Horizon PE: Shared Worlds + Mods** |
+| --- | --- | --- | --- |
+| **Latest stable** | **[1.0.0](https://github.com/shopifygav222/horizon-pocket-edition-ios/releases/tag/v1.0.0)** | **[1.0.0 Shared Worlds](https://github.com/shopifygav222/horizon-pocket-edition-ios/releases/tag/v1.0.0-shared-worlds)** | **[1.0.0 Shared Worlds + Mods](https://github.com/shopifygav222/horizon-pocket-edition-ios/releases/tag/v1.0.0-shared-worlds-mods)** |
+| **Direct download** | [HorizonPE-1.0.0.ipa](https://github.com/shopifygav222/horizon-pocket-edition-ios/releases/download/v1.0.0/HorizonPE-1.0.0.ipa) | [HorizonPE-1.0.0-SharedWorlds.ipa](https://github.com/shopifygav222/horizon-pocket-edition-ios/releases/download/v1.0.0-shared-worlds/HorizonPE-1.0.0-SharedWorlds.ipa) | [HorizonPE-1.0.0-SharedWorlds-Mods.ipa](https://github.com/shopifygav222/horizon-pocket-edition-ios/releases/download/v1.0.0-shared-worlds-mods/HorizonPE-1.0.0-SharedWorlds-Mods.ipa) |
+| **Source branch** | [`main`](https://github.com/shopifygav222/horizon-pocket-edition-ios/tree/main) | [`shared-worlds`](https://github.com/shopifygav222/horizon-pocket-edition-ios/tree/shared-worlds) | [`shared-worlds-mods`](https://github.com/shopifygav222/horizon-pocket-edition-ios/tree/shared-worlds-mods) |
 
 ### Which one should I get?
 
-| | Horizon PE | Horizon PE: Shared Worlds |
-| --- | :---: | :---: |
-| The whole game: single player, servers, LAN, Play with Friends | Yes | Yes |
-| Touch controls, controllers, keyboard and mouse | Yes | Yes |
-| Shader packs, resource packs, skins, mods and native mods | Yes | Yes |
-| Tells you when an update is out, and installs it | Yes, its own updates | Yes, its own updates |
-| **Shared worlds:** a world your group owns, hosted by whoever is playing, with no server | No | **Yes** |
-| **Backups** of shared worlds that anyone can ask to load | No | **Yes** |
-| **Voice chat** in shared worlds, with a volume for each player | No | **Yes** |
-| Asks for the microphone | Never | Only when you turn your microphone on |
-| Needs a free Cloudflare account | No | Only for the one who shares a world |
+| | Horizon PE | Shared Worlds | Shared Worlds + Mods |
+| --- | :---: | :---: | :---: |
+| The whole game: single player, servers, LAN, Play with Friends | Yes | Yes | Yes |
+| Touch controls, controllers, keyboard and mouse | Yes | Yes | Yes |
+| Shader packs, resource packs, skins, mods and native mods | Yes | Yes | Yes |
+| Tells you when an update is out, and installs it | Its own | Its own | Its own |
+| **Shared worlds:** a world your group owns, hosted by whoever is playing, with no server | No | **Yes** | **Yes** |
+| **Backups** of shared worlds that anyone can ask to load | No | **Yes** | **Yes** |
+| **Voice chat** in shared worlds, with a volume for each player | No | **Yes** | **Yes** |
+| **15 quality of life mods built in**, ready on the first start | No | No | **Yes** |
+| **Zoom and waypoint buttons** in the touch controls and on a controller | No | No | **Yes** |
+| Asks for the microphone | Never | Only when you turn your microphone on | Only when you turn your microphone on |
+| Needs a free Cloudflare account | No | Only for the one who shares a world | Only for the one who shares a world |
 
 - **Get Horizon PE** if you play alone, on servers, or with friends through an invite code. It is
   the simplest build and has the fewest moving parts.
 - **Get Horizon PE: Shared Worlds** if your group wants one world that any of you can open at any
   time, and to talk in it. Everything else in it is the same as Horizon PE.
+- **Get Horizon PE: Shared Worlds + Mods** if you want that with a minimap of waypoints, zoom, a
+  coordinates display, tree felling and eleven more mods already in the app: no fork, no token, no
+  hour of building. [What is in it](#the-built-in-mods).
 
-**Switching is safe.** Both editions are the same app to iOS: install either one over the other and
+**Switching is safe.** All three editions are the same app to iOS: install any one over another and
 your worlds, settings, accounts and mods stay. A shared world stays in its storage if you go back to
 Horizon PE, and is there again when you return.
 
@@ -101,7 +108,7 @@ Horizon PE, and is there again when you return.
 - A built-in **catalog** of mods, shader packs and resource packs.
 - **Native mods** built into the app for you by GitHub: [Native mods](#native-mods).
 
-**Only in the Shared Worlds edition**
+**In the Shared Worlds editions**
 
 - **Shared worlds:** one world for your group. Whoever opens it hosts it; when they leave it moves
   to someone still playing, and everyone follows by themselves.
@@ -109,6 +116,16 @@ Horizon PE, and is there again when you return.
   from inside the game.
 - **Voice chat:** off until you turn it on, a mute button in the touch controls, a volume and a mute
   for each player, a choice of microphone, and an optional noise filter.
+
+**Only in the Shared Worlds + Mods edition**
+
+- **15 mods built in:** Waymap, Zoom, Jade, AppleSkin, Armor Status, Status Effect HUD, Coordinates
+  HUD, TreeFall, RightClickHarvest, ShulkerPeek, Enchantment Hints, BiomeCompass, SmartF3,
+  ContinuityHorizon and Better Dynamic Lights.
+- **Buttons for them:** a zoom button and two waypoint buttons in the touch controls, placed and
+  styled like the others, and the same three on a controller.
+- **Set up for a phone:** the mods' displays start where they don't cover each other, and dynamic
+  lights, the Mouse Tweaks controls and the sort buttons are on from the first start.
 
 ## Install
 
@@ -205,8 +222,8 @@ Starling Visuals and the **Auto** profile are the light options.
 
 ## Shared worlds and voice chat
 
-*Only in [Horizon PE: Shared Worlds](#download).* The full guide, with every detail, is
-**[docs/shared-worlds.md](docs/shared-worlds.md)**.
+*In [Horizon PE: Shared Worlds and Shared Worlds + Mods](#download).* The full guide, with every
+detail, is **[docs/shared-worlds.md](docs/shared-worlds.md)**.
 
 A shared world belongs to your group, not to one of you. Whoever opens it while nobody is playing
 hosts it on their own phone, and friends join them with no server. When the host leaves, the world
@@ -258,11 +275,58 @@ world from its last copy. Nothing is damaged.
 
 [More about voice chat](docs/shared-worlds.md#voice-chat)
 
-**Good to know:** 8 players at most; shared worlds are between phones running the Shared Worlds
+**Good to know:** 8 players at most; shared worlds are between phones running a Shared Worlds
 edition (friends on PC are planned for later); friends who aren't signed in can join and host under
-their name.
+their name. Friends with and without the built-in mods play in the same world, but **TreeFall,
+RightClickHarvest and BiomeCompass act on the world itself, so they work only while the host has
+them**: [more](docs/shared-worlds-mods.md#in-a-shared-world).
+
+## The built-in mods
+
+*Only in [Horizon PE: Shared Worlds + Mods](#download).* The full guide is
+**[docs/shared-worlds-mods.md](docs/shared-worlds-mods.md)**.
+
+Fifteen native mods are compiled into this edition, so they work from the first start. Turn any of
+them off, or change its settings, in **Options > Mods**.
+
+| Mod | What it does |
+| --- | --- |
+| **Waymap** | Waypoints you name and colour, shown in the world and on a minimap |
+| **Zoom** | Hold to zoom in |
+| **Jade** | Says what you are looking at: the block or mob, its health, what is in it |
+| **AppleSkin** | Shows how much hunger and saturation a food gives |
+| **Armor Status** | Your armour and held items with their durability, beside the hotbar |
+| **Status Effect HUD** | Your potion effects with their time left |
+| **Coordinates HUD** | Your position and the way you face |
+| **TreeFall** | Cut the bottom log and the whole tree falls |
+| **RightClickHarvest** | Tap a grown crop to harvest and replant it |
+| **ShulkerPeek** | See inside a shulker box from its tooltip |
+| **Enchantment Hints** | Says under each enchantment what it does |
+| **BiomeCompass** | A compass that finds a biome |
+| **SmartF3** | A tidier debug screen |
+| **ContinuityHorizon** | Connected textures: glass and bookshelves join up |
+| **Better Dynamic Lights** | A held torch lights the way |
+
+**The buttons**
+
+| Button | Where | What it does | On a controller |
+| --- | --- | --- | --- |
+| **Magnifying glass** | Left edge, under the **H** button | Hold to zoom in | Hold **View** |
+| **Pin with lines** | Right of the top row | Opens the list of waypoints | D-pad **left** |
+| **Pin with a plus** | Right of that | Adds a waypoint where you stand | D-pad **down** |
+
+Move, resize, recolour or hide them in the layout editor like every other button. They press the
+keys the mods use (Z, M and N unless you change them in **Options > Mods**).
+
+**Changed for this edition:** Coordinates HUD can sit at any height on the screen (its settings
+page says the number, to copy to another phone); Armor Status has a **Size** setting; Enchantment
+Hints show under the virtual mouse's pointer as well as for a tapped item, and a tapped item's
+tooltip is right beside it. [Every default and change](docs/shared-worlds-mods.md)
 
 ## Native mods
+
+*The Shared Worlds + Mods edition already has [fifteen](#the-built-in-mods): this is for adding
+your own, to any edition.*
 
 Native mods change the game's code, and iOS only runs code an app shipped with. So a native mod is
 **built into the app**: GitHub compiles a new `.ipa` with the mods you pick, you install it over your
@@ -271,12 +335,14 @@ can start them, so you need **your own fork** and the app built from it.
 
 **1. Your own copy (once)**
 
-1. On [GitHub](https://github.com) (signed in), open this repository and tap **Fork**. For the
+1. On [GitHub](https://github.com) (signed in), open this repository and tap **Fork**. For a
    Shared Worlds edition, untick **Copy the `main` branch only**. Then **Create fork**. Keep it
    public: then GitHub's build machines are free.
 2. In your fork, open **Actions** and enable workflows (GitHub asks once).
-3. **Actions > ios > Run workflow**. Under **Use workflow from**, leave `main` for Horizon PE or pick
-   `shared-worlds` for the Shared Worlds edition. Tick **Make and keep the unsigned .ipa**, run it.
+3. **Actions > ios > Run workflow**. Under **Use workflow from**, leave `main` for Horizon PE, or pick
+   `shared-worlds` or `shared-worlds-mods` for those editions (for the last, also put its fifteen
+   mods in **Native mods to build in**: [the list](docs/shared-worlds-mods.md#building-it-yourself)).
+   Tick **Make and keep the unsigned .ipa**, run it.
    In about an hour the run has a `horizon-pe-ios-<number>` artifact: install that `.ipa`
    ([Install](#install)). The app remembers the branch it was built from, and builds its mods there.
 
@@ -337,13 +403,14 @@ No Mac needed: GitHub builds the app.
 | --- | --- | --- |
 | [`main`](https://github.com/shopifygav222/horizon-pocket-edition-ios/tree/main) | Horizon PE | `v1.0.0` |
 | [`shared-worlds`](https://github.com/shopifygav222/horizon-pocket-edition-ios/tree/shared-worlds) | `main` plus shared worlds and voice chat | `v1.0.0-shared-worlds` |
+| [`shared-worlds-mods`](https://github.com/shopifygav222/horizon-pocket-edition-ios/tree/shared-worlds-mods) | `shared-worlds` plus fifteen native mods (in its `native-mods/`), their buttons and defaults | `v1.0.0-shared-worlds-mods` |
 
 | Workflow | What it does |
 | --- | --- |
 | [`ios.yml`](.github/workflows/ios.yml) | Compiles the game for iOS, lints it, prepares the game files, bundles the app (checking it carries none of Mojang's files) and starts it in the iOS Simulator. Dispatched with **Make and keep the unsigned .ipa**, it keeps the app |
 | [`ios-guard.yml`](.github/workflows/ios-guard.yml) | Formatting, and Starling's desktop and Android builds still compile |
 | [`native-mods-check.yml`](.github/workflows/native-mods-check.yml) | Builds every native mod of the catalog against this source, one job each |
-| `shared-worlds.yml`, `shared-worlds-e2e.yml`, `voice.yml` | On `shared-worlds` only: the shared worlds and voice crates' tests, and two games sharing one world end to end |
+| `shared-worlds.yml`, `shared-worlds-e2e.yml`, `voice.yml` | On the `shared-worlds` branches: the shared worlds and voice crates' tests, and two games sharing one world end to end |
 
 On a Mac with Xcode: `rustup target add aarch64-apple-ios`, `python3 tools/ios_prepare.py` (needs Java
 25), then `brew install xcodegen && cd packaging/ios && xcodegen generate` and open
@@ -364,7 +431,13 @@ a new Starling release. The rest of `docs/` is Horizon's and Starling's own docu
 - **[horizon-iOS](https://github.com/meehandaniel4/horizon-iOS)**: the first native mod builds for iOS
   on GitHub Actions.
 - **[Opus](https://opus-codec.org)** and **[RNNoise](https://github.com/xiph/rnnoise)** (Xiph.Org):
-  the voice codec and the noise filter of the Shared Worlds edition.
+  the voice codec and the noise filter of the Shared Worlds editions.
+- **The mods of the Shared Worlds + Mods edition** and their authors: Waymap (Aron, after Nirokx's
+  horizon-waypoints), Zoom and Coordinates HUD (Horizon), Jade (Snownee; Horizon port by Joeypc6),
+  AppleSkin (sillysoufi), Armor Status and Status Effect HUD (CayMac), TreeFall, Enchantment Hints,
+  BiomeCompass and SmartF3 (d3grando), RightClickHarvest (Domanffe), ShulkerPeek (vstxx),
+  ContinuityHorizon (tariksabanuz) and Better Dynamic Lights (DeportedToHell). Their sources and
+  licences: [docs/shared-worlds-mods.md](docs/shared-worlds-mods.md#the-mods-their-authors-and-licences).
 
 ## License
 
