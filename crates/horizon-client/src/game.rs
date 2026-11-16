@@ -211,6 +211,7 @@ mod mob_looting;
 mod mob_sounds;
 #[cfg(any(target_os = "android", target_os = "ios"))]
 mod mobile_controls;
+mod mod_keys;
 mod mod_api_host;
 mod mod_assets;
 #[cfg(any(target_os = "android", target_os = "ios"))]
@@ -2957,6 +2958,8 @@ struct Game<'a> {
     /// The offer of the Starling folder in shared storage (game/files_offer.rs).
     #[cfg(target_os = "android")]
     files_offer: files_offer::FilesOffer,
+    /// The mods' keys a touch button or a controller holds (game/mod_keys.rs).
+    mod_keys: mod_keys::ModKeys,
     #[cfg(any(target_os = "android", target_os = "ios"))]
     update_offer: update_offer::UpdateOffer,
     #[cfg(target_os = "android")]
@@ -14826,6 +14829,8 @@ impl Game<'_> {
         self.bedrock_show(slot < Creative::DISPLAY, width);
     }
     /// Where the creative screen's window, or both of Bedrock Inventory's, start and end across.
+    /// (The other editions place a picked slot's tooltip by it; this one puts that beside the slot.)
+    #[allow(dead_code)]
     pub(super) fn creative_bounds(batch: &HudBatch) -> (f32, f32) {
         let (x, _) = batch.centered_origin(Creative::WIDTH, Creative::HEIGHT);
         let shift = CREATIVE_SHIFT.get().abs();
@@ -19409,6 +19414,7 @@ impl<'a> Game<'a> {
             imports: Default::default(),
             #[cfg(target_os = "android")]
             files_offer: Default::default(),
+            mod_keys: Default::default(),
             #[cfg(any(target_os = "android", target_os = "ios"))]
             update_offer: Default::default(),
             #[cfg(any(target_os = "android", target_os = "ios"))]

@@ -54,9 +54,15 @@ pub enum Control {
     Shield,
     /// Voice chat's microphone, on or muted (a shared world's; shown while voice chat is on).
     Voice,
+    /// The Zoom mod's key, held (shown while the mod is in the app and on).
+    Zoom,
+    /// Waymap's keys: the list of waypoints, and a new waypoint here (shown while the mod is
+    /// in the app and on).
+    Waypoints,
+    AddWaypoint,
 }
 impl Control {
-    pub const ALL: [Self; 15] = [
+    pub const ALL: [Self; 18] = [
         Self::Move,
         Self::Sprint,
         Self::Jump,
@@ -72,6 +78,9 @@ impl Control {
         Self::Offhand,
         Self::Shield,
         Self::Voice,
+        Self::Zoom,
+        Self::Waypoints,
+        Self::AddWaypoint,
     ];
     pub fn name(self) -> &'static str {
         match self {
@@ -90,6 +99,9 @@ impl Control {
             Self::Offhand => "Swap hands",
             Self::Shield => "Raise shield",
             Self::Voice => "Voice chat microphone",
+            Self::Zoom => "Zoom (hold)",
+            Self::Waypoints => "Waypoints",
+            Self::AddWaypoint => "Add waypoint",
         }
     }
 }
@@ -545,7 +557,7 @@ pub struct Settings {
     #[serde(default = "default_feedback_enabled")]
     pub show_control_hub: bool,
     #[serde(deserialize_with = "deserialize_visibility")]
-    pub button_visibility: [u8; 15],
+    pub button_visibility: [u8; 18],
     pub horizontal_margin: f32,
     pub vertical_margin: f32,
     /// Which factory defaults this file has had (`DEFAULTS_REV`): older files get the newer
@@ -575,7 +587,7 @@ pub struct Settings {
     #[serde(default)]
     pub snap_to_grid: bool,
     #[serde(deserialize_with = "deserialize_layouts")]
-    pub layouts: [[Placement; 15]; 3],
+    pub layouts: [[Placement; 18]; 3],
 }
 /// The factory defaults' revision. 1: toggle sprint and inventory walk controls on.
 pub const DEFAULTS_REV: u32 = 2;
@@ -606,7 +618,7 @@ fn default_res_scale() -> u32 {
 // Append new buttons without resetting a player's existing ten-button layout.
 fn deserialize_layouts<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
-) -> Result<[[Placement; 15]; 3], D::Error> {
+) -> Result<[[Placement; 18]; 3], D::Error> {
     let rows = Vec::<Vec<Placement>>::deserialize(deserializer)?;
     // A file with more controls than this app has (another edition's, whose own controls come
     // after these) reads too: the ones this app has are kept as they were placed.
@@ -622,14 +634,14 @@ fn deserialize_layouts<'de, D: serde::Deserializer<'de>>(
     }
     Ok(layouts)
 }
-fn deserialize_visibility<'de, D: serde::Deserializer<'de>>(d: D) -> Result<[u8; 15], D::Error> {
+fn deserialize_visibility<'de, D: serde::Deserializer<'de>>(d: D) -> Result<[u8; 18], D::Error> {
     let old = Vec::<u8>::deserialize(d)?;
     if old.len() < 12 {
         return Err(serde::de::Error::custom(
             "expected 12 or more visibility values",
         ));
     }
-    let mut values = [0; 15];
+    let mut values = [0; 18];
     let known = old.len().min(values.len());
     values[..known].copy_from_slice(&old[..known]);
     Ok(values)
@@ -653,6 +665,11 @@ impl Default for Settings {
             Placement::new(0.92, 0.36, 0.12),
             // The microphone: the leftmost of the top row, a place left of the debug button.
             Placement::new(0.38, 0.055, 0.075),
+            // Zoom: at the left edge, under the hub's button.
+            Placement::new(0.035, 0.17, 0.075),
+            // Waymap's two: the top row goes on to the right with them.
+            Placement::new(0.62, 0.055, 0.075),
+            Placement::new(0.66, 0.055, 0.075),
         ];
         let mut layouts = [base; 3];
         layouts[2][Control::Sneak as usize] = Placement::new(0.13, 0.76, 0.10);
@@ -692,7 +709,7 @@ impl Default for Settings {
             virtual_mouse_hidden: true,
             disable_game_animations: false,
             resolution_scale_percent: default_res_scale(),
-            virtual_mouse_sensitivity: 1.0,
+            virtual_mouse_sensitivity: 1.4,
             virtual_mouse_pointer_scale: default_pointer_scale(),
             crosshair_gestures: false,
             attack_button_look: true,
@@ -706,7 +723,7 @@ impl Default for Settings {
             vibrate: true,
             ui_vibrate: false,
             show_control_hub: true,
-            button_visibility: [0; 15],
+            button_visibility: [0; 18],
             horizontal_margin: 0.0,
             vertical_margin: 0.0,
             defaults_rev: DEFAULTS_REV,
@@ -1841,7 +1858,7 @@ impl Settings {
         self.control_style = style;
         match style {
             ControlStyle::Mcpe => {
-                self.button_visibility = [0; 15];
+                self.button_visibility = [0; 18];
                 self.custom_buttons.retain(|b| !b.layouts[0].use_goy_style);
             }
             ControlStyle::GoyControl => {

@@ -751,9 +751,9 @@ impl Game<'_> {
         self.touch.slots.slides = kept;
     }
 
-    /// The pick as Bedrock shows it: the slot framed, a bar over it for half of the stack, and its
-    /// tooltip beside the window at the slot's height, near the pick and over no slot (under the
-    /// window where the screen is too narrow for that).
+    /// The pick as Bedrock shows it: the slot framed and a bar over it for half of the stack. Its
+    /// tooltip is right beside the slot (in this edition: the enchantment hints and the other
+    /// mods' lines are read next to the item they are about).
     fn draw_slot_pick(&mut self, batch: &mut HudBatch) {
         let Some(p) = self.touch.slots.picked else {
             return;
@@ -773,33 +773,23 @@ impl Game<'_> {
             batch.fill(atlas, x + 1.0, y + 1.0, 14.0, 2.0, rgba(60, 60, 60, 255));
             batch.fill(atlas, x + 1.0, y + 1.0, 7.0, 2.0, rgba(85, 255, 85, 255));
         }
-        let window = self.window_image(batch);
-        // Bedrock Inventory's two windows count as one: no slot of either under the tooltip.
-        let (left, right) = if self.screen == Screen::Creative {
-            Self::creative_bounds(batch)
-        } else {
-            (window.left as f32, (window.left + window.width) as f32)
-        };
-        // Clear of the window's frame and of the tooltip's own, on the roomier side; lines too
-        // long for it wrap (a phone's GUI is narrow).
-        const GAP: f32 = 8.0;
-        let (room_right, room_left) = (batch.width - right - GAP - 4.0, left - GAP - 4.0);
+        // Right beside the picked slot, as a mouse's tooltip is beside its pointer: on the side
+        // with more room, and lines too long for that side wrap (a phone's GUI is narrow).
+        const GAP: f32 = 6.0;
+        let (room_right, room_left) = (batch.width - (x + 16.0 + GAP) - 4.0, x - GAP - 4.0);
         let room = room_right.max(room_left);
         let lines = self.wrap_tooltip(self.stack_tooltip(&stack), room);
         let width = lines
             .iter()
             .map(|(t, _)| self.gui.atlas.font.width_text(t))
             .fold(0.0, f32::max);
-        let (tx, ty) = if width <= room_right {
-            (right + GAP, y + 4.0)
-        } else if width <= room_left {
-            (left - GAP - width, y + 4.0)
+        let tx = if width <= room_right || room_right >= room_left {
+            x + 16.0 + GAP
         } else {
-            let bottom = (window.top + window.height) as f32;
-            ((x + 8.0 - width / 2.0).max(4.0), bottom + GAP)
+            x - GAP - width
         };
         // draw_tooltip puts the box 12 right of and 12 above the point it is given.
-        self.draw_tooltip_lines(batch, &lines, tx - 12.0, ty + 12.0);
+        self.draw_tooltip_lines(batch, &lines, tx - 12.0, y + 4.0 + 12.0);
     }
 
     /// Tooltip lines wrapped to `width` GUI pixels (left whole when that is too narrow to read).

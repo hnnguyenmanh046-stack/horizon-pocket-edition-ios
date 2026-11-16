@@ -185,6 +185,19 @@ enum Role {
     Button(Button),
 }
 
+/// The factory top row from left to right, each control with its place (a fraction of the
+/// screen's width): the microphone, the five that were always there, and Waymap's two.
+const TOP_ROW: [(Control, f32); 8] = [
+    (Control::Voice, 0.38),
+    (Control::Debug, 0.42),
+    (Control::Chat, 0.46),
+    (Control::Pause, 0.50),
+    (Control::Settings, 0.54),
+    (Control::Perspective, 0.58),
+    (Control::Waypoints, 0.62),
+    (Control::AddWaypoint, 0.66),
+];
+
 pub struct TouchControls {
     pub settings: Settings,
     pub hud_opacity_scale: f32,
@@ -194,6 +207,10 @@ pub struct TouchControls {
     /// Voice chat is on (a shared world's): its microphone button shows, red while muted.
     pub voice_available: bool,
     pub voice_muted: bool,
+    /// The Zoom mod is in this app and turned on: its button shows. And Waymap, for the two
+    /// waypoint buttons.
+    pub zoom_available: bool,
+    pub waypoints_available: bool,
     /// Physical keypad profiles keep utility controls without a movement overlay.
     pub auxiliary_only: bool,
     /// Inventory utility buttons emit real modifier/mouse events, never movement.
@@ -223,6 +240,11 @@ pub struct TouchControls {
     pub perspective_requested: bool,
     /// The microphone button was tapped: on, or muted again.
     pub voice_requested: bool,
+    /// A waypoint button was tapped: the list of waypoints, a new waypoint here.
+    pub waypoints_requested: bool,
+    pub add_waypoint_requested: bool,
+    /// The finger on the zoom button: zoomed in for as long as it stays down.
+    zoom_finger: Option<u64>,
     pub clicked: bool,
     pub context_use: bool,
     pub vertical_movement: bool,
@@ -250,6 +272,8 @@ impl Default for TouchControls {
             shield_available: false,
             voice_available: false,
             voice_muted: true,
+            zoom_available: false,
+            waypoints_available: false,
             auxiliary_only: false,
             inventory_mode: false,
             inventory_shift: false,
@@ -273,6 +297,9 @@ impl Default for TouchControls {
             debug_requested: false,
             perspective_requested: false,
             voice_requested: false,
+            waypoints_requested: false,
+            add_waypoint_requested: false,
+            zoom_finger: None,
             clicked: false,
             context_use: false,
             vertical_movement: false,
@@ -372,6 +399,9 @@ impl TouchControls {
                 | Control::Settings
                 | Control::Perspective
                 | Control::Voice
+                | Control::Zoom
+                | Control::Waypoints
+                | Control::AddWaypoint
         )
     }
     pub fn auxiliary_at(&self, point: [f32; 2]) -> bool {
@@ -496,6 +526,16 @@ impl TouchControls {
         if c == Control::Voice && !self.voice_available && self.editor.is_none() {
             return false;
         }
+        // A mod's buttons are there while the mod is in the app and on (and in the editor).
+        if c == Control::Zoom && !self.zoom_available && self.editor.is_none() {
+            return false;
+        }
+        if matches!(c, Control::Waypoints | Control::AddWaypoint)
+            && !self.waypoints_available
+            && self.editor.is_none()
+        {
+            return false;
+        }
         if c == Control::Shield
             && self.force_crosshair
             && self.settings.button_visibility[Control::Use as usize] == 0
@@ -541,28 +581,26 @@ impl TouchControls {
         // Keep factory top buttons separate on tall surfaces. Custom positions
         // and every landscape layout remain exactly as the player saved them.
         if self.aspect() < 1.0 && p.center[1] == 0.055 && p.size == 0.075 {
-            // Five across, as ever; six while the microphone is there with them.
-            let top = if self.visible(Control::Voice) {
-                match c {
-                    Control::Voice => Some((0.38, 0.085)),
-                    Control::Debug => Some((0.42, 0.25)),
-                    Control::Chat => Some((0.46, 0.415)),
-                    Control::Pause => Some((0.50, 0.58)),
-                    Control::Settings => Some((0.54, 0.745)),
-                    Control::Perspective => Some((0.58, 0.91)),
-                    _ => None,
-                }
-            } else {
-                match c {
-                    Control::Debug => Some((0.42, 0.18)),
-                    Control::Chat => Some((0.46, 0.34)),
-                    Control::Pause => Some((0.50, 0.50)),
-                    Control::Settings => Some((0.54, 0.66)),
-                    Control::Perspective => Some((0.58, 0.82)),
-                    _ => None,
-                }
-            };
-            if let Some((old, new)) = top {
+            // The row from left to right, each with its factory place: the five there always
+            // were, and the ones that show only at times (the microphone, a mod's buttons).
+            let row: Vec<(Control, f32)> = TOP_ROW
+                .into_iter()
+                .filter(|(control, _)| {
+                    !matches!(
+                        control,
+                        Control::Voice | Control::Waypoints | Control::AddWaypoint
+                    ) || self.visible(*control)
+                })
+                .collect();
+            if let Some(index) = row.iter().position(|(control, _)| *control == c) {
+                let (old, count) = (row[index].1, row.len());
+                // Five across, as ever; six from edge to edge; more share that width.
+                let step = 0.825 / (count.max(2) - 1) as f32;
+                let new = match count {
+                    5 => [0.18, 0.34, 0.50, 0.66, 0.82][index],
+                    6 => [0.085, 0.25, 0.415, 0.58, 0.745, 0.91][index],
+                    _ => 0.085 + step * index as f32,
+                };
                 let old = if self.settings.left_handed {
                     1.0 - old
                 } else {
@@ -575,6 +613,10 @@ impl TouchControls {
                         new
                     };
                     p.size = p.size.min(self.aspect() * 0.12);
+                    if count > 6 {
+                        // Seven or eight: each a little smaller, so none touches the next.
+                        p.size = p.size.min(self.aspect() * step * 0.92);
+                    }
                 }
             }
         }
@@ -584,15 +626,7 @@ impl TouchControls {
         if self.aspect() >= 1.0
             && p.center[1] == 0.055
             && p.size == 0.075
-            && matches!(
-                c,
-                Control::Voice
-                    | Control::Debug
-                    | Control::Chat
-                    | Control::Pause
-                    | Control::Settings
-                    | Control::Perspective
-            )
+            && TOP_ROW.iter().any(|(control, _)| *control == c)
         {
             let wide = p.size / self.aspect();
             let x = p.center[0];
@@ -601,9 +635,9 @@ impl TouchControls {
             } else {
                 x
             };
-            let placed = [0.38, 0.42, 0.46, 0.50, 0.54, 0.58]
+            let placed = TOP_ROW
                 .iter()
-                .any(|f: &f32| (factory - f).abs() < 0.0001);
+                .any(|(_, place)| (factory - place).abs() < 0.0001);
             if wide > 0.045 && placed {
                 p.center[0] = 0.5 + (x - 0.5) * (wide * 1.05 / 0.04);
             }
@@ -837,7 +871,13 @@ impl TouchControls {
                     Control::Jump => "ui/jump",
                     Control::Sneak => "ui/sneak",
                     Control::Pause => "ui/pause_icon",
-                    Control::Chat | Control::Debug | Control::Perspective | Control::Voice => "gui",
+                    Control::Chat
+                    | Control::Debug
+                    | Control::Perspective
+                    | Control::Voice
+                    | Control::Zoom
+                    | Control::Waypoints
+                    | Control::AddWaypoint => "gui",
                     Control::Inventory => "ui/more-dots",
                     Control::Settings => "ui/gear",
                     Control::Offhand | Control::Shield => "ui/joystick_knob",
@@ -851,6 +891,9 @@ impl TouchControls {
                         region(b, a, "gui", [236.0, 46.0, 18.0, 18.0], bounds, color)
                     }
                     Control::Voice => mic_button(b, a, bounds, self.voice_muted, color),
+                    Control::Zoom => zoom_button(b, a, bounds, color),
+                    Control::Waypoints => waypoint_button(b, a, bounds, false, color),
+                    Control::AddWaypoint => waypoint_button(b, a, bounds, true, color),
                     Control::Offhand | Control::Shield => {
                         let label = if control == Control::Offhand {
                             "Swap"
@@ -1082,6 +1125,18 @@ impl TouchControls {
                     self.voice_requested = true;
                     Role::Ignore
                 }
+                Some(Control::Zoom) => {
+                    self.zoom_finger = Some(id);
+                    Role::Ignore
+                }
+                Some(Control::Waypoints) => {
+                    self.waypoints_requested = true;
+                    Role::Ignore
+                }
+                Some(Control::AddWaypoint) => {
+                    self.add_waypoint_requested = true;
+                    Role::Ignore
+                }
                 Some(Control::Sneak)
                     if self.settings.mode == Mode::Dpad
                         && self.toggle_crouch
@@ -1209,6 +1264,14 @@ impl TouchControls {
         self.debug_requested = false;
         self.perspective_requested = false;
         self.voice_requested = false;
+        self.waypoints_requested = false;
+        self.add_waypoint_requested = false;
+        self.zoom_finger = None;
+    }
+    /// A finger is on the zoom button: the Zoom mod's key is down for as long.
+    pub fn zoom_held(&self) -> bool {
+        self.zoom_finger
+            .is_some_and(|finger| self.fingers.contains_key(&finger))
     }
     /// A short world tap never holds a mouse button into the next tick.
     /// Its item-use intent is resolved against the current entity target.
@@ -1620,6 +1683,62 @@ fn mic_button(b: &mut HudBatch, a: &HudAtlas, [x, y, w, h]: [f32; 4], muted: boo
     }
 }
 
+/// The Zoom mod's button: the plate of its neighbours with a magnifying glass on it. Held, it
+/// is the mod's zoom key held.
+fn zoom_button(b: &mut HudBatch, a: &HudAtlas, [x, y, w, h]: [f32; 4], color: u32) {
+    const GLASS: [&str; 12] = [
+        "...####.....",
+        "..#....#....",
+        ".#......#...",
+        ".#......#...",
+        ".#......#...",
+        ".#......#...",
+        "..#....#....",
+        "...####.#...",
+        "........##..",
+        ".........##.",
+        "..........##",
+        "...........#",
+    ];
+    menu_frame(b, a, [x, y, w, h], color);
+    let inner = [x + w * 0.2, y + h * 0.2, w * 0.6, h * 0.6];
+    pixel_glyph(b, a, inner, &GLASS, color);
+}
+
+/// Waymap's two buttons: the plate of their neighbours with a map pin on it, and a mark in
+/// its lower right corner that tells them apart. The list of waypoints has three short lines,
+/// fainter than the pin; a new waypoint has a plus.
+fn waypoint_button(b: &mut HudBatch, a: &HudAtlas, [x, y, w, h]: [f32; 4], add: bool, color: u32) {
+    const PIN: [&str; 12] = [
+        "....####....",
+        "...######...",
+        "..###..###..",
+        "..##....##..",
+        "..##....##..",
+        "..###..###..",
+        "...######...",
+        "...######...",
+        "....####....",
+        "....####....",
+        ".....##.....",
+        ".....##.....",
+    ];
+    const LINES: [&str; 5] = ["#####", ".....", "#####", ".....", "#####"];
+    const PLUS: [&str; 5] = ["..#..", "..#..", "#####", "..#..", "..#.."];
+    menu_frame(b, a, [x, y, w, h], color);
+    // The pin a little left of the middle, the mark beside its point.
+    let pin = [x + w * 0.14, y + h * 0.2, w * 0.56, h * 0.56];
+    pixel_glyph(b, a, pin, &PIN, color);
+    let mark = [x + w * 0.60, y + h * 0.52, w * 0.24, h * 0.24];
+    if add {
+        pixel_glyph(b, a, mark, &PLUS, color);
+    } else {
+        // Two thirds of the plate's own opacity: there, without drawing the eye.
+        let alpha = (color >> 24) * 2 / 3;
+        pixel_glyph(b, a, mark, &LINES, (color & 0x00FF_FFFF) | (alpha << 24));
+    }
+}
+
 /// A glyph drawn from rows of cells (`#` filled), each run of cells in a row as one quad,
 /// square and centred in the rectangle.
 fn pixel_glyph(b: &mut HudBatch, a: &HudAtlas, [x, y, w, h]: [f32; 4], rows: &[&str], color: u32) {
@@ -1859,6 +1978,9 @@ pub fn draw_single_mcpe_control(
         Control::Shield => "ui/shield_icon",
         Control::Move => "ui/joystick_frame",
         Control::Voice => "ui/mic_icon",
+        Control::Zoom => "ui/zoom_icon",
+        Control::Waypoints => "ui/waypoints_icon",
+        Control::AddWaypoint => "ui/add_waypoint_icon",
     };
     match control {
         Control::Chat if a.sprites.contains_key("gui/bedrock/gui") => {
@@ -1871,6 +1993,9 @@ pub fn draw_single_mcpe_control(
             region(b, a, "gui", [236.0, 46.0, 18.0, 18.0], bounds, color)
         }
         Control::Voice => mic_button(b, a, bounds, tc.voice_muted, color),
+        Control::Zoom => zoom_button(b, a, bounds, color),
+        Control::Waypoints => waypoint_button(b, a, bounds, false, color),
+        Control::AddWaypoint => waypoint_button(b, a, bounds, true, color),
         Control::Offhand | Control::Shield => {
             let label = if control == Control::Offhand {
                 "Swap"
@@ -2828,7 +2953,7 @@ mod tests {
         let settings = Settings::default();
         let mut old = serde_json::to_value(&settings).unwrap();
         for row in old["layouts"].as_array_mut().unwrap() {
-            assert_eq!(row.as_array().unwrap().len(), 15);
+            assert_eq!(row.as_array().unwrap().len(), 18);
             row.as_array_mut().unwrap().truncate(14);
         }
         old["button_visibility"]
@@ -2858,7 +2983,7 @@ mod tests {
         let again: Settings =
             serde_json::from_value(serde_json::to_value(&settings).unwrap()).unwrap();
         assert_eq!(again.layouts, settings.layouts);
-        assert_eq!(Control::ALL.len(), 15);
+        assert_eq!(Control::ALL.len(), 18);
         assert_eq!(Control::ALL[Control::Voice as usize], Control::Voice);
     }
     #[test]
@@ -3372,5 +3497,162 @@ mod tests {
         assert_eq!(read.button_visibility[Control::Chat as usize], 2);
         assert_eq!(read.virtual_mouse_sensitivity, 1.5);
         assert_eq!(read.layouts[0], settings.layouts[0]);
+    }
+
+    /// The mods' buttons of this edition: Zoom's under the hub, held like its key; Waymap's two
+    /// right of the top row, taps. Each is there only while its mod is (and in the editor), and
+    /// a layout saved before them loads whole with them at their places.
+    #[test]
+    fn the_zoom_and_waypoint_buttons_show_with_their_mods_and_join_old_layouts() {
+        let mut touch = TouchControls::default();
+        touch.viewport(2532, 1170);
+        let mods = [Control::Zoom, Control::Waypoints, Control::AddWaypoint];
+        // Without the mods: none is there, and a touch where one would be isn't its.
+        for control in mods {
+            assert!(!touch.visible(control), "{control:?}");
+        }
+        let zoom = touch.settings.placement(Control::Zoom).center;
+        touch.update(1, zoom, true, false);
+        assert!(!touch.zoom_held());
+        touch.update(1, zoom, false, true);
+        touch.clear();
+        // With them: there, the same size as the top row's, apart from each other and from it.
+        touch.zoom_available = true;
+        touch.waypoints_available = true;
+        let row = [
+            Control::Debug,
+            Control::Chat,
+            Control::Pause,
+            Control::Settings,
+            Control::Perspective,
+            Control::Waypoints,
+            Control::AddWaypoint,
+        ];
+        let rects: Vec<_> = row
+            .iter()
+            .map(|c| touch.placement(*c).rect(touch.aspect()))
+            .collect();
+        for pair in rects.windows(2) {
+            assert!(pair[0][0] + pair[0][2] <= pair[1][0] + 0.0001, "{rects:?}");
+            assert_eq!(pair[0][1], pair[1][1]);
+            assert_eq!(pair[0][3], pair[1][3]);
+        }
+        assert!(rects[6][0] + rects[6][2] <= 1.0);
+        // The zoom button: under the hub at the left edge, on the screen, the row's size.
+        let glass = touch.placement(Control::Zoom).rect(touch.aspect());
+        assert!(glass[0] >= 0.0 && glass[1] > rects[0][1] + rects[0][3], "{glass:?}");
+        assert_eq!(glass[3], rects[0][3]);
+        // Held: zoomed for as long as the finger is down, and nothing else's.
+        touch.update(1, zoom, true, false);
+        assert!(touch.zoom_held());
+        assert!(matches!(touch.fingers[&1].0, Role::Ignore));
+        assert_eq!(touch.poll_state().triggers, [0.0; 2]);
+        touch.update(1, [zoom[0] + 0.01, zoom[1]], false, false);
+        assert!(touch.zoom_held());
+        touch.update(1, zoom, false, true);
+        assert!(!touch.zoom_held());
+        // A finger left down when the controls are cleared (a screen opened) lets go.
+        touch.update(2, zoom, true, false);
+        assert!(touch.zoom_held());
+        touch.clear();
+        assert!(!touch.zoom_held());
+        // Taps: the list, a new waypoint.
+        for (control, list) in [(Control::Waypoints, true), (Control::AddWaypoint, false)] {
+            let point = touch.settings.placement(control).center;
+            touch.update(3, point, true, false);
+            touch.update(3, point, false, true);
+            assert_eq!(touch.waypoints_requested, list);
+            assert_eq!(touch.add_waypoint_requested, !list);
+            touch.clear();
+            assert!(!touch.waypoints_requested && !touch.add_waypoint_requested);
+        }
+        // Hidden by the player in the editor's list: hidden, the mod or not.
+        touch.settings.button_visibility[Control::Zoom as usize] = 2;
+        assert!(!touch.visible(Control::Zoom));
+        touch.settings.button_visibility[Control::Zoom as usize] = 0;
+        // The editor shows all three to be placed, the mods or not.
+        touch.zoom_available = false;
+        touch.waypoints_available = false;
+        touch.open_editor();
+        for control in mods {
+            assert!(touch.visible(control), "{control:?}");
+        }
+        // A phone held upright: the row's seven, and its eight with the microphone, none
+        // touching the next, all on the screen; without the mods the five are where they were.
+        let mut tall = TouchControls::default();
+        tall.viewport(480, 854);
+        let five: Vec<_> = row[..5]
+            .iter()
+            .map(|c| tall.placement(*c).center[0])
+            .collect();
+        assert_eq!(five, [0.18, 0.34, 0.50, 0.66, 0.82]);
+        tall.waypoints_available = true;
+        for voice in [false, true] {
+            tall.voice_available = voice;
+            let shown: Vec<Control> = std::iter::once(Control::Voice)
+                .filter(|_| voice)
+                .chain(row)
+                .collect();
+            let rects: Vec<_> = shown
+                .iter()
+                .map(|c| tall.placement(*c).rect(tall.aspect()))
+                .collect();
+            for pair in rects.windows(2) {
+                assert!(pair[0][0] + pair[0][2] < pair[1][0], "{voice} {rects:?}");
+            }
+            let last = rects[rects.len() - 1];
+            assert!(rects[0][0] >= 0.0 && last[0] + last[2] <= 1.0, "{voice} {rects:?}");
+        }
+        // An iPad: the row with every button stands apart, on the screen.
+        let mut pad = TouchControls::default();
+        pad.viewport(2048, 1536);
+        pad.voice_available = true;
+        pad.waypoints_available = true;
+        let rects: Vec<_> = std::iter::once(Control::Voice)
+            .chain(row)
+            .map(|c| pad.placement(c).rect(pad.aspect()))
+            .collect();
+        for pair in rects.windows(2) {
+            assert!(pair[0][0] + pair[0][2] < pair[1][0], "{rects:?}");
+        }
+        assert!(rects[0][0] >= 0.0 && rects[7][0] + rects[7][2] <= 1.0, "{rects:?}");
+        // A layout saved with fifteen controls (Shared Worlds'): every one kept, the three
+        // added at their places, shown by default.
+        let settings = Settings::default();
+        let mut old = serde_json::to_value(&settings).unwrap();
+        for row in old["layouts"].as_array_mut().unwrap() {
+            row.as_array_mut().unwrap().truncate(15);
+        }
+        old["button_visibility"]
+            .as_array_mut()
+            .unwrap()
+            .truncate(15);
+        old["layouts"][0][Control::Voice as usize]["center"] = serde_json::json!([0.3, 0.4]);
+        let restored: Settings = serde_json::from_value(old).unwrap();
+        assert_eq!(
+            restored.layouts[0][Control::Voice as usize].center,
+            [0.3, 0.4]
+        );
+        for control in mods {
+            for mode in 0..3 {
+                assert_eq!(
+                    restored.layouts[mode][control as usize],
+                    settings.layouts[mode][control as usize]
+                );
+            }
+            assert_eq!(restored.button_visibility[control as usize], 0);
+        }
+        assert_eq!(
+            settings.layouts[0][Control::Waypoints as usize].center,
+            [0.62, 0.055]
+        );
+        assert_eq!(
+            settings.layouts[0][Control::AddWaypoint as usize].center,
+            [0.66, 0.055]
+        );
+        assert_eq!(
+            settings.layouts[0][Control::Zoom as usize].center,
+            [0.035, 0.17]
+        );
     }
 }

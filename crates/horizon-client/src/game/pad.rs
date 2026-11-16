@@ -366,6 +366,22 @@ impl Game<'_> {
                 }
                 Ok(())
             }
+            // The mods' keys (game/mod_keys.rs): Zoom's for as long as the button is held,
+            // Waymap's as a press.
+            gamepad::ZOOM => {
+                self.mod_key_hold("pad", &super::mod_keys::ZOOM, down);
+                Ok(())
+            }
+            gamepad::WAYPOINTS | gamepad::ADD_WAYPOINT => {
+                if down {
+                    self.mod_key_tap(if action == gamepad::WAYPOINTS {
+                        &super::mod_keys::WAYPOINTS
+                    } else {
+                        &super::mod_keys::ADD_WAYPOINT
+                    });
+                }
+                Ok(())
+            }
             #[cfg(any(target_os = "android", target_os = "ios"))]
             "key.sneak" if self.touch_shown() && self.mobile.controls.vertical_movement => {
                 self.toggles.0[SNEAK].is_down = down;

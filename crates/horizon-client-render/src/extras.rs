@@ -156,7 +156,9 @@ impl Default for Extras {
     fn default() -> Self {
         Self {
             fullbright: false,
-            dynamic_lights: false,
+            // Horizon PE: Shared Worlds + Mods has dynamic lights, the Mouse Tweaks controls and
+            // the sort buttons on from the first start.
+            dynamic_lights: true,
             zoom: false,
             zoom_key: "key.keyboard.z".into(),
             zoom_level: 4,
@@ -179,9 +181,9 @@ impl Default for Extras {
             ui_sound_reserve: false,
             own_name_tag: false,
             hide_block_particles: false,
-            mouse_tweaks: false,
+            mouse_tweaks: true,
             mouse_tweaks_wheel: true,
-            sort: false,
+            sort: true,
             sort_key: "key.keyboard.unknown".into(),
             chat_animation: false,
             chat_indicator: true,
@@ -814,9 +816,9 @@ mod tests {
     #[test]
     fn everything_is_off_by_default_and_round_trips() {
         let d = Extras::default();
-        assert!(!d.fullbright && !d.dynamic_lights);
+        assert!(!d.fullbright && d.dynamic_lights);
         assert!(!d.zoom && !d.fps && !d.keystrokes && !d.minimap && !d.auto_reconnect);
-        assert!(!d.mouse_tweaks && !d.sort && !d.own_name_tag && !d.ui_sound_reserve);
+        assert!(d.mouse_tweaks && d.sort && !d.own_name_tag && !d.ui_sound_reserve);
         assert!(!d.hide_block_particles);
         assert!(!d.music_page && d.music_off.is_empty());
         assert!(d.discord_presence);

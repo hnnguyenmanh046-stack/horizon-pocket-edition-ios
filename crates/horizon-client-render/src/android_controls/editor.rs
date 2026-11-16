@@ -524,13 +524,13 @@ impl TouchControls {
         }
     }
 }
-/// The list of built-in controls: three to a row, so all fifteen stay on the screen.
+/// The list of built-in controls: three to a row, six rows, so all eighteen stay on the screen.
 fn palette_rect(index: usize) -> [f32; 4] {
     [
         0.22 + (index % 3) as f32 * 0.193,
-        0.17 + (index / 3) as f32 * 0.11,
+        0.17 + (index / 3) as f32 * 0.1,
         0.18,
-        0.09,
+        0.085,
     ]
 }
 fn plate(b: &mut HudBatch, a: &HudAtlas, [x, y, w, h]: [f32; 4], label: &str, on: bool) {

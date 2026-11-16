@@ -1,10 +1,11 @@
 //! iOS: where Horizon PE's releases come out, and which of them is an update of this app: for
 //! the update prompt (game/update_offer.rs).
 //!
-//! The app comes in two editions, released side by side in one repository: Horizon PE (tags
-//! `v1.0.0`, `v1.0.1`, ...) and Horizon PE: Shared Worlds, which adds shared worlds and voice
-//! chat (tags `v1.0.0-shared-worlds`, ...). An app is only ever offered its own edition's
-//! releases: the other's is another game to its player.
+//! The app comes in three editions, released side by side in one repository: Horizon PE (tags
+//! `v1.0.0`, `v1.0.1`, ...), Horizon PE: Shared Worlds, which adds shared worlds and voice
+//! chat (tags `v1.0.0-shared-worlds`, ...), and Horizon PE: Shared Worlds + Mods, that one
+//! built with fifteen native mods (tags `v1.0.0-shared-worlds-mods`, ...). An app is only ever
+//! offered its own edition's releases: another's is another game to its player.
 use crate::starling_releases::{Update, newer};
 
 /// The repository the releases come out in, as GitHub's API names it.
@@ -17,11 +18,14 @@ pub enum Edition {
     Standard,
     /// Horizon PE: Shared Worlds.
     SharedWorlds,
+    /// Horizon PE: Shared Worlds + Mods.
+    SharedWorldsMods,
 }
 
-/// The edition this source builds. The one line that differs between the branches `main` and
-/// `shared-worlds` here: a merge of `main` into `shared-worlds` keeps `shared-worlds`' own.
-pub const EDITION: Edition = Edition::SharedWorlds;
+/// The edition this source builds. The one line that differs between the branches `main`,
+/// `shared-worlds` and `shared-worlds-mods` here: a merge from the branch below keeps this
+/// branch's own.
+pub const EDITION: Edition = Edition::SharedWorldsMods;
 
 impl Edition {
     /// What follows the version in the edition's release tags.
@@ -29,6 +33,7 @@ impl Edition {
         match self {
             Self::Standard => "",
             Self::SharedWorlds => "-shared-worlds",
+            Self::SharedWorldsMods => "-shared-worlds-mods",
         }
     }
 
@@ -37,6 +42,7 @@ impl Edition {
         match self {
             Self::Standard => "Horizon PE",
             Self::SharedWorlds => "Horizon PE: Shared Worlds",
+            Self::SharedWorldsMods => "Horizon PE: Shared Worlds + Mods",
         }
     }
 
@@ -218,10 +224,36 @@ mod tests {
         assert_eq!(update_in(&json!([]), EDITION, "1.0.0"), None);
     }
 
-    /// This branch is Horizon PE: Shared Worlds; `main` has this test say Horizon PE.
+    /// This branch is Horizon PE: Shared Worlds + Mods; `main` has this test say Horizon PE,
+    /// `shared-worlds` Shared Worlds.
     #[test]
-    fn this_source_is_the_shared_worlds_edition() {
-        assert_eq!(EDITION, Edition::SharedWorlds);
-        assert_eq!(EDITION.tag_suffix(), "-shared-worlds");
+    fn this_source_is_the_shared_worlds_and_mods_edition() {
+        assert_eq!(EDITION, Edition::SharedWorldsMods);
+        assert_eq!(EDITION.tag_suffix(), "-shared-worlds-mods");
+    }
+
+    /// The three editions' tags never read as one another's.
+    #[test]
+    fn the_mods_editions_tags_are_its_own() {
+        let (standard, shared, mods) = (
+            Edition::Standard,
+            Edition::SharedWorlds,
+            Edition::SharedWorldsMods,
+        );
+        assert_eq!(mods.version_of("v1.2.0-shared-worlds-mods"), Some("1.2.0"));
+        assert_eq!(mods.version_of("v1.2.0-shared-worlds"), None);
+        assert_eq!(mods.version_of("v1.2.0"), None);
+        assert_eq!(shared.version_of("v1.2.0-shared-worlds-mods"), None);
+        assert_eq!(standard.version_of("v1.2.0-shared-worlds-mods"), None);
+        let releases = json!([
+            release("v1.3.0-shared-worlds", "a.ipa"),
+            release("v1.2.0-shared-worlds-mods", "HorizonPE-1.2.0-SharedWorlds-Mods.ipa"),
+            release("v1.1.0", "b.ipa"),
+        ]);
+        let update = update_in(&releases, mods, "1.0.0").unwrap();
+        assert_eq!(update.version, "1.2.0");
+        assert_eq!(update.name, "HorizonPE-1.2.0-SharedWorlds-Mods.ipa");
+        assert_eq!(update_in(&releases, shared, "1.0.0").unwrap().version, "1.3.0");
+        assert_eq!(update_in(&releases, standard, "1.0.0").unwrap().version, "1.1.0");
     }
 }

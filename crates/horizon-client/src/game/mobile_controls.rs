@@ -269,7 +269,12 @@ impl Game<'_> {
         // Voice chat's microphone button: there while voice chat is on, red while muted.
         // (Red or not the moment it is tapped: what is asked for, not the device's state.)
         let (voice_on, mic_live) = (self.voice.enabled(), self.voice.mic_on());
+        // The mods' buttons: there while the mod is in the app and on (game/mod_keys.rs).
+        let zoom_mod = self.mod_key_ready(super::mod_keys::ZOOM.mod_id);
+        let waypoint_mod = self.mod_key_ready(super::mod_keys::WAYPOINTS.mod_id);
         let tc = &mut self.mobile.controls;
+        tc.zoom_available = zoom_mod;
+        tc.waypoints_available = waypoint_mod;
         tc.auxiliary_only = self.settings.keypad.enabled;
         tc.shield_available = shield_available;
         tc.voice_available = voice_on;
@@ -327,6 +332,10 @@ impl Game<'_> {
         let debug = std::mem::take(&mut tc.debug_requested);
         let settings = std::mem::take(&mut tc.settings_requested);
         let voice = std::mem::take(&mut tc.voice_requested);
+        let waypoints = std::mem::take(&mut tc.waypoints_requested);
+        let add_waypoint = std::mem::take(&mut tc.add_waypoint_requested);
+        // Zoomed for as long as a finger is on the button, in play.
+        let zoom = tc.zoom_held() && !in_menu && !editing && self.focused;
         if let Some(held_use) = tap {
             if self.pick_entity_hit().is_some()
                 && self.using.is_none()
@@ -351,6 +360,13 @@ impl Game<'_> {
         }
         if voice {
             self.voice_toggle_mic();
+        }
+        self.mod_key_hold("touch", &super::mod_keys::ZOOM, zoom);
+        if waypoints && !in_menu {
+            self.mod_key_tap(&super::mod_keys::WAYPOINTS);
+        }
+        if add_waypoint && !in_menu {
+            self.mod_key_tap(&super::mod_keys::ADD_WAYPOINT);
         }
         if settings {
             self.mobile.ui.floating_menu = false;

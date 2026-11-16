@@ -225,6 +225,11 @@ impl Edges {
 /// Horizon's pad-only actions (no vanilla key mapping).
 pub const HOTBAR_PREVIOUS: &str = "pad.hotbarPrevious";
 pub const HOTBAR_NEXT: &str = "pad.hotbarNext";
+/// Horizon PE: Shared Worlds + Mods: the keys of the mods it is built with. Zoom's, held; the
+/// list of Waymap's waypoints; a waypoint here.
+pub const ZOOM: &str = "pad.zoom";
+pub const WAYPOINTS: &str = "pad.waypoints";
+pub const ADD_WAYPOINT: &str = "pad.addWaypoint";
 
 /// Bindable actions and their default buttons: vanilla key mappings (the
 /// game acts as their default key) and Horizon's pad-only actions. Start is
@@ -241,10 +246,15 @@ pub const ACTIONS: &[(&str, Option<Button>)] = &[
     ("key.sprint", Some(Button::LeftStick)),
     ("key.sneak", Some(Button::RightStick)),
     ("key.togglePerspective", Some(Button::DPadUp)),
-    ("key.pickItem", Some(Button::DPadLeft)),
+    // In this edition the D-pad's left and down and View are the mods' (below): pick block,
+    // advancements and the player list have no button until the player gives them one.
+    ("key.pickItem", None),
     ("key.chat", Some(Button::DPadRight)),
-    ("key.advancements", Some(Button::DPadDown)),
-    ("key.playerlist", Some(Button::Select)),
+    ("key.advancements", None),
+    ("key.playerlist", None),
+    (WAYPOINTS, Some(Button::DPadLeft)),
+    (ADD_WAYPOINT, Some(Button::DPadDown)),
+    (ZOOM, Some(Button::Select)),
     ("key.command", None),
     ("key.screenshot", None),
     ("key.toggleGui", None),
@@ -257,6 +267,9 @@ pub fn action_caption(action: &str) -> &str {
     match action {
         HOTBAR_PREVIOUS => "Hotbar: Previous Slot",
         HOTBAR_NEXT => "Hotbar: Next Slot",
+        ZOOM => "Zoom (hold)",
+        WAYPOINTS => "Waypoints: Menu",
+        ADD_WAYPOINT => "Waypoints: Add Here",
         other => other,
     }
 }

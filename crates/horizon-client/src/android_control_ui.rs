@@ -8126,7 +8126,10 @@ mod tests {
             ),
             Some(InGameMenuAction::Close)
         );
-        assert_eq!(settings.virtual_mouse_sensitivity, 1.);
+        assert_eq!(
+            settings.virtual_mouse_sensitivity,
+            crate::android_controls::Settings::default().virtual_mouse_sensitivity
+        );
         // A deliberate horizontal drag still adjusts the slider.
         ui.hub_scroll = 0.;
         ui.floating_menu_touch(
