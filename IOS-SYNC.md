@@ -7,12 +7,16 @@ Android iOS port is kept under `archive/horizon-android-ios`, and `main`'s histo
 developed on `starling-ios` until it moved to `main`.
 
 - **Branches and releases:** `main` is Horizon PE (release tags `v1.0.0`, ...). `shared-worlds` is `main` plus
-  shared worlds and voice chat (release tags `v1.0.0-shared-worlds`, ...): a fix that isn't about those goes to
-  `main` first and is merged into `shared-worlds`. The README is the same file on both, and names each edition's
-  latest release.
+  shared worlds and voice chat (release tags `v1.0.0-shared-worlds`, ...). `shared-worlds-mods` is `shared-worlds`
+  plus fifteen native mods in its `native-mods/`, their touch buttons and controller binds, and its own defaults
+  (release tags `v1.0.0-shared-worlds-mods`, ...; `docs/shared-worlds-mods.md`): its .ipa is built with those
+  fifteen ids in `ios.yml`'s `mods`. A fix goes to the lowest branch it belongs to and is merged upwards
+  (`main` into `shared-worlds` into `shared-worlds-mods`). The README is the same file on all three, and names
+  each edition's latest release.
 - **Releasing:** set `MARKETING_VERSION` (`packaging/ios/project.yml`) on both branches, run `ios.yml` with
   `deliver` on each, and publish each .ipa as a release of this repository: tag `v<version>` from `main`,
-  `v<version>-shared-worlds` from `shared-worlds`, neither a draft nor a pre-release, with the .ipa as an asset.
+  `v<version>-shared-worlds` from `shared-worlds`, `v<version>-shared-worlds-mods` from `shared-worlds-mods`
+  (built with its mods), none a draft or a pre-release, with the .ipa as an asset.
   The apps find them there (`horizon_client::ios_releases`, `game/update_offer.rs`): each edition is offered
   only its own tags, and only a version above its own. `ios_releases::EDITION` is the one line that differs
   between the branches. Then the README's links (the same file on both branches) name the new releases.
@@ -135,6 +139,11 @@ Every change to a file Starling has, in the order they were made.
 | `packaging/ios/GameInfo.plist` | `NSMicrophoneUsageDescription` says voice chat | The system's prompt names what the microphone is for |
 | `horizon-client-render/src/android_controls.rs` | On a screen nearer square than a phone's (an iPad), the factory top row spreads from its middle until its buttons stand apart | The top row's buttons overlapped on an iPad |
 | `horizon-client/src/game/update_offer.rs`, `game.rs`, `game/touch.rs`, `ios_releases.rs` (new), `game/mod_catalog.rs`, `game/native_builds_ios.rs` | Android's update prompt is iOS's too (`cfg` android or ios): it asks this repository's releases for the app's own edition (`ios_releases::EDITION`), and installs through the share sheet (`horizon_gamecontroller::share`); an app from a fork or with native mods is only told (`official_build`) | The game says when an update of its edition is out, and installs it |
+| `horizon-client-render/src/android_controls/layout.rs`, `android_controls.rs`, `android_controls/editor.rs` | (`shared-worlds-mods`) `Control::Zoom`, `Waypoints`, `AddWaypoint` (16th to 18th; arrays of 18, shorter files padded): plates with a magnifying glass and a map pin; shown while their mod is in the app and on; the top row's places for seven and eight buttons (`TOP_ROW`); `virtual_mouse_sensitivity` starts at 1.4 | The mods' touch buttons, placed like the others |
+| `horizon-client/src/game/mod_keys.rs` (new), `game.rs`, `game/mobile_controls.rs`, `game/pad.rs`; `horizon-client-input/src/gamepad.rs` | (`shared-worlds-mods`) A mod's key by its name (`native_mod_key`), held or tapped by a touch button or a controller; pad actions `pad.zoom` (View), `pad.waypoints` (D-pad left), `pad.addWaypoint` (D-pad down), and pick block, advancements and the player list unbound by default | Zoom and waypoints without a keyboard |
+| `horizon-client-render/src/extras.rs` | (`shared-worlds-mods`) Dynamic lights, the Mouse Tweaks controls and the sort buttons start on | The edition's defaults |
+| `horizon-client/src/game/touch/slots.rs`, `game.rs` (`creative_bounds` unused) | (`shared-worlds-mods`) A picked slot's tooltip is right beside the slot, not at the window's edge | The mods' tooltip lines are read next to their item |
+| `horizon-client/src/ios_releases.rs`, `game/native_builds_ios.rs` | (`shared-worlds-mods`) `Edition::SharedWorldsMods`; a release of this edition has native mods, so `official_build` asks only where it was built | The edition is offered its own updates |
 
 ## Gate ledger
 

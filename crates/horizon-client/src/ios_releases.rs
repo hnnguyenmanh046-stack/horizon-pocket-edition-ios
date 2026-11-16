@@ -247,13 +247,22 @@ mod tests {
         assert_eq!(standard.version_of("v1.2.0-shared-worlds-mods"), None);
         let releases = json!([
             release("v1.3.0-shared-worlds", "a.ipa"),
-            release("v1.2.0-shared-worlds-mods", "HorizonPE-1.2.0-SharedWorlds-Mods.ipa"),
+            release(
+                "v1.2.0-shared-worlds-mods",
+                "HorizonPE-1.2.0-SharedWorlds-Mods.ipa"
+            ),
             release("v1.1.0", "b.ipa"),
         ]);
         let update = update_in(&releases, mods, "1.0.0").unwrap();
         assert_eq!(update.version, "1.2.0");
         assert_eq!(update.name, "HorizonPE-1.2.0-SharedWorlds-Mods.ipa");
-        assert_eq!(update_in(&releases, shared, "1.0.0").unwrap().version, "1.3.0");
-        assert_eq!(update_in(&releases, standard, "1.0.0").unwrap().version, "1.1.0");
+        assert_eq!(
+            update_in(&releases, shared, "1.0.0").unwrap().version,
+            "1.3.0"
+        );
+        assert_eq!(
+            update_in(&releases, standard, "1.0.0").unwrap().version,
+            "1.1.0"
+        );
     }
 }

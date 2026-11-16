@@ -211,11 +211,11 @@ mod mob_looting;
 mod mob_sounds;
 #[cfg(any(target_os = "android", target_os = "ios"))]
 mod mobile_controls;
-mod mod_keys;
 mod mod_api_host;
 mod mod_assets;
 #[cfg(any(target_os = "android", target_os = "ios"))]
 mod mod_catalog;
+mod mod_keys;
 mod mods;
 mod mount_menu;
 mod mounts;
@@ -10436,6 +10436,9 @@ impl Game<'_> {
     }
     /// The open screen's window (`leftPos`, `topPos`, `imageWidth`, `imageHeight`): the touch
     /// slots' and the mods' name for `container_image`.
+    // (Its one caller placed a picked slot's tooltip by the window; this edition puts that
+    // beside the slot: game/touch/slots.rs.)
+    #[allow(dead_code)]
     fn window_image(&self, batch: &HudBatch) -> horizon_client::container_screen::Image {
         self.container_image(batch)
     }

@@ -336,3 +336,14 @@ Provider-aware profile selection and Ely.by authentication, refresh, 2FA and ses
 Per-account skin selection and the Microsoft profile skin upload are adapted from [Vasysik/horizon-android at fa548eb7abe91c194d3780e4580b9746323cd606](https://github.com/Vasysik/horizon-android/tree/fa548eb7abe91c194d3780e4580b9746323cd606), specifically `launcher/src/skins.rs`, `launcher/src/skins/library.rs`, `launcher/src/skins/cloud.rs` and `crates/horizon-client/src/android/wardrobe.rs` (behavior reference). MIT, copyright (c) 2026 Ludovic Marie and the Horizon contributors; the repository LICENSE retains the license text. Starling keeps its `skins/` folder and Skin Customization page in place of the wardrobe's image store and launcher panel, keys each choice by the profile, uploads through its own sealed session, and sends Ely.by accounts to ely.by as Horizon Android does.
 
 The mobile attack gauge side and offhand spacing in `crates/horizon-client-render/src/hud_layout.rs` are adapted from the same Horizon Android commit fa548eb7abe91c194d3780e4580b9746323cd606 under MIT.
+
+## Native mods built into Horizon PE: Shared Worlds + Mods
+
+That edition's app contains fifteen native mods, compiled from the sources in `native-mods/`:
+AppleSkin (sillysoufi), Armor Status and Status Effect HUD (CayMac), BiomeCompass, Enchantment
+Hints, SmartF3 and TreeFall (d3grando), ContinuityHorizon (tariksabanuz), Coordinates HUD and Zoom
+(Horizon), Better Dynamic Lights (DeportedToHell), RightClickHarvest (Domanffe), ShulkerPeek
+(vstxx) and Waymap (Aron, after Nirokx's horizon-waypoints), all under the MIT licence; and Jade
+(Snownee; Horizon port by Joeypc6) under CC BY-NC-SA 4.0, which is why that edition is not for
+commercial use. `native-mods/README.md` has each one's version, source and licence, and what was
+changed in six of them.

@@ -3540,7 +3540,10 @@ mod tests {
         assert!(rects[6][0] + rects[6][2] <= 1.0);
         // The zoom button: under the hub at the left edge, on the screen, the row's size.
         let glass = touch.placement(Control::Zoom).rect(touch.aspect());
-        assert!(glass[0] >= 0.0 && glass[1] > rects[0][1] + rects[0][3], "{glass:?}");
+        assert!(
+            glass[0] >= 0.0 && glass[1] > rects[0][1] + rects[0][3],
+            "{glass:?}"
+        );
         assert_eq!(glass[3], rects[0][3]);
         // Held: zoomed for as long as the finger is down, and nothing else's.
         touch.update(1, zoom, true, false);
@@ -3601,7 +3604,10 @@ mod tests {
                 assert!(pair[0][0] + pair[0][2] < pair[1][0], "{voice} {rects:?}");
             }
             let last = rects[rects.len() - 1];
-            assert!(rects[0][0] >= 0.0 && last[0] + last[2] <= 1.0, "{voice} {rects:?}");
+            assert!(
+                rects[0][0] >= 0.0 && last[0] + last[2] <= 1.0,
+                "{voice} {rects:?}"
+            );
         }
         // An iPad: the row with every button stands apart, on the screen.
         let mut pad = TouchControls::default();
@@ -3615,7 +3621,10 @@ mod tests {
         for pair in rects.windows(2) {
             assert!(pair[0][0] + pair[0][2] < pair[1][0], "{rects:?}");
         }
-        assert!(rects[0][0] >= 0.0 && rects[7][0] + rects[7][2] <= 1.0, "{rects:?}");
+        assert!(
+            rects[0][0] >= 0.0 && rects[7][0] + rects[7][2] <= 1.0,
+            "{rects:?}"
+        );
         // A layout saved with fifteen controls (Shared Worlds'): every one kept, the three
         // added at their places, shown by default.
         let settings = Settings::default();
