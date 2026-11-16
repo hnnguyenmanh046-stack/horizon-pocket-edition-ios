@@ -211,8 +211,12 @@ def run(client, resources, work):
         alex('voice mic on')
         alex.wait('voice status', lambda v: v['mic'] and v['speaking'], 30, 'the microphone of Alex live')
         # Steve has it off: told so in chat, and hears nothing.
-        v = steve.wait('voice status', lambda v: any('Alex is using voice chat' in line for line in v['lines']),
-                       30, 'the line in the chat of Steve')
+        # (The line comes when Alex turns voice chat on, a moment before the microphone's own
+        # news: wait for both.)
+        v = steve.wait('voice status',
+                       lambda v: any('Alex is using voice chat' in line for line in v['lines'])
+                       and any(p['name'] == 'Alex' and p['mic'] for p in v['people']),
+                       30, 'the line in the chat of Steve, and the microphone of Alex in his list')
         assert not v['enabled'] and v['heard']['blocks'] == 0, v
         assert [p['name'] for p in v['people'] if p['mic']] == ['Alex'], v
         # On, Steve hears Alex's tone within a moment, with his own microphone still off.

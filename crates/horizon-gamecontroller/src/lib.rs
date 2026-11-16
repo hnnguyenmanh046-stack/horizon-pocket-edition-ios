@@ -304,6 +304,70 @@ mod uikit {
         }
     }
 
+    /// `CAFrameRateRange`.
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct FrameRateRange {
+        minimum: f32,
+        maximum: f32,
+        preferred: f32,
+    }
+
+    // SAFETY: the layout of `CAFrameRateRange`: three `float`s.
+    unsafe impl Encode for FrameRateRange {
+        const ENCODING: Encoding = Encoding::Struct(
+            "CAFrameRateRange",
+            &[f32::ENCODING, f32::ENCODING, f32::ENCODING],
+        );
+    }
+
+    #[link(name = "Foundation", kind = "framework")]
+    unsafe extern "C" {
+        static NSRunLoopCommonModes: *mut AnyObject;
+    }
+
+    /// Asks Core Animation for the screen's highest frame rate, once, for the whole run: a
+    /// display link whose preferred frame rate range is the screen's maximum. Without one in
+    /// the app an iPhone with a 120 Hz screen shows it at 60 whatever the game draws
+    /// (`CADisableMinimumFrameDurationOnPhone` in the Info.plist only allows more). The rate
+    /// asked for, or `None` when it was asked before or could not be.
+    pub fn request_high_frame_rate() -> Option<i64> {
+        static ASKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        MainThreadMarker::new()?;
+        if ASKED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            return None;
+        }
+        // SAFETY: UIKit's, Core Animation's and Foundation's documented methods with the
+        // argument types they take, on the main thread; a nil result ends the call before it
+        // is used. The link and its target live for the whole run (the run loop keeps the
+        // link, the link its target). Any object answers `hash`: the link only needs a target
+        // that takes its call.
+        unsafe {
+            let screen: Option<Retained<AnyObject>> = msg_send![class!(UIScreen), mainScreen];
+            let screen = screen?;
+            let max: isize = msg_send![&*screen, maximumFramesPerSecond];
+            let target: Option<Retained<AnyObject>> = msg_send![class!(NSObject), new];
+            let target = target?;
+            let link: Option<Retained<AnyObject>> = msg_send![
+                class!(CADisplayLink),
+                displayLinkWithTarget: &*target,
+                selector: objc2::sel!(hash)
+            ];
+            let link = link?;
+            let rate = max.max(60) as f32;
+            let range = FrameRateRange {
+                minimum: 60.0_f32.min(rate),
+                maximum: rate,
+                preferred: rate,
+            };
+            let _: () = msg_send![&*link, setPreferredFrameRateRange: range];
+            let run_loop: Option<Retained<AnyObject>> = msg_send![class!(NSRunLoop), mainRunLoop];
+            let run_loop = run_loop?;
+            let _: () = msg_send![&*link, addToRunLoop: &*run_loop, forMode: NSRunLoopCommonModes];
+            Some(max.max(60) as i64)
+        }
+    }
+
     pub fn screen_scale() -> Option<f64> {
         MainThreadMarker::new()?;
         // SAFETY: UIScreen class and property reads, on the main thread.
@@ -798,6 +862,15 @@ mod uikit {
             }
         }
     }
+}
+
+/// Asks iOS, once, to show the game at the screen's highest frame rate (120 on a ProMotion
+/// screen): the rate asked for, or `None` when it was asked before, off the main thread or iOS.
+pub fn request_high_frame_rate() -> Option<i64> {
+    #[cfg(target_os = "ios")]
+    return uikit::request_high_frame_rate();
+    #[cfg(not(target_os = "ios"))]
+    None
 }
 
 /// UIKit's screen scale: points to pixels at full resolution. `None` off the main thread or iOS.
