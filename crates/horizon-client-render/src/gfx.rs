@@ -1176,6 +1176,10 @@ pub struct Renderer {
     /// Where a screenshot's frame is drawn when the swapchain cannot be read back.
     readback: readback::Readback,
     pub info: wgpu::AdapterInfo,
+    /// When this frame's swapchain image was handed over, if one was: with VSync the display
+    /// hands them out on its refreshes, so it is the display's own clock. iOS paces its frame
+    /// cap from it (`window::display_paced_wait`); taken by whoever reads it.
+    pub acquired_at: Option<std::time::Instant>,
     pub suspended: bool,
     /// Suspended without a window at all (`suspend`), not just minimized.
     pub detached: bool,
@@ -4299,6 +4303,7 @@ impl Renderer {
             post_effects: None,
             readback: readback::Readback::default(),
             info,
+            acquired_at: None,
             suspended: !drawable_size(size.width, size.height, max_side),
             detached: false,
             acquire_validation_failures: 0,
@@ -6379,6 +6384,7 @@ impl Renderer {
         } else {
             self.surface.as_ref().map(|s| s.get_current_texture())
         };
+        self.acquired_at = acquired.is_some().then(std::time::Instant::now);
         self.last_wait = landed + queued + acquire.elapsed();
         // Inside the acquire's time already.
         self.queue.take_waited();

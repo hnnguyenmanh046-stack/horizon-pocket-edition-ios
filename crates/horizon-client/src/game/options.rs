@@ -744,11 +744,46 @@ impl Game<'_> {
     /// `Minecraft.runTick`'s frame limiter: `FramerateLimiter.limitDisplayFPS`
     /// below 260 frames per second, sleeping then spin-waiting until the
     /// frame's slot ends (not in scripted frame-count runs).
+    /// iOS: the frame cap, paced by the display. An iPhone presents only on its screen's
+    /// refreshes, whatever the VSync option says, and the limiter's own clock beside them
+    /// halved the frame rate for as long as the two stayed in step (60 became 30 until
+    /// something moved one of them: `window::display_paced_wait`). The wait is counted from
+    /// when the display handed this frame its image. False when no image was handed over
+    /// this frame (nothing drawn, or frame generation presents): the limiter paces it.
+    #[cfg(target_os = "ios")]
+    fn display_paced(&mut self, limit: i32) -> bool {
+        let Some(acquired) = self.renderer.as_mut().and_then(|r| r.acquired_at.take()) else {
+            return false;
+        };
+        let refresh = self
+            .window
+            .as_ref()
+            .and_then(|w| w.current_monitor())
+            .and_then(|m| m.refresh_rate_millihertz())
+            .map_or(60.0, |mhz| f64::from(mhz) / 1000.0);
+        if let Some(wait) = horizon_client::window::display_paced_wait(limit, refresh) {
+            let until = acquired + wait;
+            // Short sleeps: a long one runs late by a share of its length.
+            loop {
+                let left = until.saturating_duration_since(std::time::Instant::now());
+                if left.is_zero() {
+                    break;
+                }
+                std::thread::sleep(left.min(std::time::Duration::from_millis(1)));
+            }
+        }
+        true
+    }
+
     pub(super) fn limit_frame(&mut self) {
         if self.options.frames.is_some() || self.options.paced_by_split {
             return;
         }
         let limit = self.framerate_limit();
+        #[cfg(target_os = "ios")]
+        if self.display_paced(limit) {
+            return;
+        }
         match self.settings.horizon.pacing {
             horizon_client::graphics::Pacing::Precise => {
                 horizon_client::window::end_frame(&mut self.limiter, limit, &mut self.frame_clock)

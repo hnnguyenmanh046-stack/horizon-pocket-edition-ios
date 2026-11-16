@@ -231,6 +231,25 @@ impl LimiterClock for SleepingClock {
     }
 }
 
+/// How long after a frame's swapchain image was handed over the next frame may start, on
+/// a display that only presents on its refreshes (iOS: there is no way to present without
+/// VSync): none when the display alone paces the frames.
+///
+/// A limiter with a clock of its own and the display's refreshes beat against each other.
+/// A cap of 60 on a 60 Hz screen wakes up every 16.67 ms, and whenever that is a moment
+/// after a refresh the frame waits for the next one: every frame takes two refreshes, 30
+/// frames a second, for as long as the two stay in step (which they do, each frame's wait
+/// starting from the last one's). So here the display is the clock: a cap at or above the
+/// refresh rate waits for nothing, and a lower one is the nearest whole number of
+/// refreshes per frame, the wait ending half a refresh before the one the frame is for.
+pub fn display_paced_wait(framerate_limit: i32, refresh_hz: f64) -> Option<std::time::Duration> {
+    if !(1..260).contains(&framerate_limit) || refresh_hz < 1.0 {
+        return None;
+    }
+    let refreshes = (refresh_hz / f64::from(framerate_limit)).round();
+    (refreshes >= 2.0).then(|| std::time::Duration::from_secs_f64((refreshes - 0.5) / refresh_hz))
+}
+
 /// `Minecraft.runTick`'s frame-limiter step: only limits below 260
 /// (the "unlimited" setting) pace frames.
 pub fn end_frame(
@@ -252,6 +271,45 @@ pub fn end_frame_on_grid(
 ) {
     if framerate_limit < 260 {
         limiter.limit_on_grid(framerate_limit, clock);
+    }
+}
+
+#[cfg(test)]
+mod display_pacing {
+    use super::display_paced_wait;
+    use std::time::Duration;
+
+    #[test]
+    fn the_display_paces_a_cap_it_can_show_and_a_lower_one_waits_short_of_its_refresh() {
+        // At or above the refresh rate, and "unlimited": the display alone.
+        let alone = [
+            (60, 60.0),
+            (120, 60.0),
+            (120, 120.0),
+            (260, 120.0),
+            (250, 60.0),
+        ];
+        for (limit, refresh) in alone {
+            assert_eq!(
+                display_paced_wait(limit, refresh),
+                None,
+                "{limit} at {refresh}"
+            );
+        }
+        // Nearer one refresh a frame than two: the display alone.
+        assert_eq!(display_paced_wait(90, 120.0), None);
+        // Lower: so many refreshes a frame, less half of one.
+        let ms = |limit, refresh| {
+            let wait: Option<Duration> = display_paced_wait(limit, refresh);
+            wait.map(|wait| (wait.as_secs_f64() * 1e5).round() / 100.0)
+        };
+        assert_eq!(ms(60, 120.0), Some(12.5));
+        assert_eq!(ms(30, 60.0), Some(25.0));
+        assert_eq!(ms(30, 120.0), Some(29.17));
+        assert_eq!(ms(10, 60.0), Some(91.67));
+        // Nothing to divide by.
+        assert_eq!(display_paced_wait(0, 60.0), None);
+        assert_eq!(display_paced_wait(60, 0.0), None);
     }
 }
 
