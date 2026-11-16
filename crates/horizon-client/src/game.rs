@@ -368,7 +368,7 @@ mod trident;
 mod tutorial;
 mod tweaks;
 mod ui_control;
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 mod update_offer;
 mod vault;
 mod villagers;
@@ -2957,7 +2957,7 @@ struct Game<'a> {
     /// The offer of the Starling folder in shared storage (game/files_offer.rs).
     #[cfg(target_os = "android")]
     files_offer: files_offer::FilesOffer,
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     update_offer: update_offer::UpdateOffer,
     #[cfg(target_os = "android")]
     native_builds: native_builds::NativeBuilds,
@@ -8306,10 +8306,12 @@ impl Game<'_> {
         self.draw_catalog(batch);
         self.draw_native_builds(batch);
     }
-    // iOS: the catalog, as on Android. Its game folder needs no offer (the Files app shows it),
-    // the App Store's way updates it, and it runs no code built elsewhere (no native builds).
+    // iOS: the catalog, as on Android, and the prompt of a newer release of this app's edition
+    // (game/update_offer.rs). Its game folder needs no offer (the Files app shows it), and it
+    // runs no code built elsewhere (no native builds).
     #[cfg(target_os = "ios")]
     fn draw_phone_offers(&mut self, batch: &mut HudBatch) {
+        self.draw_update_offer(batch);
         self.draw_catalog(batch);
     }
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -18903,7 +18905,10 @@ impl Game<'_> {
             self.poll_native_builds();
         }
         #[cfg(target_os = "ios")]
-        self.poll_native_builds();
+        {
+            self.poll_update_offer();
+            self.poll_native_builds();
+        }
         #[cfg(any(target_os = "android", target_os = "ios"))]
         self.poll_catalog();
         horizon_client::spans::time("pads", || self.poll_pads(event_loop));
@@ -19404,7 +19409,7 @@ impl<'a> Game<'a> {
             imports: Default::default(),
             #[cfg(target_os = "android")]
             files_offer: Default::default(),
-            #[cfg(target_os = "android")]
+            #[cfg(any(target_os = "android", target_os = "ios"))]
             update_offer: Default::default(),
             #[cfg(any(target_os = "android", target_os = "ios"))]
             native_builds: Default::default(),

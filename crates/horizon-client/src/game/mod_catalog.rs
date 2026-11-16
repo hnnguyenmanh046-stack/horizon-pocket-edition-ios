@@ -1341,6 +1341,12 @@ impl Game<'_> {
             horizon_client::shader_pack_list::scan(&Self::shader_packs_dir());
     }
 
+    /// The catalog is open (over whatever was there).
+    #[cfg(target_os = "ios")]
+    pub(super) fn catalog_open(&self) -> bool {
+        self.catalog.shown
+    }
+
     /// Whether the keyboard types in the search box (`text_context`).
     pub(super) fn catalog_typing(&self) -> bool {
         self.catalog.shown && self.catalog.typing

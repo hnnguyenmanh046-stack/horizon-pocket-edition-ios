@@ -739,10 +739,10 @@ impl Game<'_> {
         self.input_used(InputMode::Touch);
         self.last_input = Instant::now();
         // The offer of the Starling folder, over the title, takes the touches while it shows.
-        // iOS: the catalog alone (its folder needs no offer, and it has no updates or native
-        // builds of its own).
+        // iOS: the prompt of a newer release and the catalog (its folder needs no offer, and
+        // its native builds are the Mods page's).
         #[cfg(target_os = "ios")]
-        if self.catalog_touch(t) {
+        if self.update_offer_touch(t) || self.catalog_touch(t) {
             return true;
         }
         #[cfg(target_os = "android")]

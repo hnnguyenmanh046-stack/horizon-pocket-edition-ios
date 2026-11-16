@@ -10,6 +10,12 @@ developed on `starling-ios` until it moved to `main`.
   shared worlds and voice chat (release tags `v1.0.0-shared-worlds`, ...): a fix that isn't about those goes to
   `main` first and is merged into `shared-worlds`. The README is the same file on both, and names each edition's
   latest release.
+- **Releasing:** set `MARKETING_VERSION` (`packaging/ios/project.yml`) on both branches, run `ios.yml` with
+  `deliver` on each, and publish each .ipa as a release of this repository: tag `v<version>` from `main`,
+  `v<version>-shared-worlds` from `shared-worlds`, neither a draft nor a pre-release, with the .ipa as an asset.
+  The apps find them there (`horizon_client::ios_releases`, `game/update_offer.rs`): each edition is offered
+  only its own tags, and only a version above its own. `ios_releases::EDITION` is the one line that differs
+  between the branches. Then the README's links (the same file on both branches) name the new releases.
 
 - **Base:** starling-client/starling `starling` @ `ac874422ed` (tag `v0.8.0`, "the first release of Starling and
   Horizon Android together"). Remote: `starling`. Starling 0.8.0 took Horizon Android's control system, account
@@ -127,6 +133,8 @@ Every change to a file Starling has, in the order they were made.
 | `horizon-client/src/voice_screen.rs` (new), `shared_screen.rs`, `client_lib.rs` | Voice chat's page of the Friends screen; a Voice Chat button at the foot of the shared world's Friends screen | Each player's volume and mute, the microphone, on and off |
 | `horizon-client-render/src/android_controls/layout.rs`, `android_controls.rs`, `android_controls/editor.rs` | A fifteenth control, `Control::Voice` (the microphone, leftmost of the top row, red while muted; older layouts get it at its place); the editor's list three to a row; the factory top row spreads apart on a screen nearer square than a phone's | Voice chat's microphone button, and the top row not overlapping on an iPad |
 | `packaging/ios/GameInfo.plist` | `NSMicrophoneUsageDescription` says voice chat | The system's prompt names what the microphone is for |
+| `horizon-client-render/src/android_controls.rs` | On a screen nearer square than a phone's (an iPad), the factory top row spreads from its middle until its buttons stand apart | The top row's buttons overlapped on an iPad |
+| `horizon-client/src/game/update_offer.rs`, `game.rs`, `game/touch.rs`, `ios_releases.rs` (new), `game/mod_catalog.rs`, `game/native_builds_ios.rs` | Android's update prompt is iOS's too (`cfg` android or ios): it asks this repository's releases for the app's own edition (`ios_releases::EDITION`), and installs through the share sheet (`horizon_gamecontroller::share`); an app from a fork or with native mods is only told (`official_build`) | The game says when an update of its edition is out, and installs it |
 
 ## Gate ledger
 

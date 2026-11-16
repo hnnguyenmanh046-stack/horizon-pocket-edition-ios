@@ -6,10 +6,22 @@
 //! in a day; No, at the next start. Only a release asks: a test build is signed with another key,
 //! and the release could not install over it (`STARLING_UPDATE_TEST=<version>` makes one ask as
 //! that version, to try the prompt).
+//!
+//! iOS: the same prompt for Horizon PE, from this port's own repository
+//! (horizon_client::ios_releases), and only ever for the edition this app is: Horizon PE is
+//! offered Horizon PE's releases, Horizon PE: Shared Worlds its own. Update downloads the
+//! release's .ipa and opens the share sheet on it, where the player picks their sideloading app
+//! (or Save to Files): iOS lets no app install another by itself. An app built in a player's
+//! own fork, or with native mods, is told of the release and how it is updated there instead:
+//! the release's .ipa has no native mods and builds none for that fork.
 use super::Game;
+#[cfg(target_os = "ios")]
+use horizon_client::ios_releases;
+#[cfg(target_os = "android")]
+use horizon_client::starling_releases as releases;
 use horizon_client::{
     hud::HudBatch,
-    starling_releases::{self as releases, Update as Release},
+    starling_releases::Update as Release,
     ui_theme::{Face, Ui, color},
 };
 use sha2::{Digest, Sha256};
@@ -47,6 +59,9 @@ struct Shared {
 pub(super) struct UpdateOffer {
     started: bool,
     stage: Option<Stage>,
+    /// The release installs over this app (Android: always, only a release asks; iOS: not over
+    /// one from a player's own fork or with native mods, which is only told).
+    direct: bool,
     shared: Arc<Mutex<Shared>>,
     cancel: Arc<AtomicBool>,
     /// The buttons as last drawn (UI units), at most three.
@@ -68,10 +83,52 @@ fn now() -> u64 {
         .map_or(0, |d| d.as_secs())
 }
 
-/// A repository's latest release, as GitHub's API serves it.
+/// The game's name in the prompt.
+#[cfg(target_os = "android")]
+const NAME: &str = "Starling";
+#[cfg(target_os = "ios")]
+const NAME: &str = ios_releases::EDITION.name();
+
+/// This app's version, and whether a release installs over it.
+#[cfg(target_os = "android")]
+fn this_app() -> Option<(String, bool)> {
+    // Only a release asks: a test build is signed with another key.
+    crate::android::app_version().filter(|(_, release)| *release)
+}
+#[cfg(target_os = "ios")]
+fn this_app() -> Option<(String, bool)> {
+    horizon_gamecontroller::app_version()
+        .filter(|version| !version.is_empty())
+        .map(|version| (version, super::native_builds_ios::official_build()))
+}
+
+/// The system's way to install the downloaded update `name` (in [`updates`]): Android's
+/// installer; on iOS the share sheet, for the player's sideloading app. False when it didn't open.
+#[cfg(target_os = "android")]
+fn install(name: &str) -> bool {
+    crate::android::install_update(name)
+}
+#[cfg(target_os = "ios")]
+fn install(name: &str) -> bool {
+    horizon_gamecontroller::share(&updates().join(name))
+}
+
+/// Why [`install`] didn't open.
+const NO_INSTALLER: &str = if cfg!(target_os = "ios") {
+    "The share sheet couldn't open here. The update is not lost: press Try again."
+} else {
+    "Android has no installer that takes the update."
+};
+
+/// What GitHub's API serves at `url` (a repository's latest release, or its releases).
 fn latest(url: &str, current: &str) -> Result<serde_json::Value, String> {
+    let client = if cfg!(target_os = "ios") {
+        "HorizonPE"
+    } else {
+        "Starling"
+    };
     let text = ureq::get(url)
-        .set("User-Agent", &format!("Starling/{current}"))
+        .set("User-Agent", &format!("{client}/{current}"))
         .set("Accept", "application/vnd.github+json")
         .timeout(Duration::from_secs(15))
         .call()
@@ -81,8 +138,21 @@ fn latest(url: &str, current: &str) -> Result<serde_json::Value, String> {
     serde_json::from_str(&text).map_err(|e| e.to_string())
 }
 
+/// iOS: the newest release of this app's edition, when it is newer than `current` and has its
+/// .ipa.
+#[cfg(target_os = "ios")]
+fn check(current: &str) -> Result<Option<Release>, String> {
+    let releases = latest(&ios_releases::releases_url(), current)?;
+    Ok(ios_releases::update_in(
+        &releases,
+        ios_releases::EDITION,
+        current,
+    ))
+}
+
 /// The newest Starling release on GitHub, when it is newer than `current` and has its APK: every
 /// repository asked, an error only when none answered.
+#[cfg(target_os = "android")]
 fn check(current: &str) -> Result<Option<Release>, String> {
     let mut found = Vec::new();
     let mut errors = Vec::new();
@@ -111,7 +181,7 @@ fn download(
     };
     if !ok(&release.name) || !release.url.starts_with("https://") {
         return Err(format!(
-            "the release's APK is named oddly: {}",
+            "the release's file is named oddly: {}",
             release.name
         ));
     }
@@ -177,11 +247,12 @@ impl Game<'_> {
             let test = std::env::var("STARLING_UPDATE_TEST")
                 .ok()
                 .filter(|v| !v.is_empty());
-            let current = match (crate::android::app_version(), test) {
-                (_, Some(pretend)) => pretend,
-                (Some((version, true)), None) => version,
+            let (current, direct) = match (this_app(), test) {
+                (_, Some(pretend)) => (pretend, true),
+                (Some(app), None) => app,
                 _ => return,
             };
+            offer.direct = direct;
             let until = std::fs::read_to_string(later())
                 .ok()
                 .and_then(|t| t.trim().parse::<u64>().ok());
@@ -194,17 +265,14 @@ impl Game<'_> {
                 .spawn(move || match check(&current) {
                     Ok(release) => {
                         if let Some(r) = &release {
-                            log::info!(
-                                "Horizon: Starling {} is out (this is {current})",
-                                r.version
-                            );
+                            log::info!("Horizon: {NAME} {} is out (this is {current})", r.version);
                         }
                         shared
                             .lock()
                             .unwrap_or_else(PoisonError::into_inner)
                             .release = release;
                     }
-                    Err(e) => log::info!("Horizon: could not look for a newer Starling: {e}"),
+                    Err(e) => log::info!("Horizon: could not look for a newer {NAME}: {e}"),
                 });
             return;
         }
@@ -219,16 +287,24 @@ impl Game<'_> {
             && let Some(result) = shared.downloaded.take()
         {
             offer.stage = Some(match result {
-                Ok(name) if crate::android::install_update(&name) => Stage::Installing,
-                Ok(_) => Stage::Failed("Android has no installer that takes the update.".into()),
+                Ok(name) if install(&name) => Stage::Installing,
+                // (Downloaded: Try again downloads it again, which is what can be done here.)
+                Ok(_) => Stage::Failed(NO_INSTALLER.into()),
                 Err(e) => Stage::Failed(e),
             });
         }
     }
 
-    /// Over the title only, and not over the offer of the Starling folder.
+    /// Over the title only, and not over the offer of the Starling folder (iOS: nor the catalog,
+    /// which opens over the title).
     fn update_offer_shown(&self) -> Option<Stage> {
-        if self.title.is_none() || self.files_offer_shown().is_some() {
+        self.title.as_ref()?;
+        #[cfg(target_os = "android")]
+        if self.files_offer_shown().is_some() {
+            return None;
+        }
+        #[cfg(target_os = "ios")]
+        if self.catalog_open() {
             return None;
         }
         self.update_offer.stage.clone()
@@ -261,7 +337,26 @@ impl Game<'_> {
             (shared.done, shared.total.max(release.size))
         };
         let version = &release.version;
+        let ios = cfg!(target_os = "ios");
         let (title, body, buttons): (String, String, &[&str]) = match &stage {
+            // iOS, an app from the player's own fork or with native mods: told, and how.
+            Stage::Ask if !self.update_offer.direct => (
+                format!("{NAME} {version} is out"),
+                "This app was built in your own fork, so it updates there: on your fork's GitHub \
+                 page tap Sync fork, then Update branch, and build the app again (Actions > ios > \
+                 Run workflow, or your mods from Options > Mods). Your worlds and settings stay."
+                    .into(),
+                &["OK", "Tomorrow"],
+            ),
+            Stage::Ask if ios => (
+                format!("{NAME} {version} is out"),
+                format!(
+                    "Update now? The game downloads it ({} MB) and hands it to your sideloading \
+                     app, which installs it over this one: your worlds and settings stay.",
+                    mb(release.size)
+                ),
+                &["Update", "Tomorrow", "No"],
+            ),
             Stage::Ask => (
                 format!("Starling {version} is out"),
                 format!(
@@ -272,9 +367,17 @@ impl Game<'_> {
                 &["Update", "Tomorrow", "No"],
             ),
             Stage::Downloading => (
-                format!("Downloading Starling {version}"),
+                format!("Downloading {NAME} {version}"),
                 format!("{} of {} MB", mb(done), mb(total)),
                 &["Cancel"],
+            ),
+            Stage::Installing if ios => (
+                format!("Install {NAME} {version}"),
+                "Pick your sideloading app in the share sheet (SideStore, AltStore, \
+                 LiveContainer), or Save to Files and install it from there. It goes in over \
+                 this app: your worlds and settings stay."
+                    .into(),
+                &["Install", "Later"],
             ),
             Stage::Installing => (
                 format!("Install Starling {version}"),
@@ -399,8 +502,9 @@ impl Game<'_> {
         };
         let release = self.release();
         let offer = &mut self.update_offer;
+        let direct = offer.direct;
         match (stage, button) {
-            (Stage::Ask | Stage::Failed(_), 0) => {
+            (Stage::Ask | Stage::Failed(_), 0) if direct => {
                 if let Some(release) = release {
                     offer.stage = Some(Stage::Downloading);
                     offer.cancel.store(false, Ordering::Relaxed);
@@ -432,14 +536,12 @@ impl Game<'_> {
             }
             (Stage::Installing, 0) => {
                 if let Some(release) = release
-                    && !crate::android::install_update(&release.name)
+                    && !install(&release.name)
                 {
-                    offer.stage = Some(Stage::Failed(
-                        "Android has no installer that takes the update.".into(),
-                    ));
+                    offer.stage = Some(Stage::Failed(NO_INSTALLER.into()));
                 }
             }
-            // Cancel, No, Later: asked again at the next start.
+            // Cancel, No, Later, OK: asked again at the next start.
             _ => {
                 offer.cancel.store(true, Ordering::Relaxed);
                 offer.stage = None;

@@ -59,6 +59,7 @@ There are two editions of Horizon PE. Both are the same game; one adds shared wo
 | The whole game: single player, servers, LAN, Play with Friends | Yes | Yes |
 | Touch controls, controllers, keyboard and mouse | Yes | Yes |
 | Shader packs, resource packs, skins, mods and native mods | Yes | Yes |
+| Tells you when an update is out, and installs it | Yes, its own updates | Yes, its own updates |
 | **Shared worlds:** a world your group owns, hosted by whoever is playing, with no server | No | **Yes** |
 | **Backups** of shared worlds that anyone can ask to load | No | **Yes** |
 | **Voice chat** in shared worlds, with a volume for each player | No | **Yes** |
@@ -91,6 +92,7 @@ Horizon PE, and is there again when you return.
 - Game controllers, keyboards and mice; gyroscope aiming; a virtual mouse for menus.
 - Portrait and landscape, iPhone and iPad.
 - Performance defaults chosen for your device, and a render resolution slider.
+- **Update notices in the game**, for the edition you have, with an Update button.
 
 **Looks and mods**
 
@@ -120,8 +122,13 @@ sideloading app: [SideStore](https://sidestore.io), [AltStore](https://altstore.
 3. **Start it.** Sign in with Microsoft (the account that owns Java Edition) or Ely.by, or play
    offline. The first start downloads the game's files from Mojang, so stay on Wi-Fi.
 
-**Updating or switching edition:** install the newer `.ipa` over the old one. Worlds, settings,
-accounts and mods stay.
+**Updating:** the game tells you. When a newer release of **your edition** is out, the title screen
+shows a card: **Update** downloads it and opens the share sheet, where you pick your sideloading app
+(or Save to Files). It installs over the app; worlds, settings, accounts and mods stay. **Tomorrow**
+asks again in a day. An app built in your own fork (for native mods) is told how to update the fork
+instead.
+
+**Switching edition:** install the other edition's `.ipa` over the app. Nothing is lost.
 
 **Want native mods?** They need the app built in your own fork instead of a release:
 [Native mods](#native-mods), step 1.

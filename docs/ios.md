@@ -17,7 +17,12 @@ What differs from Android, because iOS does not allow it or does it another way:
 - **Game files** are downloaded from Mojang and checked as on Android, then laid out from tables
   the app carries instead of being prepared with Java.
 - **Your game folder** is the app's Documents: "Horizon PE" under On My iPhone in the Files app.
-- **Updates** come as a new IPA, and there is no separate recovery window before the game starts.
+- **Updates** come as a new IPA. When a newer release of the app's own edition is out, a card
+  over the title screen offers it (Update, Tomorrow, No): Update downloads the release's IPA,
+  checks it against the SHA-256 GitHub gives, and opens the share sheet on it for the sideloading
+  app, since iOS lets no app install another by itself. An app built in a fork, or with native
+  mods, is told how to update there instead. There is no separate recovery window before the
+  game starts.
 
 ## Native mods
 

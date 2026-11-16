@@ -180,6 +180,14 @@ pub(super) fn built_mods() -> Vec<(String, String)> {
         .collect()
 }
 
+/// Whether this app is a release of this port's own repository as it came: not built in a
+/// player's fork, and with no native mods. Only such an app is updated by installing the next
+/// release over it (game/update_offer.rs): the release has no native mods, and builds none in a
+/// fork.
+pub(super) fn official_build() -> bool {
+    REPO == horizon_client::ios_releases::REPOSITORY && built_mods().is_empty()
+}
+
 /// [`built_mods`] as `native-mods.json` holds it, for the Mods page's rows (game/mods.rs).
 pub(super) fn running_build_info() -> Option<String> {
     let exe = std::env::current_exe().ok()?;
