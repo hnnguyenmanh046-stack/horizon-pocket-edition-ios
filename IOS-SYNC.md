@@ -19,7 +19,7 @@ developed on `starling-ios` until it moved to `main`.
   (built with its mods), none a draft or a pre-release, with the .ipa as an asset.
   The apps find them there (`horizon_client::ios_releases`, `game/update_offer.rs`): each edition is offered
   only its own tags, and only a version above its own. `ios_releases::EDITION` is the one line that differs
-  between the branches. Then the README's links (the same file on both branches) name the new releases.
+  between the branches. Then the README's links (the same file on every branch) name the new releases.
 
 - **Base:** starling-client/starling `starling` @ `ac874422ed` (tag `v0.8.0`, "the first release of Starling and
   Horizon Android together"). Remote: `starling`. Starling 0.8.0 took Horizon Android's control system, account
