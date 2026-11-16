@@ -6,7 +6,7 @@
 //! A mod reads its key through `native_mod_key` (the player's choice in Options > Mods, else its
 //! default), so what is pressed here is that same key by name: the mod can't tell it from a
 //! keyboard's. The buttons are there only while their mod is in the app and turned on.
-use super::Game;
+use super::{Game, Screen};
 
 /// A native mod's key: the mod, the key's name in it, and the key pressed when the player
 /// chose none.
@@ -44,6 +44,9 @@ pub(super) struct ModKeys {
     held: Vec<(&'static str, String)>,
     /// The ids of the native mods in this app, asked once.
     built: Option<Vec<String>>,
+    /// The mod whose own screen is open says one of its text fields was tapped: the phone's
+    /// keyboard is up for it (`native_mod_screen_typing`).
+    typing: bool,
 }
 
 impl Game<'_> {
@@ -56,6 +59,27 @@ impl Game<'_> {
         }
         let built = self.mod_keys.built.as_ref();
         built.is_some_and(|ids| ids.iter().any(|m| m == id)) && self.native_on(id)
+    }
+
+    /// The mod whose own screen is open (`native_mod_screen_open`) says whether the player is
+    /// typing in one of its text fields: a tap on one, until a tap elsewhere. A phone has no
+    /// keys until its keyboard is up, and the game can't see a mod's fields: with this it
+    /// brings the keyboard up and puts it away (game/touch.rs `text_context`). What is typed
+    /// reaches the mod as on a computer (`native_screen_char_typed_pre`, the key hooks).
+    /// Called by the mods built into this edition, so not by a build without them.
+    #[allow(dead_code)]
+    pub(super) fn native_mod_screen_typing(&mut self, mod_id: &str, typing: bool) {
+        if self.native_mod_screen().is_some_and(|id| id == mod_id) {
+            self.mod_keys.typing = typing;
+        }
+    }
+
+    /// Whether the open screen is a mod's own with one of its text fields being typed in.
+    pub(super) fn mod_screen_typing(&mut self) -> bool {
+        if self.screen != Screen::Mod {
+            self.mod_keys.typing = false;
+        }
+        self.mod_keys.typing
     }
 
     /// `key` goes down or up for `holder` ("touch", "pad"). A key two hold is down until both

@@ -662,6 +662,9 @@ struct State {
     markers: bool,
     labels: bool,
     panel: bool,
+    /// Horizon PE: the last click was on one of the editor's text fields, so
+    /// a phone's keyboard is up for it (`native_mod_screen_typing`).
+    typing: bool,
     /// Screen state.
     mode: Mode,
     filter: Filter,
@@ -693,6 +696,7 @@ impl Default for State {
             labels: true,
             // Horizon PE: the list on the HUD starts off (the mod's own: on).
             panel: false,
+            typing: false,
             mode: Mode::Closed,
             filter: Filter::All,
             scroll: 0,
@@ -1102,6 +1106,12 @@ impl State {
         if !matches!(action, Action::Delete(_)) {
             self.confirm_delete = None;
         }
+        // Horizon PE: a click on a text field brings a phone's keyboard up, one
+        // on anything else puts it away. And no key is still on its way to
+        // type the letter that opened the screen (a touch button opened it, or
+        // long ago): the first letter typed is the name's.
+        self.typing = matches!(action, Action::Focus(_));
+        self.skip_char = None;
         match action {
             Action::NewWaypoint => {
                 if let Some(here) = here {
@@ -1931,6 +1941,14 @@ pub(super) fn frame(game: &mut Game<'_>) {
     }
     let ours = game.native_mod_screen() == Some(MOD_ID);
     with(|s| s.sync_open(ours));
+    // Horizon PE: a phone's keyboard, while a text field of the editor is typed in.
+    let typing = with(|s| {
+        s.typing &= matches!(s.mode, Mode::Edit(_));
+        s.typing
+    });
+    if ours {
+        game.native_mod_screen_typing(MOD_ID, typing);
+    }
 }
 
 /// The mod's row in Options > Mods (from `native_mods`).
@@ -2419,6 +2437,9 @@ pub(super) fn screen_mouse_button_pressed_pre(
         let (_, widgets) = s.screen(size, screen.mouse, here.as_ref(), &measure);
         if let Some(action) = hit(&widgets, screen.mouse) {
             s.act(action, here.as_ref());
+        } else {
+            // Horizon PE: a click beside everything puts a phone's keyboard away.
+            s.typing = false;
         }
     });
 }

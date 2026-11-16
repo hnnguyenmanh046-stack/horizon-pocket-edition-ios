@@ -36,8 +36,9 @@ or open it to change its settings and keys. Their sources, as built, are in the 
 
 Nine of them differ from their authors' releases here, each marked "Horizon PE" in its source:
 Coordinates HUD, Armor Status and Enchantment Hints ([below](#what-was-changed-in-three-mods)), and
-the starting values of TreeFall, Status Effect HUD and Jade
-([What is set for you](#what-is-set-for-you)). Jade is shared under the same licence as it came
+the starting values of TreeFall, Status Effect HUD, Jade, Zoom and Waymap
+([What is set for you](#what-is-set-for-you)); SmartF3's F3 screen keeps the touch controls on
+the screen, and a tap on a text field of Waymap's waypoint editor brings the keyboard up. Jade is shared under the same licence as it came
 with (CC BY-NC-SA 4.0): not for commercial use.
 
 ## The buttons

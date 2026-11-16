@@ -1154,6 +1154,9 @@ impl Game<'_> {
         } else if self.screen == Screen::WorldOptions && self.world_options_typing() {
             // The open world's game rules and the LAN port: boxes of digits.
             Some("world")
+        } else if self.mod_screen_typing() {
+            // A text field of a mod's own screen (game/mod_keys.rs): the mod says when.
+            Some("mod")
         } else if self.text_field_focused() {
             // TextMirror supports richer selection sync for known fields.
             // All other fields supported by the normal IME path use the
@@ -1180,6 +1183,8 @@ impl Game<'_> {
             // The tap's click focused the box under it, or none.
             "world" => Some(self.world_options_typing()),
             "dialog" => Some(self.dialog_typing()),
+            // The mod says so only while the last tap was on one of its fields.
+            "mod" => Some(true),
             "native-field" => Some(match self.touch.focused_field {
                 Some(rect) => inside(rect),
                 None => self.text_field_focused(),
