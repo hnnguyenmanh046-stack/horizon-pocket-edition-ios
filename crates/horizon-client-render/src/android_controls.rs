@@ -227,7 +227,7 @@ pub struct TouchControls {
     passthrough_fingers: BTreeSet<u64>,
     custom_fingers: BTreeMap<u64, String>,
     latched_custom: BTreeSet<String>,
-    latched_controls: u16,
+    latched_controls: u32,
     custom_events: Vec<(String, bool)>,
     pending: PadState,
     pub aim: Option<[f32; 2]>,
@@ -322,7 +322,7 @@ impl TouchControls {
     /// Flight uses hold-to-descend, even with a saved toggleable layout.
     pub fn set_vertical_movement(&mut self, flying: bool) {
         if flying && !self.vertical_movement {
-            self.latched_controls &= !(1 << (Control::Sneak as u16));
+            self.latched_controls &= !(1 << (Control::Sneak as u32));
             self.last_sneak_tap = None;
         }
         self.vertical_movement = flying;
@@ -715,7 +715,7 @@ impl TouchControls {
                 let [nx, ny, nw, nh] = p.rect(self.aspect());
                 let rect = [nx * w, ny * h, nw * w, nh * h];
                 let held = Self::button(control).is_some_and(|bt| state.held(bt));
-                let toggled = (self.latched_controls & (1 << (control as u16))) != 0;
+                let toggled = (self.latched_controls & (1 << (control as u32))) != 0;
                 draw_goy_static_button(b, a, rect, &p, control.name(), held, toggled, opacity);
                 continue;
             }
@@ -1166,7 +1166,7 @@ impl TouchControls {
                 }
                 Some(Control::Sneak) if self.vertical_movement => Role::Button(Button::RightStick),
                 Some(c) if self.placement(c).toggleable => {
-                    self.latched_controls ^= 1 << (c as u16);
+                    self.latched_controls ^= 1 << (c as u32);
                     Role::Ignore
                 }
                 Some(c) => {
@@ -1340,7 +1340,7 @@ impl TouchControls {
         }
         if self.latched_controls != 0 {
             for c in Control::ALL {
-                if (self.latched_controls & (1 << (c as u16))) != 0
+                if (self.latched_controls & (1 << (c as u32))) != 0
                     && let Some(bt) = Self::button(c)
                 {
                     match bt {
