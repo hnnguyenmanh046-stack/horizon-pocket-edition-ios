@@ -17392,6 +17392,11 @@ impl Game<'_> {
         // keypad: a `WM_CHAR` after the Alt is released) reaches winit as a key event with no
         // physical key. GLFW's char callback types it in the focused text field (`charTyped`),
         // and every screen's key handler here would drop it for want of a key code.
+        //
+        // Horizon PE: every character of an iPhone's own keyboard comes this way (its keys
+        // have no key codes). The open screen's character hooks hear each one first, as they
+        // hear a key's characters (`ScreenEvent.CharacterTyped.Pre`): a native mod's own
+        // screen has no text box of the game's, and its fields are typed in through them.
         if let WindowEvent::KeyboardInput {
             event: key_event, ..
         } = &event
@@ -17400,7 +17405,12 @@ impl Game<'_> {
             && let Some(text) = key_event.text.as_deref()
         {
             let text: String = text.chars().filter(|c| !c.is_control()).collect();
-            if !text.is_empty() && self.text_field_focused() && self.types_text() {
+            if !text.is_empty()
+                && let Some(text) = self.screen_text_typed(&text)
+                && !text.is_empty()
+                && self.text_field_focused()
+                && self.types_text()
+            {
                 let _ = self.type_chars_into_screen(&text);
             }
             return;
