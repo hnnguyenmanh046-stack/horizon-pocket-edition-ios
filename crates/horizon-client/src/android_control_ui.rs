@@ -375,10 +375,27 @@ const KEYS: [(&str, KeyCode); 28] = [
     ("F3+T", KeyCode::KeyT),
 ];
 
+/// The virtual mouse's LMB and RMB buttons over a menu, in the bottom right corner: each as
+/// it is drawn, and whether it is the right button. Horizon PE: 64 x 30 (they were 48 x 20,
+/// easy to miss with a thumb), with the same margin from the corner.
 fn mouse_button_rects(w: f32, h: f32) -> [([f32; 4], bool); 2] {
     [
-        ([w - 53.0, h - 52.0, 48.0, 22.0], false),
-        ([w - 53.0, h - 28.0, 48.0, 22.0], true),
+        ([w - 69.0, h - 69.0, 64.0, 30.0], false),
+        ([w - 69.0, h - 35.0, 64.0, 30.0], true),
+    ]
+}
+
+/// Where a finger presses each of `mouse_button_rects`: a little past what is drawn, on
+/// every side but the one the two share, which is halved between them, and out to the
+/// screen's edge.
+fn mouse_button_touch_rects(w: f32, h: f32) -> [([f32; 4], bool); 2] {
+    const PAST: f32 = 5.0;
+    let [(lmb, _), (rmb, _)] = mouse_button_rects(w, h);
+    let middle = (lmb[1] + lmb[3] + rmb[1]) / 2.0;
+    let (left, top) = (lmb[0] - PAST, lmb[1] - PAST);
+    [
+        ([left, top, w - left, middle - top], false),
+        ([left, middle, w - left, h - middle], true),
     ]
 }
 
@@ -855,8 +872,8 @@ impl TouchUi {
         }
         if !self.goy_mode {
             if menu && self.virtual_mouse {
-                for ([x, y, width, height], right) in mouse_button_rects(w, h) {
-                    if (x..x + width).contains(&p[0]) && (y..y + height).contains(&p[1]) {
+                for ([x, y, width, height], right) in mouse_button_touch_rects(w, h) {
+                    if (x..=x + width).contains(&p[0]) && (y..=y + height).contains(&p[1]) {
                         return Some(Action::MouseButton(right));
                     }
                 }
@@ -928,8 +945,8 @@ impl TouchUi {
             button(b, a, "Back", b.width - 53.0, 3.0, 50.0);
             if self.virtual_mouse {
                 let [lmb, rmb] = mouse_button_rects(b.width, b.height);
-                button(b, a, "LMB", lmb.0[0], lmb.0[1], lmb.0[2]);
-                button(b, a, "RMB", rmb.0[0], rmb.0[1], rmb.0[2]);
+                mouse_button(b, a, "LMB", lmb.0);
+                mouse_button(b, a, "RMB", rmb.0);
             }
         }
         if !self.expanded {
@@ -1009,6 +1026,23 @@ impl TouchUi {
         }
     }
 }
+/// One of the virtual mouse's buttons: `button`'s plate at the size it is pressed at, its
+/// name in the middle.
+fn mouse_button(b: &mut HudBatch, a: &HudAtlas, label: &str, [x, y, w, h]: [f32; 4]) {
+    if !crate::android_controls::theme_button(b, a, "button", [x, y, w, h], false, u32::MAX, true) {
+        b.fill(a, x, y, w, h, rgba(16, 18, 24, 180));
+    }
+    let text_x = x + (w - HudBatch::text_width(a, label)) * 0.5;
+    b.text(
+        a,
+        label,
+        text_x,
+        y + (h - 8.0) * 0.5,
+        rgba(245, 245, 245, 255),
+        true,
+    );
+}
+
 fn button(b: &mut HudBatch, a: &HudAtlas, label: &str, x: f32, y: f32, w: f32) {
     if !crate::android_controls::theme_button(
         b,
@@ -8277,6 +8311,33 @@ mod tests {
             Some(Action::MouseButton(true))
         ));
         assert!(ui.action(427.0, 267.0, [399.0, 226.0], false).is_none());
+        // Larger than they were, and a thumb a little past them, or at the screen's very
+        // edge, still presses: LMB is drawn at 358..422 x 198..228, RMB under it to 262.
+        for (point, right) in [
+            ([360.0, 200.0], false),
+            ([354.0, 194.0], false),
+            ([427.0, 229.0], false),
+            ([354.0, 231.0], true),
+            ([427.0, 267.0], true),
+        ] {
+            assert!(
+                matches!(
+                    ui.action(427.0, 267.0, point, true),
+                    Some(Action::MouseButton(r)) if r == right
+                ),
+                "{point:?}"
+            );
+        }
+        // Left of them and above them is the menu's.
+        for point in [[350.0, 240.0], [400.0, 190.0]] {
+            assert!(
+                !matches!(
+                    ui.action(427.0, 267.0, point, true),
+                    Some(Action::MouseButton(_))
+                ),
+                "{point:?}"
+            );
+        }
         assert!(ui.press_mouse(1, false));
         assert!(!ui.press_mouse(2, false));
         assert!(ui.press_mouse(3, true));
