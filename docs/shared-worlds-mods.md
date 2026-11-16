@@ -51,7 +51,7 @@ the layout editor (**H** > **Controls** > the editor), like every other.
 
 | Button | Where it starts | What it does |
 | --- | --- | --- |
-| **Magnifying glass** | Left of the top row (before the microphone's place) | Zoom: tap to zoom in, tap again to zoom out. Held instead, it zooms for as long as the finger is on it. The glass is gold while it zooms |
+| **Magnifying glass** | The left edge, close under the **H** button and above the Coordinates HUD | Zoom: tap to zoom in, tap again to zoom out. Held instead, it zooms for as long as the finger is on it. The glass is gold while it zooms |
 | **Map pin with three lines** | Right of the top row (after the camera button) | Waymap: opens the list of waypoints |
 | **Map pin with a plus** | Right of that one | Waymap: adds a waypoint where you stand |
 

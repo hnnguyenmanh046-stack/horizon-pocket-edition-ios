@@ -631,11 +631,12 @@ fn deserialize_layouts<'de, D: serde::Deserializer<'de>>(
     for (output, input) in layouts.iter_mut().zip(rows) {
         let known = input.len().min(output.len());
         output[..known].copy_from_slice(&input[..known]);
-        // 1.0.0's zoom button was at the left edge under the hub, over the Coordinates HUD:
-        // one still exactly there was never placed by the player, and joins the top row.
+        // The first builds of 1.0.0 had the zoom button a little lower under the hub, on
+        // the Coordinates HUD, and then in the top row: one still exactly at either place
+        // was never placed by the player, and takes today's.
         let zoom = &mut output[Control::Zoom as usize];
-        if zoom.center == [0.035, 0.17] && zoom.size == 0.075 {
-            zoom.center = [0.34, 0.055];
+        if (zoom.center == [0.035, 0.17] || zoom.center == [0.34, 0.055]) && zoom.size == 0.075 {
+            zoom.center = [0.0225, 0.135];
         }
     }
     Ok(layouts)
@@ -671,8 +672,9 @@ impl Default for Settings {
             Placement::new(0.92, 0.36, 0.12),
             // The microphone: the leftmost of the top row, a place left of the debug button.
             Placement::new(0.38, 0.055, 0.075),
-            // Zoom: the top row's first, a place left of the microphone's.
-            Placement::new(0.34, 0.055, 0.075),
+            // Zoom: at the left edge, its left side in line with the hub button's, close
+            // under it and above the Coordinates HUD (58 GUI pixels down).
+            Placement::new(0.0225, 0.135, 0.075),
             // Waymap's two: the top row goes on to the right with them.
             Placement::new(0.62, 0.055, 0.075),
             Placement::new(0.66, 0.055, 0.075),

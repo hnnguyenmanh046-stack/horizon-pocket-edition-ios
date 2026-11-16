@@ -189,9 +189,8 @@ enum Role {
 }
 
 /// The factory top row from left to right, each control with its place (a fraction of the
-/// screen's width): Zoom's, the microphone, the five that were always there, and Waymap's two.
-const TOP_ROW: [(Control, f32); 9] = [
-    (Control::Zoom, 0.34),
+/// screen's width): the microphone, the five that were always there, and Waymap's two.
+const TOP_ROW: [(Control, f32); 8] = [
     (Control::Voice, 0.38),
     (Control::Debug, 0.42),
     (Control::Chat, 0.46),
@@ -596,7 +595,7 @@ impl TouchControls {
                 .filter(|(control, _)| {
                     !matches!(
                         control,
-                        Control::Zoom | Control::Voice | Control::Waypoints | Control::AddWaypoint
+                        Control::Voice | Control::Waypoints | Control::AddWaypoint
                     ) || self.visible(*control)
                 })
                 .collect();
@@ -3539,8 +3538,8 @@ mod tests {
         assert_eq!(read.layouts[0], settings.layouts[0]);
     }
 
-    /// The mods' buttons of this edition: Zoom's left of the top row, a tap for on and a tap
-    /// for off (or held); Waymap's two right of the top row, taps. Each is there only while its mod is (and in the editor), and
+    /// The mods' buttons of this edition: Zoom's under the hub at the left edge, a tap for on
+    /// and a tap for off (or held); Waymap's two right of the top row, taps. Each is there only while its mod is (and in the editor), and
     /// a layout saved before them loads whole with them at their places.
     #[test]
     fn the_zoom_and_waypoint_buttons_show_with_their_mods_and_join_old_layouts() {
@@ -3578,14 +3577,15 @@ mod tests {
             assert_eq!(pair[0][3], pair[1][3]);
         }
         assert!(rects[6][0] + rects[6][2] <= 1.0);
-        // The zoom button: in the row, left of the debug button with the microphone's place
-        // between them, on the screen, the row's size.
+        // The zoom button: at the left edge, close under the hub's button (which ends 0.09
+        // down a phone's screen) and above where the Coordinates HUD starts (58 GUI pixels
+        // down: 0.198 of a phone's height), on the screen, the row's size.
         let glass = touch.placement(Control::Zoom).rect(touch.aspect());
+        assert!(glass[0] >= 0.0 && glass[0] < 0.01, "{glass:?}");
         assert!(
-            glass[0] >= 0.0 && glass[0] + 2.0 * glass[2] <= rects[0][0] + 0.0001,
+            glass[1] > 0.09 && glass[1] < 0.11 && glass[1] + glass[3] < 0.19,
             "{glass:?}"
         );
-        assert_eq!(glass[1], rects[0][1]);
         assert_eq!(glass[3], rects[0][3]);
         // A tap: zoomed until the next tap, and nothing else pressed.
         touch.update(1, zoom, true, false);
@@ -3661,11 +3661,10 @@ mod tests {
             .collect();
         assert_eq!(five, [0.18, 0.34, 0.50, 0.66, 0.82]);
         tall.waypoints_available = true;
-        tall.zoom_available = true;
         for voice in [false, true] {
             tall.voice_available = voice;
-            let shown: Vec<Control> = std::iter::once(Control::Zoom)
-                .chain(std::iter::once(Control::Voice).filter(|_| voice))
+            let shown: Vec<Control> = std::iter::once(Control::Voice)
+                .filter(|_| voice)
                 .chain(row)
                 .collect();
             let rects: Vec<_> = shown
@@ -3686,9 +3685,7 @@ mod tests {
         pad.viewport(2048, 1536);
         pad.voice_available = true;
         pad.waypoints_available = true;
-        pad.zoom_available = true;
-        let rects: Vec<_> = [Control::Zoom, Control::Voice]
-            .into_iter()
+        let rects: Vec<_> = std::iter::once(Control::Voice)
             .chain(row)
             .map(|c| pad.placement(c).rect(pad.aspect()))
             .collect();
@@ -3696,7 +3693,7 @@ mod tests {
             assert!(pair[0][0] + pair[0][2] < pair[1][0], "{rects:?}");
         }
         assert!(
-            rects[0][0] >= 0.0 && rects[8][0] + rects[8][2] <= 1.0,
+            rects[0][0] >= 0.0 && rects[7][0] + rects[7][2] <= 1.0,
             "{rects:?}"
         );
         // A layout saved with fifteen controls (Shared Worlds'): every one kept, the three
@@ -3735,18 +3732,24 @@ mod tests {
         );
         assert_eq!(
             settings.layouts[0][Control::Zoom as usize].center,
-            [0.34, 0.055]
+            [0.0225, 0.135]
         );
-        // A layout saved by 1.0.0, whose zoom button was at the left edge under the hub and
-        // never moved: it joins the row. One the player placed stays.
+        // A layout saved by an earlier 1.0.0, whose zoom button was a little lower under the
+        // hub, or in the top row, and never moved: it takes its place. One the player placed
+        // stays.
         let mut first = serde_json::to_value(&settings).unwrap();
         first["layouts"][0][Control::Zoom as usize]["center"] = serde_json::json!([0.035, 0.17]);
         first["layouts"][1][Control::Zoom as usize]["center"] = serde_json::json!([0.2, 0.3]);
+        first["layouts"][2][Control::Zoom as usize]["center"] = serde_json::json!([0.34, 0.055]);
         let moved: Settings = serde_json::from_value(first).unwrap();
         assert_eq!(
             moved.layouts[0][Control::Zoom as usize].center,
-            [0.34, 0.055]
+            [0.0225, 0.135]
         );
         assert_eq!(moved.layouts[1][Control::Zoom as usize].center, [0.2, 0.3]);
+        assert_eq!(
+            moved.layouts[2][Control::Zoom as usize].center,
+            [0.0225, 0.135]
+        );
     }
 }
