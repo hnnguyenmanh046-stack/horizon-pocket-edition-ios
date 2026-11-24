@@ -159,6 +159,11 @@ pub fn main() {
         eprintln!("Horizon: {error}");
         return;
     }
+    // Play with Friends' joining side: without it no invite code joins, and the title's Friends
+    // button stays off. The desktop's program registers it too (horizon-official).
+    if let Err(error) = horizon_hooks::register(&horizon_friends::game::HOOKS) {
+        eprintln!("Horizon: Play with Friends did not register: {error}");
+    }
     let event_loop = match EventLoop::new() {
         Ok(event_loop) => event_loop,
         Err(e) => {
