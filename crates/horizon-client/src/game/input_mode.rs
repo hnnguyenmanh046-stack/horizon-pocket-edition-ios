@@ -171,3 +171,10 @@ fn fill_poly(
         batch.fill_quad(atlas, [grown[0], grown[i], grown[i + 1], grown[i + 1]], color);
     }
 }
+
+/// Other platforms have a system pointer (or none to draw): nothing to do. The call in
+/// `Game::hud` has no `cfg` of its own, which a native mod that hooks `hud` cannot resolve.
+#[cfg(not(target_os = "ios"))]
+impl Game<'_> {
+    pub(super) fn draw_hardware_cursor(&self, _batch: &mut horizon_client::hud::HudBatch) {}
+}
