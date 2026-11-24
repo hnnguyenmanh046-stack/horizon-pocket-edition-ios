@@ -43,8 +43,16 @@ elif grep -q 'panicked at' "$logs/stderr.log" 2>/dev/null; then
   echo '::error::the app panicked in the Simulator (stderr.log above)'
   failed=1
 fi
-if ! grep -q 'Horizon renderer: creating the pipelines' "$logs/latest.log" 2>/dev/null; then
-  echo "::error::the game did not reach its renderer's pipelines (latest.log above)"
+# The app here has no game files (they are fetched on the phone), so from the 0.9.0 engine on the
+# start ends on the setup screen, drawn by the loading screen's own small renderer: its first
+# frame is as far as it goes. (With game files the game's renderer follows, and stops at the
+# Simulator's limit above.)
+if ! grep -qE 'Horizon: loading screen shown|Horizon renderer: creating the pipelines' "$logs/latest.log" 2>/dev/null; then
+  echo "::error::the game did not draw its loading screen (latest.log above)"
+  failed=1
+fi
+if ! grep -q 'Horizon renderer: device ready' "$logs/latest.log" 2>/dev/null; then
+  echo "::error::the renderer got no device (latest.log above)"
   failed=1
 fi
 if ! grep -qE 'Horizon: iOS, game folder' "$logs/latest.log" 2>/dev/null; then
@@ -75,8 +83,12 @@ if [ -n "$crashes" ]; then
 fi
 if xcrun simctl spawn "$device" launchctl list | grep -q "UIKitApplication:$bundle"; then
   echo 'The app is still running.'
+elif [ $simulator_stop = 1 ]; then
+  echo "The app stopped at the Simulator's limit."
 else
-  echo '::warning::the app is no longer running'
+  # Two minutes in, a start that got this far and then left is a crash or an exit nobody asked for.
+  echo '::error::the app is no longer running'
+  failed=1
 fi
 xcrun simctl shutdown "$device" || true
 exit $failed

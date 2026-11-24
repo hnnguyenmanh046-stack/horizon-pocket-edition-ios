@@ -151,6 +151,7 @@ module into area folders (`game/starling/`, `game/interface/`, `game/runtime/`, 
 | `horizon-hdr/src/lib.rs`, `horizon-client-render/src/gfx/surface_setup.rs`, `gfx/ray_query.rs`, `gfx/hdr.rs`, `gfx/pack_shadow.rs`, `gfx/arena.rs` | What 0.9.0 gates on macOS for Metal is gated on Apple's platforms (`target_vendor = "apple"`); HDR output is not asked for on iOS; the shadow map's side limit and the arena's 32 MB page ceiling are a phone's | The same Metal, a phone's memory |
 | `horizon-guest-stack/src/lib.rs`, `horizon-client/src/game/world/integrated.rs` | On iOS a worker's stack is 16 MiB (`IOS_WORKER_STACK`) and the server thread's 64 MiB, not 0.9.0's 136 MiB each; the game's own stack (`horizon-ios-game` `GAME_STACK`) is 64 MiB | 136 MiB is reserved for wasm mods, which iOS does not run; an iPhone app's address space is a few GB and the worker pools are dozens of threads |
 | `horizon-client/src/game.rs` (imports), `horizon-mod-package/src/runtime_leases/cleanup.rs` | `event_loop` and `leave_fullscreen_after` are imported off iOS only; `Cleanup.data` may go unread on iOS as on Android | Unused on iOS (the app owns the event loop; no mod process holder), and the iOS lint has no warnings |
+| `horizon-client/src/game/runtime/loading_screen.rs` (`show_startup_console`) | The boot console while the game loads (0.9.0's, Android's) is iOS's too | A phone's start is the same on both |
 
 ## Gate ledger
 
