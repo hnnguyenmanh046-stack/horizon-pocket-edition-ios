@@ -22,7 +22,10 @@ const BUILDABLE: &str = include_str!("../../../packaging/ios/catalog-buildable.j
 
 /// The ids of the list `text` for the engine `engine`; None when it is not a list or is another
 /// engine's.
-fn buildable_in(text: &str, engine: Option<&str>) -> Option<(String, std::collections::BTreeSet<String>)> {
+fn buildable_in(
+    text: &str,
+    engine: Option<&str>,
+) -> Option<(String, std::collections::BTreeSet<String>)> {
     let list: serde_json::Value = serde_json::from_str(text).ok()?;
     let of = list["engine"].as_str()?;
     if engine.is_some_and(|engine| engine != of) {
@@ -326,7 +329,8 @@ mod tests {
         let (engine, built_with) = buildable_in(BUILDABLE, None).expect("the list the app carries");
         assert!(!engine.is_empty());
         assert!(built_with.iter().all(|id| names_a_mod(id, "0")));
-        let text = r#"{"engine":"starling-0.9.0","mods":{"zoom":"1.0.0","Bad Id":"1","gamma":"2"}}"#;
+        let text =
+            r#"{"engine":"starling-0.9.0","mods":{"zoom":"1.0.0","Bad Id":"1","gamma":"2"}}"#;
         let (of, mods) = buildable_in(text, Some("starling-0.9.0")).unwrap();
         assert_eq!(of, "starling-0.9.0");
         assert_eq!(mods.into_iter().collect::<Vec<_>>(), ["gamma", "zoom"]);
