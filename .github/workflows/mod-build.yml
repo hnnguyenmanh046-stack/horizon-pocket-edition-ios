@@ -24,6 +24,10 @@ on:
         description: The build's key, as the mod builds service computes it; empty to compute it here
         type: string
         default: ""
+      self_test:
+        description: The workflow's own test instead (at a branch; the mods above are not read)
+        type: boolean
+        default: false
   # Branches only: a tag's push has no paths to go by, and would build for nobody.
   push:
     branches: ["**"]
@@ -60,7 +64,8 @@ jobs:
         env:
           TAG: ${{ github.ref_name }}
           REF_TYPE: ${{ github.ref_type }}
-          EVENT: ${{ github.event_name }}
+          # A push of this file, or a run asked to test itself.
+          EVENT: ${{ (github.event_name == 'push' || inputs.self_test) && 'push' || github.event_name }}
           MODS: ${{ inputs.mods }}
           KEY: ${{ inputs.key }}
           GH_TOKEN: ${{ github.token }}
@@ -137,4 +142,4 @@ jobs:
       artifact: mod-build-${{ needs.check.outputs.key }}
       retention: 7
       # A player's build is not started in the Simulator (they wait on it); the workflow's test is.
-      simulator: ${{ github.event_name == 'push' }}
+      simulator: ${{ github.event_name == 'push' || inputs.self_test == true }}
