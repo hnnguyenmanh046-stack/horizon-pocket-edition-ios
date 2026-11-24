@@ -5,9 +5,12 @@
 # panic in stderr and no crash report. GitHub's macOS machines may give the Simulator no Metal device:
 # then the renderer's "No Metal graphics device" is what the start reaches, which still proves every
 # step before it.
-#   tools/ci/ios_simulator_smoke.sh path/to/HorizonPE.app
+#   tools/ci/ios_simulator_smoke.sh path/to/HorizonPE.app [CATALOG_MODS]
+# With CATALOG_MODS (`id@version,id@version`, the mods the app was built with:
+# tools/ios_native_sdk.py), the start must also say it read each mod's package from the bundle.
 set -euo pipefail
 app=$1
+catalog_mods=${2:-}
 bundle=dev.horizon.pocketedition
 device=$(xcrun simctl list devices available -j | python3 -c '
 import json, sys
@@ -57,6 +60,19 @@ fi
 if ! grep -qE 'Horizon: iOS, game folder' "$logs/latest.log" 2>/dev/null; then
   echo "::error::Starling's start did not reach its log (latest.log above)"
   failed=1
+fi
+if [ -n "$catalog_mods" ]; then
+  if grep -q 'the mods this app was built with are left out' "$logs/stderr.log" 2>/dev/null; then
+    echo '::error::the app left out the mods it was built with (stderr.log above)'
+    failed=1
+  fi
+  built=$(grep -F 'Horizon: mods built into this app:' "$logs/stderr.log" 2>/dev/null || true)
+  for mod in ${catalog_mods//,/ }; do
+    if ! printf '%s' "$built" | grep -qF -- "${mod%%@*} ${mod#*@}"; then
+      echo "::error::the app did not say it was built with $mod (stderr.log above)"
+      failed=1
+    fi
+  done
 fi
 crashes=$(find "$HOME/Library/Logs/DiagnosticReports" -newermt "@$started" -name 'Starling*' 2>/dev/null || true)
 if [ -n "$crashes" ]; then

@@ -10,6 +10,9 @@ run-name: mod-build ${{ inputs.key }}
 # release has. The request is checked before anything is fetched (tools/mod_build_key.py): a mod is
 # a catalog mod's `id@version`, and the key must be the request's own, so no request can take
 # another build's name. The build has no secret and may only read the repository.
+#
+# When this file or what it runs changes on a branch, it tests itself: the same build, at the
+# branch, with the first mod of packaging/ios/catalog-buildable.json, started in the Simulator too.
 on:
   workflow_dispatch:
     inputs:
@@ -21,6 +24,13 @@ on:
         description: The build's key, as the mod builds service computes it; empty to compute it here
         type: string
         default: ""
+  # Branches only: a tag's push has no paths to go by, and would build for nobody.
+  push:
+    branches: ["**"]
+    paths:
+      - .github/workflows/mod-build.yml
+      - tools/mod_build_key.py
+      - tools/ios_native_sdk.py
 permissions:
   contents: read
 concurrency:
@@ -50,12 +60,25 @@ jobs:
         env:
           TAG: ${{ github.ref_name }}
           REF_TYPE: ${{ github.ref_type }}
+          EVENT: ${{ github.event_name }}
           MODS: ${{ inputs.mods }}
           KEY: ${{ inputs.key }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          [ "$REF_TYPE" = tag ] || { echo "::error::a mod build is made at a release's tag, not at $TAG"; exit 1; }
+          if [ "$EVENT" = push ]; then
+            # The workflow's own test: one mod this engine is known to build.
+            MODS=$(python3 -c 'import json; m = json.load(open("packaging/ios/catalog-buildable.json"))["mods"]; i = sorted(m)[0]; print(i + "@" + m[i])')
+            KEY=""
+            # A branch is no release: the key is a test's (v0.0.0 of this edition).
+            case "$TAG" in
+              *shared-worlds-mods*) TAG=v0.0.0-shared-worlds-mods ;;
+              *shared-worlds*) TAG=v0.0.0-shared-worlds ;;
+              *) TAG=v0.0.0 ;;
+            esac
+          else
+            [ "$REF_TYPE" = tag ] || { echo "::error::a mod build is made at a release's tag, not at $TAG"; exit 1; }
+          fi
           if [ -n "$KEY" ]; then
             python3 tools/mod_build_key.py "$TAG" "$MODS" "$KEY" > request.txt
           else
@@ -84,9 +107,10 @@ jobs:
           if [ -f native-mods/built-in.txt ]; then
             built_in=$(grep -v '^#' native-mods/built-in.txt | tr -s ' \n' ' ' | sed 's/^ *//; s/ *$//')
           fi
-          # Built already and still kept: nothing to do (the same request, asked again).
+          # Built already and still kept: nothing to do (the same request, asked again). The
+          # workflow's own test builds every time.
           done=false
-          if gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=mod-build-$key&per_page=10" \
+          if [ "$EVENT" != push ] && gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=mod-build-$key&per_page=10" \
                --jq '[.artifacts[] | select(.expired | not)] | length' | grep -qv '^0$'; then
             done=true
             echo "::notice::mod-build-$key is built already"
@@ -112,4 +136,5 @@ jobs:
       catalog_mods: ${{ needs.check.outputs.mods }}
       artifact: mod-build-${{ needs.check.outputs.key }}
       retention: 7
-      simulator: false
+      # A player's build is not started in the Simulator (they wait on it); the workflow's test is.
+      simulator: ${{ github.event_name == 'push' }}

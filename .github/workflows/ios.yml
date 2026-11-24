@@ -329,5 +329,16 @@ jobs:
             IOS_TARGET="$IOS_TARGET" CODE_SIGN_IDENTITY=- \
             CONFIGURATION_BUILD_DIR="$PWD/build-sim" \
             build > xcode-sim.log 2>&1 || { tail -80 xcode-sim.log; exit 1; }
+          # The catalog mods' packages beside the program, as the .ipa has them: the engine
+          # refuses a built mod without its package.
+          if [ -d "$RUNNER_TEMP/catalog/horizon-native-mods" ]; then
+            cp -R "$RUNNER_TEMP/catalog/horizon-native-mods" build-sim/HorizonPE.app/horizon-native-mods
+            cp "$RUNNER_TEMP/catalog-mods.json" build-sim/HorizonPE.app/catalog-mods.json
+          fi
+          if [ -f "$RUNNER_TEMP/native-mods.json" ]; then
+            cp "$RUNNER_TEMP/native-mods.json" build-sim/HorizonPE.app/native-mods.json
+          fi
       - name: Start it in the Simulator
-        run: bash tools/ci/ios_simulator_smoke.sh build-sim/HorizonPE.app
+        env:
+          CATALOG_MODS: ${{ inputs.catalog_mods }}
+        run: bash tools/ci/ios_simulator_smoke.sh build-sim/HorizonPE.app "$CATALOG_MODS"
