@@ -511,7 +511,8 @@ impl PlayerSender {
     pub fn send_now(&self, body: Vec<u8>) {
         match &self.to {
             To::Disabled => {}
-            To::Channel(tx) => drop(tx.send(Out::Express(body))),
+            // A test's channel: out at once, whatever the tick holds.
+            To::Channel(tx) => drop(tx.send(Out::Packet(body))),
             To::Pool(outbox, _) => {
                 let body = Body::from(body);
                 if self.reserve(io_pool::charge(body.retained())) {
@@ -3447,7 +3448,6 @@ mod tests {
             Out::Packet(body) => vec![body],
             Out::Packets(bodies) => bodies,
             Out::Disconnect(_) => vec![b"disconnect".to_vec()],
-            Out::Express(body) => vec![body],
         }
     }
 
@@ -3463,7 +3463,7 @@ mod tests {
             // From another thread's point of view (voice never runs in the tick): the
             // packet the tick holds stays held, and stays whole.
             sender.send_now(vec![9]);
-            assert!(matches!(rx.try_recv(), Ok(Out::Express(body)) if body == [9]));
+            assert!(matches!(rx.try_recv(), Ok(Out::Packet(body)) if body == [9]));
             assert!(rx.try_recv().is_err(), "the tick's packet left early");
         }
         sender.flush();
@@ -3609,6 +3609,7 @@ mod tests {
         };
         let lan = crate::lan::Lan::start_with(Arc::new(SyncData::empty()), config).unwrap();
         let mut c = PlayConn {
+            voice: false,
             payload_sender: PlayerSender::disabled(),
             payload_transport: Transport::empty(),
             conn: 1,
@@ -3747,6 +3748,7 @@ mod tests {
         };
         let lan = crate::lan::Lan::start_with(Arc::new(SyncData::empty()), config).unwrap();
         let conn = |uuid: u128, pending: Option<i64>| PlayConn {
+            voice: false,
             payload_sender: PlayerSender::disabled(),
             payload_transport: Transport::empty(),
             conn: 1,
@@ -3800,6 +3802,7 @@ mod tests {
         };
         let lan = crate::lan::Lan::start_with(Arc::new(SyncData::empty()), config).unwrap();
         let conn = |uuid: u128| PlayConn {
+            voice: false,
             payload_sender: PlayerSender::disabled(),
             payload_transport: Transport::empty(),
             conn: 1,

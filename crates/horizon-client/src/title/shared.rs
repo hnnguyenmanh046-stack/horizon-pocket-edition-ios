@@ -1338,8 +1338,10 @@ mod tests {
     #[test]
     fn the_setup_help_fits_above_its_buttons_on_a_phone() {
         let atlas =
-            crate::hud::HudAtlas::build(std::path::Path::new("/nonexistent/horizon-test-assets"))
-                .unwrap();
+            crate::hud::HudAtlas::build(&crate::resource_source::ResourceSource::directory(
+                std::path::Path::new("/nonexistent/horizon-test-assets").to_path_buf(),
+            ))
+            .unwrap();
         for (w, h) in [(427.0f32, 240.0f32), (341.0, 256.0), (520.0, 240.0)] {
             let width = (w - 50.0).min(320.0);
             let mut y = 34.0;

@@ -303,12 +303,13 @@ mod tests {
         }
 
         /// The voice messages sent to this player since the last look, in order: nothing
-        /// else was sent, and nothing went by the game's own queue.
+        /// else was sent, and none waited for a tick (a test's channel gets what a tick held
+        /// as `Out::Packets`, and the express lane's as a packet at once).
         fn got(&self) -> Vec<Vec<u8>> {
             let prefix = packet(Vec::new());
             let mut messages = Vec::new();
             while let Ok(out) = self.out.try_recv() {
-                let Out::Express(body) = out else {
+                let Out::Packet(body) = out else {
                     panic!("voice went by the game's queue");
                 };
                 assert!(body.starts_with(&prefix));

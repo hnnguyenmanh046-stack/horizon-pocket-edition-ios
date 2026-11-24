@@ -433,7 +433,10 @@ mod tests {
     use super::*;
 
     fn atlas() -> HudAtlas {
-        HudAtlas::build(std::path::Path::new("/nonexistent/horizon-test-assets")).unwrap()
+        HudAtlas::build(&crate::resource_source::ResourceSource::directory(
+            std::path::Path::new("/nonexistent/horizon-test-assets").to_path_buf(),
+        ))
+        .unwrap()
     }
 
     fn person(n: u128, name: &str) -> Person {

@@ -177,9 +177,6 @@ pub enum Out {
     Packets(Vec<Vec<u8>>),
     /// Send a play disconnect with this component, then close.
     Disconnect(horizon_core::nbt::Tag),
-    /// A test's channel: what went by the connection's express lane (voice chat,
-    /// `conn::PlayerSender::send_now`), ahead of what is queued.
-    Express(Vec<u8>),
 }
 
 /// PlayerList.canPlayerLogin for a dedicated server: the disconnect reason
