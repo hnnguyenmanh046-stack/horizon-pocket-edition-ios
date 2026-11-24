@@ -34,7 +34,6 @@ bindings = [
   { name = "steps", ty = "f32", value = "steps" },
   { name = "claimed", ty = "&mut bool", value = "&mut *claimed" },
 ]
-
 [[injection]]
 id = "list"
 kind = "HEAD"
@@ -63,4 +62,15 @@ helper = "camera.rs"
 bindings = [
   { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
   { name = "partial", ty = "f32", value = "partial" },
+]
+[[injection]]
+id = "turn"
+kind = "HEAD"
+cancellable = true
+target = "horizon_client::game::perspective::Game<'_>::turn_player"
+helper = "turn.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+  { name = "xo", ty = "f64", value = "xo" },
+  { name = "yo", ty = "f64", value = "yo" },
 ]
