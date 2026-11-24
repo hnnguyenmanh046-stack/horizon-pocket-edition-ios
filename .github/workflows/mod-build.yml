@@ -135,6 +135,8 @@ jobs:
     uses: ./.github/workflows/ios.yml
     permissions:
       contents: read
+      # The stage of the built-in mods looks for the kept horizon-mixins among the artifacts.
+      actions: read
     with:
       deliver: true
       mods: ${{ needs.check.outputs.built_in }}
