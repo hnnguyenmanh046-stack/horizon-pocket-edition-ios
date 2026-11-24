@@ -308,12 +308,9 @@ mod tests {
             let prefix = packet(Vec::new());
             let mut messages = Vec::new();
             while let Ok(out) = self.out.try_recv() {
-                assert!(
-                    matches!(out, Out::Express),
-                    "voice went by the game's queue"
-                );
-            }
-            while let Some(body) = self.sender.take_express() {
+                let Out::Express(body) = out else {
+                    panic!("voice went by the game's queue");
+                };
                 assert!(body.starts_with(&prefix));
                 messages.push(body[prefix.len()..].to_vec());
             }

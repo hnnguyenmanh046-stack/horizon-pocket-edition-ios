@@ -151,6 +151,18 @@ pub fn ime_height() -> u32 {
     horizon_gamecontroller::keyboard_height()
 }
 
+/// How far the sensor housing (the notch, the Dynamic Island) reaches into the window from each
+/// edge, in pixels: left, top, right, bottom, as Android's camera cutout (android.rs).
+pub fn safe_insets() -> [u32; 4] {
+    horizon_gamecontroller::safe_insets()
+}
+
+/// The game the app's event loop ran has ended: the hooks hear it, as at the end of the
+/// desktop's `entry::start` (which returns here once the game is handed over).
+pub fn game_ended() {
+    horizon_hooks::engine::shutdown();
+}
+
 /// Registers the platform's hooks and probes, before the game starts.
 pub fn install() {
     crate::platform::set(crate::platform::Hooks {

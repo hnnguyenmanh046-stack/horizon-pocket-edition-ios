@@ -7,6 +7,7 @@
 mod install;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
+use std::time::Instant;
 
 /// Where the preparing is.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -14,7 +15,7 @@ pub enum Stage {
     #[default]
     Idle,
     /// Fetching the Java runtime: bytes so far, and in all.
-    Java(u64, u64),
+    Java(u64, u64, Instant),
     /// Unpacking it.
     Unpacking,
     /// horizon-prepare at work: its last line.
@@ -69,8 +70,9 @@ pub fn start(resources: PathBuf) {
         *shared() = Stage::Failed("On 32-bit x86, import prepared resources as a .starling file. An Android x86 Java 25 runtime is not available.".into());
         return;
     };
+    let started = Instant::now();
     #[cfg(not(target_os = "ios"))]
-    let first = Stage::Java(0, runtime.size);
+    let first = Stage::Java(0, runtime.size, started);
     {
         let mut stage = shared();
         if matches!(
@@ -84,12 +86,11 @@ pub fn start(resources: PathBuf) {
     let spawned = std::thread::Builder::new()
         .name("preparer".into())
         .spawn(move || {
-            let started = std::time::Instant::now();
             // iOS runs no Java: the app carries what horizon-prepare made in CI.
             let result = if cfg!(target_os = "ios") {
                 assemble(&resources)
             } else {
-                run(&resources)
+                run(&resources, started)
             };
             *shared() = match result {
                 Ok(()) => {
@@ -110,7 +111,7 @@ pub fn start(resources: PathBuf) {
     }
 }
 
-fn run(resources: &Path) -> Result<(), String> {
+fn run(resources: &Path, started: Instant) -> Result<(), String> {
     let runtime = starling_account::java::android_runtime(std::env::consts::ARCH)
         .ok_or("No Java runtime is available for this architecture.")?;
     let server_jar = crate::accounts::server_jar()
@@ -130,7 +131,7 @@ fn run(resources: &Path) -> Result<(), String> {
             *shared() = if done >= total {
                 Stage::Unpacking
             } else {
-                Stage::Java(done, total)
+                Stage::Java(done, total, started)
             };
         },
         &|| false,
@@ -209,11 +210,7 @@ fn run(resources: &Path) -> Result<(), String> {
 /// with the player's own official files just fetched, as horizon-prepare made them file for file
 /// (horizon-ios-prepare, checked by CI on every build).
 fn assemble(resources: &Path) -> Result<(), String> {
-    let engine = std::env::current_exe()
-        .map_err(|e| e.to_string())?
-        .parent()
-        .ok_or("The app cannot find its own files.")?
-        .join("assets/engine-data.zip");
+    let engine = engine_tables().ok_or("The app cannot find its own files.")?;
     if !engine.is_file() {
         return Err("The game tables are missing from the app: install it again.".into());
     }
@@ -230,6 +227,59 @@ fn assemble(resources: &Path) -> Result<(), String> {
     // Bedrock's touch buttons, from Mojang too, so the first game already has them.
     crate::bedrock_touch::fetch_logged(resources);
     Ok(())
+}
+
+/// The tables the iOS app carries (`assets/engine-data.zip`, beside its program).
+fn engine_tables() -> Option<PathBuf> {
+    Some(
+        std::env::current_exe()
+            .ok()?
+            .parent()?
+            .join("assets/engine-data.zip"),
+    )
+}
+
+/// iOS: an app installed over an older one carries other tables than the ones `resources` was
+/// laid out from, which this engine may not read. Their manifest goes, so the start finds no
+/// prepared files and the setup lays them out again from the official files still on the
+/// phone ([`assemble`], which replaces the folder whole), fetching them again only if they
+/// went. Before anything reads the folder. Whether it did.
+pub fn retire_other_tables(resources: &Path) -> bool {
+    if !cfg!(target_os = "ios") {
+        return false;
+    }
+    let manifest = resources.join("horizon-resources.json");
+    if !manifest.is_file() {
+        return false;
+    }
+    let Some(carried) = engine_tables().and_then(|engine| horizon_ios_prepare::engine_id(&engine))
+    else {
+        // An app without its tables can lay nothing out: what is there stays.
+        return false;
+    };
+    let laid_out = horizon_ios_prepare::assembled_id(resources);
+    if tables_match(laid_out.as_deref(), &carried) {
+        return false;
+    }
+    log::info!(
+        "Horizon: the game files were laid out from other tables ({}) than this app's ({}): \
+         laying them out again",
+        laid_out.as_deref().map_or("none", str::trim),
+        carried.trim()
+    );
+    match std::fs::remove_file(&manifest) {
+        Ok(()) => true,
+        Err(e) => {
+            log::warn!("Horizon: {}: {e}", manifest.display());
+            false
+        }
+    }
+}
+
+/// Whether the folder laid out from the tables `laid_out` (None: by an app that kept no note)
+/// holds this app's, `carried`.
+fn tables_match(laid_out: Option<&str>, carried: &str) -> bool {
+    laid_out.is_some_and(|id| id.trim() == carried.trim())
 }
 
 /// The fetched files' sounds into `kit`'s prepared folder (horizon-prepare's `sounds`).
@@ -257,6 +307,25 @@ pub fn complete_sounds(resources: &Path) {
             resources.display()
         ),
         Err(e) => log::warn!("Horizon: the game's sounds were not added: {e}"),
+    }
+}
+
+/// Once the game has loaded the prepared `resources`, the official files they were prepared
+/// from go (accounts::drop_files), on a thread of their own: thousands of files to delete. Not
+/// while the resources lack their sounds, which `complete_sounds` still takes from them.
+pub fn drop_downloads(resources: &Path) {
+    let root = crate::accounts::files_root();
+    if !crate::platform::registered()
+        || !resources.join("assets/minecraft/sounds.json").is_file()
+        || !(root.exists() || root.with_file_name("minecraft.dropped").exists())
+    {
+        return;
+    }
+    if let Err(e) = std::thread::Builder::new()
+        .name("drop-downloads".into())
+        .spawn(crate::accounts::drop_files)
+    {
+        log::warn!("Horizon: the fetched game files stay: {e}");
     }
 }
 
@@ -337,6 +406,12 @@ pub fn put_shader_pack(game_folder: &Path) {
     }
 }
 
+/// The std the wasm mods linked against, which earlier versions put in the app's own files: gone
+/// with the wasm mods (Starling runs none since 2026-11-20).
+pub fn remove_wasm_std() {
+    let _ = std::fs::remove_file(crate::logging::private_home().join("horizon-wasm-std.wasm"));
+}
+
 /// CRC-32 (IEEE), to tell one skin from the next.
 fn crc32(bytes: &[u8]) -> u32 {
     let mut crc = !0u32;
@@ -386,4 +461,20 @@ fn unpack(bytes: &[u8], dir: &Path) -> Result<(), String> {
         std::io::copy(&mut entry, &mut file).map_err(|e| format!("{}: {e}", path.display()))?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::tables_match;
+
+    #[test]
+    fn only_the_apps_own_tables_are_kept() {
+        assert!(tables_match(Some("abc123"), "abc123"));
+        // A line end either side is none of the id.
+        assert!(tables_match(Some("abc123\n"), "abc123"));
+        assert!(tables_match(Some("abc123"), "abc123\n"));
+        // Another version's tables, and a folder laid out before the note was kept.
+        assert!(!tables_match(Some("abc124"), "abc123"));
+        assert!(!tables_match(None, "abc123"));
+    }
 }

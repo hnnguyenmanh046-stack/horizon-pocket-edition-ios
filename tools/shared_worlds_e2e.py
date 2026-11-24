@@ -20,7 +20,7 @@
              the world, loads the backup and opens it again: the block is gone. Undo Last Load
              brings it back the same way.
 
-    python3 tools/shared_worlds_e2e.py --client target/fast/horizon-client --resources R --xvfb --offscreen
+    python3 tools/shared_worlds_e2e.py --client target/fast/horizon-official --resources R --xvfb --offscreen
 
 The SHARED_WORLDS_S3_* variables name the bucket (tools/ci/s3_server.sh starts one). Nothing
 else leaves the machine: no router is asked for a port, STUN and the public tunnel are off.

@@ -22,6 +22,8 @@ pub(crate) use trace;
 pub mod code;
 pub mod crypto;
 pub mod direct;
+#[cfg(feature = "game")]
+pub mod game;
 pub mod guest;
 pub mod host;
 pub mod invite;
@@ -74,6 +76,21 @@ pub fn split_tunnels(text: &str) -> (&str, Vec<SocketAddr>) {
         ),
         None => (text, Vec::new()),
     }
+}
+
+/// How the last invite a game joined reached its host ([`join_path`]).
+static JOIN_PATH: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+/// The joining game's note of the path its join took: 0 while one is being looked for, then 1
+/// (straight to the host), 2 (the host's public tunnel), 3 (the relay) or 4 (straight, over
+/// UDP).
+pub fn note_join_path(path: u8) {
+    JOIN_PATH.store(path, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// How the last invite joined reached its host ([`note_join_path`]).
+pub fn join_path() -> u8 {
+    JOIN_PATH.load(std::sync::atomic::Ordering::SeqCst)
 }
 
 /// Fill `buf` from the OS random generator.
@@ -150,6 +167,18 @@ pub fn resolve_relay(url: &str) -> io::Result<Vec<SocketAddr>> {
     Ok(found)
 }
 
+/// Configure TCP keepalive probes so dead peers (e.g. lost Wi-Fi, sleep, or silent NAT
+/// teardown) are detected by the OS instead of holding threads indefinitely.
+pub fn set_tcp_keepalive(stream: &TcpStream) -> io::Result<()> {
+    let sock = socket2::SockRef::from(stream);
+    let keepalive = socket2::TcpKeepalive::new()
+        .with_time(Duration::from_secs(10))
+        .with_interval(Duration::from_secs(3));
+    #[cfg(not(any(target_os = "windows", target_os = "openbsd")))]
+    let keepalive = keepalive.with_retries(3);
+    sock.set_tcp_keepalive(&keepalive)
+}
+
 /// Carry one connection both ways between a plain stream (the game's) and a
 /// protected one, until either side ends; then both are closed.
 pub fn pump(
@@ -161,13 +190,14 @@ pub fn pump(
     for s in [&plain, reader.get_ref(), writer.get_ref()] {
         s.set_read_timeout(None)?;
         let _ = s.set_nodelay(true);
+        let _ = set_tcp_keepalive(s);
     }
     let mut plain_in = plain.try_clone()?;
     let mut plain_out = plain;
     let outbound = std::thread::Builder::new()
         .name("horizon-friends-out".into())
         .spawn(move || {
-            let mut buf = vec![0u8; crypto::MAX_PAYLOAD];
+            let mut buf = [0u8; crypto::MAX_PAYLOAD];
             loop {
                 match plain_in.read(&mut buf) {
                     Ok(0) | Err(_) => break,
@@ -207,6 +237,7 @@ mod tests {
     };
 
     #[test]
+    #[ignore = "daily"]
     fn a_deadline_ends_the_stream_unless_dropped() {
         let l = TcpListener::bind("127.0.0.1:0").unwrap();
         let _kept = TcpStream::connect(l.local_addr().unwrap()).unwrap();
@@ -240,6 +271,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "daily"]
     fn a_deadline_ends_a_peer_that_sends_one_byte_at_a_time() {
         use std::io::Write;
         let l = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -265,5 +297,15 @@ mod tests {
             "{:?}",
             started.elapsed()
         );
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn tcp_keepalive_configures_stream() {
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let client = TcpStream::connect(l.local_addr().unwrap()).unwrap();
+        let (server, _) = l.accept().unwrap();
+        assert!(set_tcp_keepalive(&client).is_ok());
+        assert!(set_tcp_keepalive(&server).is_ok());
     }
 }

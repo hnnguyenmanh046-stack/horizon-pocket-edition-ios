@@ -7,7 +7,27 @@
 //! usual ones. The fork measured less GPU time on an Adreno 710 (14.73 to 13.59 ms standing,
 //! 16.5 to 13.5 ms turning), with the same pixels. Shader packs, the End sky, the water mirror
 //! and occlusion culling keep the usual order.
+//!
+//! Built on every GPU behind Android's Vulkan (`wanted`), as the fork takes it, and on there by
+//! default except on a Mali (`on_by_default`). `horizon-ctl sky-order early` brings the usual
+//! order back for an A/B check, and the Diagnostics page lets the player pick either.
 use super::adreno::TerrainModule;
+
+/// Whether frames on this GPU may draw the sky after solid terrain: any GPU behind Android's
+/// Vulkan. Adapted from Vasysik/horizon-android (`late_sky` in its `gfx.rs`, on any Android
+/// Vulkan GPU), MIT, copyright (c) 2026 Ludovic Marie and the Horizon contributors.
+pub(super) fn wanted(info: &wgpu::AdapterInfo) -> bool {
+    cfg!(target_os = "android") && info.backend == wgpu::Backend::Vulkan
+}
+
+/// Whether frames take the late sky until asked otherwise (`Renderer::set_late_sky`, the
+/// Diagnostics page's sky choice, `horizon-ctl sky-order`), on the GPU `name`d. Not on a Mali:
+/// the 0.8.1 test 2's guided test found the usual order faster there (median 4% over 144 Malis,
+/// 8 to 11% on the Mali-G57), while Adreno came out even and the fork measured the late sky
+/// ahead on an Adreno 710.
+pub(super) fn on_by_default(name: &str) -> bool {
+    !name.to_ascii_lowercase().contains("mali")
+}
 
 pub(super) struct LateSky {
     pub sky: wgpu::RenderPipeline,

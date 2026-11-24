@@ -14,15 +14,30 @@ path = "src/main.rs"
 # Everything is iOS-only: on other targets the program only says what it is for.
 [target.'cfg(target_os = "ios")'.dependencies]
 # The game (Starling's), its iOS hooks (horizon-client/src/ios.rs) and its start (entry.rs).
-horizon-client = { path = "../horizon-client", default-features = false }
+# `horizon-extras`, as Starling's Android library: Options' Horizon Settings and Mods, Play with
+# Friends and the cosmetics, which 0.8.0 had before Horizon put them behind the feature.
+horizon-client = { path = "../horizon-client", default-features = false, features = ["horizon-extras"] }
+# What the desktop's mod host installs before the engine starts (app.rs `install_platform`), as
+# Starling's Android library does (crates/horizon-android).
+horizon-engine-slots = { path = "../horizon-engine-slots" }
+mod_platform = { package = "horizon-mod-api", path = "../horizon-mod-api" }
+mod_points = { package = "horizon-mod-points", path = "../horizon-mod-points" }
+mod_render = { package = "horizon-mod-render", path = "../horizon-mod-render" }
+# The code mods' loading, as the desktop's mod host loads them (`load_code`, app.rs `start_game`):
+# on iOS only what the app was built with, since it runs no code it did not ship with.
+horizon-mod-host = { path = "../horizon-mod-host", default-features = false }
+# The packages of those mods, and the mark that says this program is the game.
+horizon-mod-package = { path = "../horizon-mod-package" }
+# Play with Friends' joining side: the resolver of invite codes, which the program registers
+# with the game's hooks before it starts, as the desktop's does (horizon-official).
+horizon-friends = { path = "../horizon-friends", features = ["game"] }
+horizon-hooks = { path = "../horizon-hooks" }
 # UIKit, GameController and the Keychain: the calls the launcher makes.
 horizon-gamecontroller = { path = "../horizon-gamecontroller" }
 # SRV records through iOS's resolver (dns.rs).
 horizon-protocol = { path = "../horizon-protocol" }
 # Free memory given back when iOS warns (`memory_warning`).
 horizon-threads = { path = "../horizon-threads" }
-# The mod API level the program carries, as the desktop's does (main.rs).
-horizon-mods = { path = "../horizon-mods", default-features = false, features = ["index"] }
 winit = "0.30.13"
 serde_json = "1"
 # The 16 MB stack every event-loop callback runs on: iOS gives its main thread 1 MB.

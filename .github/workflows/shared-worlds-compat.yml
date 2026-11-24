@@ -13,7 +13,7 @@ on:
     inputs:
       official:
         description: The official Horizon commit to test against
-        default: 441f49d57e344bd56b90fd4af5c4e443ff3937c9
+        default: c98a51a664c8ce8ec166ecedd85bb47b3687b336
 permissions:
   contents: read
 concurrency:
@@ -27,7 +27,7 @@ env:
   CARGO_INCREMENTAL: "0"
   CARGO_PROFILE_FAST_DEBUG: "0"
   CARGO_PROFILE_RELEASE_DEBUG: "0"
-  OFFICIAL: ${{ inputs.official || '441f49d57e344bd56b90fd4af5c4e443ff3937c9' }}
+  OFFICIAL: ${{ inputs.official || 'c98a51a664c8ce8ec166ecedd85bb47b3687b336' }}
 
 jobs:
   compat:
@@ -51,8 +51,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev \
             libfontconfig-dev libvulkan-dev libasound2-dev libudev-dev xvfb xauth mesa-vulkan-drivers libvulkan1
-          rustup toolchain install stable --profile minimal
-          rustup default stable
+          bash port/tools/ci/rustup_install.sh --profile minimal
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -86,7 +85,7 @@ jobs:
           done
       - name: Build this port's game for the desktop
         working-directory: port
-        run: cargo build --profile fast -p horizon-client --bin horizon-client
+        run: cargo build --profile fast -p horizon-official --bin horizon-official
       - name: Build official Horizon
         working-directory: official
         run: cargo build --profile fast -p horizon-official --bin horizon-official
@@ -94,10 +93,10 @@ jobs:
         run: |
           python3 port/tools/shared_worlds_compat.py --xvfb --offscreen \
             --a-client official/target/fast/horizon-official --a-resources resources-official \
-            --b-client port/target/fast/horizon-client --b-resources resources-port
+            --b-client port/target/fast/horizon-official --b-resources resources-port
       - name: The port hosts, official joins; then the save goes port, official, port
         if: ${{ !cancelled() }}
         run: |
           python3 port/tools/shared_worlds_compat.py --xvfb --offscreen \
-            --a-client port/target/fast/horizon-client --a-resources resources-port \
+            --a-client port/target/fast/horizon-official --a-resources resources-port \
             --b-client official/target/fast/horizon-official --b-resources resources-official

@@ -63,6 +63,11 @@ final class GameFolder {
         this.ownFiles = ownFiles;
     }
 
+    /** The folder itself (DiagnosticsActivity's graphics API choice writes its settings file). */
+    File root() {
+        return root;
+    }
+
     /**
      * The folder the game uses, as android.rs game_folder chooses it: `shared` (null when not
      * allowed), once the game has made it and moved the player's files there at a start, else
@@ -99,7 +104,11 @@ final class GameFolder {
             return file;
         }
         String[] names = id.substring(ROOT.length() + 1).split("/", -1);
-        if (ownFiles && !PLAYER_FILES.contains(names[0]) && !LOGS.contains(names[0])) {
+        boolean appearanceImages = "skins".equals(names[0])
+                || ("game-wardrobe".equals(names[0])
+                    && (names.length == 1 || "images".equals(names[1])));
+        if (ownFiles && !PLAYER_FILES.contains(names[0]) && !LOGS.contains(names[0])
+                && !appearanceImages) {
             throw new FileNotFoundException("Not in the game folder: " + id);
         }
         for (String name : names) {
