@@ -15,7 +15,7 @@ use winit::event::{Touch, TouchPhase};
 mod mobile_platform;
 // iOS: the window's keyboard and UIKit's haptics in place of Android's (IOS-SYNC.md).
 #[cfg(target_os = "ios")]
-#[path = "mobile_controls/mobile_platform_ios.rs"]
+#[path = "mobile_platform_ios.rs"]
 mod mobile_platform;
 
 #[derive(Default)]
