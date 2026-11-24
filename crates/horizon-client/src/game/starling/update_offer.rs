@@ -1,4 +1,4 @@
-// game-module-cfg: target_os = "android"
+// game-module-cfg: any(target_os = "android", target_os = "ios")
 //! Android: the prompt, over the title screen, when GitHub has a newer Starling release than this
 //! one: the newest of the organisation's repository and Starling's own (starling_releases, which
 //! also keeps Horizon Android's releases and preview builds out). Update downloads its APK and

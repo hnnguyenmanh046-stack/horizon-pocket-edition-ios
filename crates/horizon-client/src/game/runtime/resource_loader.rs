@@ -319,7 +319,18 @@ pub(super) fn run_loading(
         sound_registry,
         suspended: false,
     };
-    let mut app = App::Loading(Box::new(loading));
+    let app = App::Loading(Box::new(loading));
+    // iOS: the app's event loop already runs (UIKit makes one a process, ios.rs), and takes the
+    // game from here, under the stack the game needs.
+    #[cfg(target_os = "ios")]
+    return crate::ios::take_game(Box::new(app));
+    #[cfg(not(target_os = "ios"))]
+    run_until_quit(app)
+}
+
+/// The loading screen and then the game on a new event loop, until the player quits.
+#[cfg(not(target_os = "ios"))]
+fn run_until_quit(mut app: App) -> Result<()> {
     let result = event_loop()?.run_app(&mut app);
     narrator::stop();
     match &mut app {

@@ -35,16 +35,23 @@ pub fn native_build_current(
     }
 }
 /// Why a native mod installed in [`NATIVE_DIR`] doesn't run in this game.
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub const NOT_BUILT: &str = "Installed, not built into this game: build the game with it in the launcher (Settings > Native mods), then play the instance that build is in.";
 #[cfg(target_os = "android")]
 pub const NOT_BUILT: &str =
     "Installed, not in this game yet: Compile builds the game with it on Starling's build server.";
+/// iOS runs no code it did not ship with: a native mod is compiled into the app itself, which the
+/// Mods page's top builds (game/pocket/native_builds_ios.rs, docs/ios.md).
+#[cfg(target_os = "ios")]
+pub const NOT_BUILT: &str =
+    "Installed, not in this app yet: Build, at the top of this page, makes the app with it.";
 /// [`NOT_BUILT`] in the player's language, as the Mods page's tooltip says it.
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub const NOT_BUILT_TIP: &str = "horizon.mods.not_built_tip";
 #[cfg(target_os = "android")]
 pub const NOT_BUILT_TIP: &str = "starling.mods.native.not_built_tip";
+#[cfg(target_os = "ios")]
+pub const NOT_BUILT_TIP: &str = "starling.mods.native.not_built_tip_ios";
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ModList {

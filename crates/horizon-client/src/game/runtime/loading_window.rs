@@ -175,7 +175,7 @@ impl<'a> RendererParts<'a> {
             self.prepared
                 .unwrap_or_else(|| prepare_renderer_textures(&self.pack)),
         );
-        #[cfg(target_os = "android")]
+        #[cfg(any(target_os = "android", target_os = "ios"))]
         crate::diagnostics::checkpoint(
             "renderer_init",
             || serde_json::json!({"api":format!("{:?}",self.api)}),
@@ -294,7 +294,7 @@ pub(super) fn boot_renderer(
     if let Some(atlas) = atlas {
         atlas.font.reset_cache();
     }
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     crate::diagnostics::checkpoint(
         "renderer_init",
         || serde_json::json!({"api":format!("{:?}",api)}),
@@ -364,7 +364,7 @@ pub(super) fn loading_renderer(
     if let Some(atlas) = atlas {
         atlas.font.reset_cache();
     }
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     crate::diagnostics::checkpoint(
         "renderer_init",
         || serde_json::json!({"api":format!("{:?}",api)}),
@@ -693,8 +693,8 @@ pub(super) fn start_game<'a>(
             title.last_server = game.settings.file.string("lastServer");
             title.skip_multiplayer_warning = game.settings.file.bool("skipMultiplayerWarning");
             // Gui.addInitialScreens: the accessibility onboarding comes first. Not on Android,
-            // which has no narrator, and whose players' options all still ask for it.
-            if !cfg!(target_os = "android") && game.settings.file.bool("onboardAccessibility") {
+            // which has no narrator, and whose players' options all still ask for it (iOS too).
+            if !horizon_client::PHONE && game.settings.file.bool("onboardAccessibility") {
                 title.start_onboarding();
             }
             game.show_title(title);

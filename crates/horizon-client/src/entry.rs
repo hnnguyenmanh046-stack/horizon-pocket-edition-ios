@@ -273,6 +273,9 @@ pub fn start<G>(
             game::exit_code::ERROR
         });
     }
+    // iOS: the game was handed to the app's event loop and still runs (`ios::take_game`); its
+    // end tells the hooks (`ios::game_ended`).
+    #[cfg(not(target_os = "ios"))]
     horizon_hooks::engine::shutdown();
     logging::flush();
 }

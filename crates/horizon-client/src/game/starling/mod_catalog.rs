@@ -1,4 +1,4 @@
-// game-module-cfg: target_os = "android"
+// game-module-cfg: any(target_os = "android", target_os = "ios")
 //! Android: the catalog, where a player finds and installs mods, resource packs and shader packs
 //! without leaving the game. It opens from the Mods, Resource Packs and Shader Packs pages, on their
 //! shelf. Searching, checking and installing are the desktop launcher's mod browser (the

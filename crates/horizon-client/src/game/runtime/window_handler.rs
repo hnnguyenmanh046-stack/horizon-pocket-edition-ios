@@ -295,8 +295,15 @@ impl Game<'_> {
             self.poll_files_offer();
             self.poll_update_offer();
             self.poll_native_builds();
-            self.poll_catalog();
         }
+        // iOS: no offer of a folder (the Files app shows the game's).
+        #[cfg(target_os = "ios")]
+        {
+            self.poll_update_offer();
+            self.poll_native_builds();
+        }
+        #[cfg(any(target_os = "android", target_os = "ios"))]
+        self.poll_catalog();
         horizon_client::spans::time("pads", || self.poll_pads(event_loop));
         self.settle_after_run(event_loop);
         self.pause_if_inactive();
@@ -435,6 +442,11 @@ impl ApplicationHandler for Game<'_> {
         } else {
             None
         };
+        // iOS: what a keyboard or a pointer sent says the player went to them. Only here, where the
+        // window's own events come: the control system makes pointer events of its own for the
+        // menus, which are fingers, not a mouse.
+        #[cfg(target_os = "ios")]
+        self.ios_input(&event);
         self.handle_window_event(event_loop, id, event, input_trace::InputOrigin::User);
         if let Some((event, modifiers)) = key {
             let name = match event.physical_key {
@@ -491,7 +503,7 @@ impl ApplicationHandler for Game<'_> {
     /// already, since the system may end the process at any time from here on. Android's UI
     /// thread waits for this to return, so nothing here waits for the world's writes.
     fn suspended(&mut self, _event_loop: &ActiveEventLoop) {
-        #[cfg(target_os = "android")]
+        #[cfg(any(target_os = "android", target_os = "ios"))]
         {
             crate::diagnostics::heartbeat("suspended", || serde_json::json!({}));
             crate::diagnostics::request_flush();

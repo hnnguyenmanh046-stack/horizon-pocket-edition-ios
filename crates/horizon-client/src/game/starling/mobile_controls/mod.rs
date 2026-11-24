@@ -1,4 +1,4 @@
-// game-module-cfg: target_os = "android"
+// game-module-cfg: any(target_os = "android", target_os = "ios")
 // Adapted from Horizon Android at fa548eb7abe91c194d3780e4580b9746323cd606 (MIT).
 // Copyright (c) 2026 Ludovic Marie and the Horizon contributors.
 // See THIRD_PARTY_NOTICES.md and LICENSE.

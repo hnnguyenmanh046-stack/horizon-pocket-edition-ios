@@ -11,6 +11,8 @@
 #[cfg(target_os = "ios")]
 mod app;
 #[cfg(target_os = "ios")]
+mod built_mods;
+#[cfg(target_os = "ios")]
 mod dns;
 
 fn main() {

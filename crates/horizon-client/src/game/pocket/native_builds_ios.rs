@@ -1,3 +1,4 @@
+// game-module-cfg: target_os = "ios"
 //! iOS: native mods (docs/ios.md). iOS runs no code its app did not ship with, so where Starling's
 //! Android app swaps in a library its build service compiled (native_builds.rs), a native mod here
 //! is compiled into the app itself: this repository's `ios` workflow, run with the mods, builds an

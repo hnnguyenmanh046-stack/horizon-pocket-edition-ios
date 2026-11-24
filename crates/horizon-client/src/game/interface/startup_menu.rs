@@ -131,7 +131,7 @@ impl StartupMenu {
             title.skip_multiplayer_warning = settings.file.bool("skipMultiplayerWarning");
             // Gui.addInitialScreens: the accessibility onboarding comes first. Not on Android,
             // which has no narrator, and whose players' options all still ask for it.
-            if !cfg!(target_os = "android") && settings.file.bool("onboardAccessibility") {
+            if !horizon_client::PHONE && settings.file.bool("onboardAccessibility") {
                 title.start_onboarding();
             }
             self.title = Some(title);

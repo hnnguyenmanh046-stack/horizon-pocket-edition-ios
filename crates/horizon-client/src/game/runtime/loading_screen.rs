@@ -320,7 +320,7 @@ impl Loading {
     /// The window is going away (Android): its surface goes with it, and the log is flushed
     /// before the system may end the process.
     fn suspended(&mut self) {
-        #[cfg(target_os = "android")]
+        #[cfg(any(target_os = "android", target_os = "ios"))]
         {
             crate::diagnostics::heartbeat("suspended", || serde_json::json!({}));
             crate::diagnostics::request_flush();
@@ -660,7 +660,7 @@ impl Loading {
         } else {
             Vec::new()
         };
-        #[cfg(target_os = "android")]
+        #[cfg(any(target_os = "android", target_os = "ios"))]
         crate::diagnostics::heartbeat(
             if self.failure.is_some() {
                 "setup_failure"
@@ -1188,7 +1188,9 @@ impl ApplicationHandler for App {
                     None => Step::Waiting,
                     Some(Ok(Some(game))) => {
                         // Starling: the prepared resources loaded, the files they came from
-                        // can go.
+                        // can go. Not on iOS, which lays its tables out again from them after
+                        // an update of the app (horizon-ios-prepare).
+                        #[cfg(not(target_os = "ios"))]
                         horizon_client::preparer::drop_downloads(&loading.vanilla_root);
                         Step::Ready(Box::new(game))
                     }
@@ -1203,7 +1205,7 @@ impl ApplicationHandler for App {
             Step::Done => event_loop.exit(),
             Step::Failed(e) => {
                 if let App::Loading(loading) = self {
-                    if cfg!(target_os = "android") {
+                    if horizon_client::PHONE {
                         log::error!("Horizon: {e}");
                         loading.failure = Some(e.to_string());
                         return;
@@ -1231,7 +1233,7 @@ impl ApplicationHandler for App {
 /// manifest is `horizon-resources.json`): without them, say where they were
 /// looked for and how to get them, before a window or a loader starts. `get` is
 /// the page a hook sends the player to (`horizon_hooks::engine::get_the_game`).
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(super) fn missing_resources(
     root: &std::path::Path,
     get: Option<horizon_hooks::GetTheGame>,

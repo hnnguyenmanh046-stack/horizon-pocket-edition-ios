@@ -68,10 +68,9 @@ jobs:
       - name: Check the Apple toolchain
         run: bash tools/ci/ios-toolchain.sh
       - name: Install Rust and its iOS standard library
-        # Starling has no rust-toolchain.toml: stable, as its own workflows use.
+        # The Rust Starling pins (tools/ci/rust-version), as its Android build uses.
         run: |
-          rustup toolchain install stable --profile minimal --component clippy --target "$IOS_TARGET"
-          rustup default stable
+          bash tools/ci/rustup_install.sh --profile minimal --component clippy --target "$IOS_TARGET"
           rustc --version
       - uses: Swatinem/rust-cache@v2
         with:
@@ -236,8 +235,7 @@ jobs:
           python3 tools/ios_native_mods.py info "$RUNNER_TEMP/native" "$GITHUB_SHA" > "$RUNNER_TEMP/native-mods.json"
       - name: Install Rust and its iOS Simulator standard library
         run: |
-          rustup toolchain install stable --profile minimal --target "$IOS_TARGET"
-          rustup default stable
+          bash tools/ci/rustup_install.sh --profile minimal --target "$IOS_TARGET"
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: ios-${{ env.IOS_TARGET }}

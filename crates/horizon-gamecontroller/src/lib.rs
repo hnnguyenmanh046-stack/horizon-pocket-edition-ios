@@ -231,7 +231,7 @@ mod uikit {
     use std::ffi::c_void;
 
     mod picker;
-    pub use picker::{export, pick, share};
+    pub use picker::{export, notice, pick, presenting, share};
 
     // Full CoreGraphics layouts, though only some fields are read.
     #[allow(dead_code)]
@@ -392,6 +392,53 @@ mod uikit {
             })
         }
     }
+
+    /// `UIEdgeInsets`.
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct EdgeInsets {
+        top: f64,
+        left: f64,
+        bottom: f64,
+        right: f64,
+    }
+    // SAFETY: UIKit's UIEdgeInsets, four CGFloats: top, left, bottom, right.
+    unsafe impl Encode for EdgeInsets {
+        const ENCODING: Encoding = Encoding::Struct(
+            "UIEdgeInsets",
+            &[
+                f64::ENCODING,
+                f64::ENCODING,
+                f64::ENCODING,
+                f64::ENCODING,
+            ],
+        );
+    }
+
+    pub fn safe_insets() -> Option<[u32; 4]> {
+        let view = root_view()?;
+        // SAFETY: properties of the live view, on the main thread.
+        let (insets, scale) = unsafe {
+            let insets: EdgeInsets = msg_send![&*view, safeAreaInsets];
+            let scale: f64 = msg_send![&*view, contentScaleFactor];
+            (insets, scale)
+        };
+        let pixels = |points: f64| (points.max(0.0) * scale).round() as u32;
+        Some(super::housing_insets(
+            [
+                pixels(insets.left),
+                pixels(insets.top),
+                pixels(insets.right),
+                pixels(insets.bottom),
+            ],
+            interface_rotation().unwrap_or(0),
+            pixels(HOUSING_POINTS),
+        ))
+    }
+
+    /// A top inset this tall or taller is a sensor housing (the notch, the Dynamic Island): a
+    /// status bar alone is 20 to 24 points.
+    const HOUSING_POINTS: f64 = 30.0;
 
     pub fn keyboard_top() -> Option<u32> {
         let view = root_view()?;
@@ -887,6 +934,36 @@ pub fn interface_rotation() -> i32 {
     0
 }
 
+/// Of UIKit's safe-area `insets` (left, top, right, bottom, in pixels), the one the sensor
+/// housing makes, as Android's camera cutout is the only inset Starling's controls keep out of:
+/// the edge the top of the device is at (`rotation`, as [`interface_rotation`]). UIKit insets
+/// both long edges alike in landscape and adds the home bar's strip, which the game hides; an
+/// inset under `housing` (a status bar's) is none.
+pub fn housing_insets(insets: [u32; 4], rotation: i32, housing: u32) -> [u32; 4] {
+    // Left, top, right, bottom: where the top of the device is at each rotation.
+    let side = match rotation {
+        1 => 0,
+        3 => 2,
+        2 => 3,
+        _ => 1,
+    };
+    let mut out = [0; 4];
+    if insets[side] >= housing {
+        out[side] = insets[side];
+    }
+    out
+}
+
+/// How far the sensor housing (the notch, the Dynamic Island) reaches into the game's view from
+/// each edge, in pixels: left, top, right, bottom ([`housing_insets`]). All 0 without one, off
+/// the main thread and off iOS.
+pub fn safe_insets() -> [u32; 4] {
+    #[cfg(target_os = "ios")]
+    return uikit::safe_insets().unwrap_or_default();
+    #[cfg(not(target_os = "ios"))]
+    [0; 4]
+}
+
 /// The software keyboard's top edge in the game view's pixels, or `None` while it is closed.
 pub fn keyboard_top() -> Option<u32> {
     #[cfg(target_os = "ios")]
@@ -1074,5 +1151,43 @@ pub fn export(paths: &[std::path::PathBuf]) -> bool {
     {
         let _ = paths;
         false
+    }
+}
+
+/// UIKit's alert with one button, over whatever shows. False when it could not open (and off
+/// iOS).
+pub fn notice(title: &str, message: &str, button: &str) -> bool {
+    #[cfg(target_os = "ios")]
+    return uikit::notice(title, message, button);
+    #[cfg(not(target_os = "ios"))]
+    {
+        let _ = (title, message, button);
+        false
+    }
+}
+
+/// Whether anything (a notice, a sheet) shows over the game's view.
+pub fn presenting() -> bool {
+    #[cfg(target_os = "ios")]
+    return uikit::presenting();
+    #[cfg(not(target_os = "ios"))]
+    false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::housing_insets;
+
+    #[test]
+    fn only_the_housing_edge_is_an_inset() {
+        // An iPhone held with the top of the device to the left: UIKit insets both long edges
+        // and the home bar's strip; only the housing's edge counts.
+        assert_eq!(housing_insets([177, 0, 177, 63], 1, 90), [177, 0, 0, 0]);
+        assert_eq!(housing_insets([177, 0, 177, 63], 3, 90), [0, 0, 177, 0]);
+        // Upright: the top.
+        assert_eq!(housing_insets([0, 177, 0, 102], 0, 90), [0, 177, 0, 0]);
+        // An iPad: its status bar is no housing.
+        assert_eq!(housing_insets([0, 48, 0, 40], 1, 60), [0; 4]);
+        assert_eq!(housing_insets([0, 48, 0, 40], 0, 60), [0; 4]);
     }
 }

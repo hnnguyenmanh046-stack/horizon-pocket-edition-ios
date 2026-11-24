@@ -6,7 +6,7 @@ use key_codes::{
 };
 // `entry` starts the game from `game::Options`, so this one is named outside the module too.
 pub(crate) use launch_options::Options;
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use loading_screen::missing_resources;
 use loading_screen::{
     App, Loading, event_loop, leave_fullscreen_after, run_event_loop, unclean_start_recovery,
@@ -11766,7 +11766,9 @@ pub(crate) fn run_with(
     options.resources = loaded.root.clone();
     // Starling: a phone's setup before 0.1.6 left the sounds out.
     horizon_client::preparer::complete_sounds(&vanilla_root);
-    // Starling: the prepared resources loaded, the files they came from can go.
+    // Starling: the prepared resources loaded, the files they came from can go (not iOS's,
+    // which lays its tables out again from them after an update of the app).
+    #[cfg(not(target_os = "ios"))]
     horizon_client::preparer::drop_downloads(&vanilla_root);
     let audio = if !options.execution_role.is_client() || options.headless {
         Audio::silent(&loaded.pack.source)
