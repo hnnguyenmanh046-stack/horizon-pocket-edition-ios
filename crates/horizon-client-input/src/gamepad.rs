@@ -950,12 +950,13 @@ impl PadSettings {
         // in the binds list.
         if !text.is_empty() && layout.is_none() {
             s.bindings.entry(RADIAL).or_insert(None);
+            // This edition's 1.0.0 had the player list and the advancements on no button (View
+            // and the D-pad's down were the mods' already, as they are now): a file from then
+            // gets neither back from Starling 0.8.0's defaults.
             for (action, button) in [
                 ("key.drop", Button::East),
                 ("key.togglePerspective", Button::DPadUp),
                 ("key.chat", Button::DPadRight),
-                ("key.playerlist", Button::Select),
-                ("key.advancements", Button::DPadDown),
             ] {
                 // A button saved by hand stays, even one that's now this action's default.
                 if !saved(action) {
@@ -2057,14 +2058,17 @@ bind_key.hotbar.2:north
 
     #[test]
     fn a_file_from_before_these_defaults_keeps_its_buttons() {
-        // Saved settings that never bound D-pad down: it stays on the advancements.
+        // Saved settings of this edition's 1.0.0: the mods keep the D-pad's down and View,
+        // which Starling 0.8.0's advancements and player list never had here.
         let s = PadSettings::parse("vibration:false\nbind_key.chat:up\n");
-        assert_eq!(s.binding("key.advancements"), Some(Button::DPadDown));
+        assert_eq!(s.binding("key.advancements"), None);
         assert_eq!(s.binding("key.chat"), Some(Button::DPadUp));
         assert_eq!(s.binding("key.drop"), Some(Button::East));
         assert_eq!(s.binding("key.togglePerspective"), Some(Button::DPadUp));
-        assert_eq!(s.binding("key.playerlist"), Some(Button::Select));
-        assert!(!s.conflicts("key.advancements"));
+        assert_eq!(s.binding("key.playerlist"), None);
+        assert_eq!(s.binding(ADD_WAYPOINT), Some(Button::DPadDown));
+        assert_eq!(s.binding(ZOOM), Some(Button::Select));
+        assert!(!s.conflicts(ADD_WAYPOINT) && !s.conflicts(ZOOM));
         // Advancements moved by hand stays moved, and the file stays this way from then on.
         let s = PadSettings::parse("bind_key.advancements:left\nbind_key.drop:down\n");
         assert_eq!(s.binding("key.advancements"), Some(Button::DPadLeft));
@@ -2073,13 +2077,19 @@ bind_key.hotbar.2:north
     }
 
     #[test]
-    fn a_new_player_drops_on_d_pad_down_and_chats_on_d_pad_up() {
+    fn a_new_player_has_this_editions_buttons() {
+        // As its 1.0.0: drop on B, the mods on the D-pad's left and down and on View, and no
+        // button for the radial menu until the player gives it one.
         for s in [PadSettings::default(), PadSettings::parse("")] {
-            assert_eq!(s.binding("key.drop"), Some(Button::DPadDown));
-            assert_eq!(s.binding("key.chat"), Some(Button::DPadUp));
-            assert_eq!(s.binding("key.togglePerspective"), Some(Button::Select));
+            assert_eq!(s.binding("key.drop"), Some(Button::East));
+            assert_eq!(s.binding("key.chat"), Some(Button::DPadRight));
+            assert_eq!(s.binding("key.togglePerspective"), Some(Button::DPadUp));
             assert_eq!(s.binding("key.playerlist"), None);
             assert_eq!(s.binding("key.advancements"), None);
+            assert_eq!(s.binding(WAYPOINTS), Some(Button::DPadLeft));
+            assert_eq!(s.binding(ADD_WAYPOINT), Some(Button::DPadDown));
+            assert_eq!(s.binding(ZOOM), Some(Button::Select));
+            assert_eq!(s.binding(RADIAL), None);
         }
         let s = PadSettings::parse(&PadSettings::default().serialize());
         assert_eq!(s, PadSettings::default());
