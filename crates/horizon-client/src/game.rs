@@ -8354,7 +8354,6 @@ impl Game<'_> {
             .draw(self.settings.horizon.overlay, &mut batch, &self.gui.atlas);
         self.draw_stats_overlay(&mut batch);
         self.draw_pad_cursor(&mut batch);
-                #[cfg(target_os = "ios")]
         self.draw_hardware_cursor(&mut batch);
         self.lift_over_keyboard(&mut batch);
         self.draw_phone_offers(&mut batch);
