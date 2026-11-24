@@ -11,6 +11,12 @@ on:
         description: The release to upgrade from (a tag); empty for this edition's 1.0.0
         type: string
         default: ""
+  # And when the test itself changes (branches only: a tag's push has no paths to go by).
+  push:
+    branches: ["**"]
+    paths:
+      - .github/workflows/world-upgrade.yml
+      - tools/world_upgrade.py
 permissions:
   contents: read
 concurrency:
