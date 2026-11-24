@@ -17,20 +17,22 @@ developed on `starling-ios` until it moved to `main`.
   `deliver` on each, and publish each .ipa as a release of this repository: tag `v<version>` from `main`,
   `v<version>-shared-worlds` from `shared-worlds`, `v<version>-shared-worlds-mods` from `shared-worlds-mods`
   (built with its mods), none a draft or a pre-release, with the .ipa as an asset.
-  The apps find them there (`horizon_client::ios_releases`, `game/update_offer.rs`): each edition is offered
+  The apps find them there (`horizon_client::ios_releases`, `game/starling/update_offer.rs`): each edition is offered
   only its own tags, and only a version above its own. `ios_releases::EDITION` is the one line that differs
   between the branches. Then the README's links (the same file on every branch) name the new releases.
 
-- **Base:** starling-client/starling `starling` @ `ac874422ed` (tag `v0.8.0`, "the first release of Starling and
-  Horizon Android together"). Remote: `starling`. Starling 0.8.0 took Horizon Android's control system, account
-  profiles with Ely.by, skins, catalog and Diagnostics itself, so this port carries none of its own: the work on the
-  0.2.3 base (a hand port of those) is in history under `archive/starling-ios-0.2.3`.
+- **Base:** starling-client/starling `starling` @ `ff303502a4` (tag `v0.9.0`, Horizon as of its `c98a51a664`,
+  2026-11-08; the last Starling release under the MIT licence). Remote: `starling`. Horizon PE 1.0.0 was built on
+  `ac874422ed` (tag `v0.8.0`); 1.1.0 is the move to 0.9.0, made on `sync/0.9.0` (and `sync/0.9.0-shared-worlds`,
+  `sync/0.9.0-shared-worlds-mods`) before it was merged. Starling took Horizon Android's control system, account
+  profiles with Ely.by, skins, catalog and Diagnostics itself in 0.8.0, so this port carries none of its own: the
+  work on the 0.2.3 base (a hand port of those) is in history under `archive/starling-ios-0.2.3`.
 - **Workflows:** only `ios.yml` and `ios-guard.yml`. Starling's own (its APK and release builds, its build service,
   its registry, schedules and pull-request bots) need Starling's secrets and machines, so they are not in this tree:
   a sync that changes one of them is a "deleted here" conflict, kept deleted. So are its `CODEOWNERS`, pull request
   template and native-build issue form; `.github/ISSUE_TEMPLATE/bug_report.yml` is this app's.
 - **Name:** the app is Horizon Pocket Edition. `APP_NAME` (render crate, "Horizon PE" on iOS, "Starling" elsewhere)
-  is the name the game says; the setup's titles (`game/setup.rs`), the Files-app folder hints (`options_ui.rs`,
+  is the name the game says; the setup's titles (`game/starling/setup/mod.rs`), the Files-app folder hints (`options_ui.rs`,
   `pack_screen.rs`) and the iOS-only text follow it, and on iOS the language files' "Starling" reads "Horizon PE"
   (`Language::load`), the credits excepted. The app is `HorizonPE.app`, bundle identifier `dev.horizon.pocketedition`, with the
   executable, Xcode project, target and scheme all `HorizonPE` (`packaging/ios/project.yml`). Builds before the
@@ -42,10 +44,10 @@ Starling's source (Horizon with Starling's Android port) with the iOS layer on t
 
 | Path | What it is |
 | --- | --- |
-| `crates/horizon-ios-game` | The app's program: its folders, the 16 MB stack the game runs on, the event loop |
+| `crates/horizon-ios-game` | The app's program: its folders, the 16 MB stack the game runs on, the event loop, the mod platform installed before the engine starts, Play with Friends' joining side registered, and the code mods the app was built with (`built_mods.rs`) |
 | `crates/horizon-gamecontroller` | Every UIKit, GameController, Keychain, CoreMotion and Photos call (the game crates forbid unsafe code) |
 | `crates/horizon-client/src/ios.rs` | The game's iOS hooks: files, Keychain sealing, the keyboard, haptics, gyroscope, imports |
-| `crates/horizon-client/src/game/native_builds_ios.rs` | Native mods built on GitHub from the Mods page |
+| `crates/horizon-client/src/game/pocket/` | This port's own game modules (0.9.0 finds the game's modules by folder: each area has a `.game-area` marker, and a loose file in `game/` is an error). `native_builds_ios.rs`: native mods built from the Mods page |
 | `crates/horizon-ios-prepare` | Lays the game files out on the phone without Java |
 | `packaging/ios` | The Xcode project (XcodeGen), `Info.plist`, icon, and the native-mod staging script |
 | `tools/ios_prepare.py`, `tools/ios_native_mods.py` | The game tables made in CI; native mods fetched and checked |
@@ -64,6 +66,14 @@ Starling's source (Horizon with Starling's Android port) with the iOS layer on t
    can do stays `target_os = "android"` and gets an iOS counterpart where the game needs one.
 4. The app follows Starling's phone build: where Starling's Android code is not JNI, iOS shares it; nothing is
    added that Starling's Android build does not have.
+5. A game module of this port's own goes in `crates/horizon-client/src/game/pocket/` (an area folder: its
+   `.game-area` marker makes the build declare its files), with `// game-module-cfg: target_os = "ios"` on its
+   first line when it is iOS's alone. A Starling module both phones share names iOS in its own
+   `// game-module-cfg` line (`starling/mobile_controls/mod.rs`, `starling/mod_catalog.rs`,
+   `starling/update_offer.rs`; `runtime/no_resources.rs` is neither phone's). Modules are declared flat, so
+   `super::` is `game` wherever the file is.
+6. What Starling's Android app does through its launcher (Horizon Android's, `ha_launcher`: instances, the wardrobe,
+   Play and back) is Android's alone: the iOS app starts in the game, and `ha_launcher` is not built for it.
 
 ## Sync procedure
 
@@ -78,9 +88,17 @@ Starling's source (Horizon with Starling's Android port) with the iOS layer on t
 
 ## What iOS shares with Starling's Android build, and what it cannot
 
-| Starling 0.8.0 | iOS |
+| Starling 0.9.0 | iOS |
 |---|---|
-| Control system (MCPE, GoyControl, editor, hub, virtual mouse, keypad, gyroscope) | shared (`game/mobile_controls.rs`); its keyboard and haptics are `mobile_controls/mobile_platform_ios.rs` |
+| The launcher before the game (instances, Play, the wardrobe, the Launcher button and row), the choice of what the app opens (onboarding), the startup console while the game loads | Android's own (`ha_launcher`); the app starts in the game, on the title menu |
+| The start: the mod platform installed, then `entry::prepare` and `entry::start` with the code mods loaded (`android_lib.rs`) | the same calls from `horizon-ios-game` (`app.rs`), with the mods the app was built with; the engine registers and seals once a process, so a restart the game asks for (a world with other content mods) is a notice to open the app again, where Android relaunches its activity |
+| Play with Friends, joining by invite code | shared; the resolver (horizon-friends' `game`) is registered by the app's program, as the desktop's does it (horizon-official) |
+| Display page: camera cutout, orientation, rotation, aspect ratio | Android's activity's; not on iOS |
+| Display page: the HUD's, the buttons' and the menus' safe zones; the touch controls kept out of the camera cutout | shared; the cutout is the sensor housing's edge, read from UIKit (`horizon_gamecontroller::safe_insets`) |
+| Menus capped at 60 frames a second, the frame counter in the menus, Pause in the Background, the catalog on the shader page, the diagnostics ZIP shared when it is made | shared |
+| The official files dropped once the game has loaded its prepared ones (`preparer::drop_downloads`) | not on iOS: an app installed over an older one lays its game files out again from them (`preparer::retire_other_tables`) |
+| The first start's resolution lift (70% and 85% to 100) | Android's; an iPhone's saved settings stay as they are |
+| Control system (MCPE, GoyControl, editor, hub, virtual mouse, keypad, gyroscope) | shared (`game/starling/mobile_controls/`); its keyboard and haptics are `mobile_controls/mobile_platform_ios.rs` |
 | Accounts (Microsoft, Ely.by, offline profiles), skins per profile | shared; secrets sealed with a Keychain key (`ios.rs`) |
 | Catalog (mods, resource packs, shader packs) | shared; native mods are not offered (`starling-catalog`) |
 | Diagnostics (Options > Diagnostics, performance recordings, ZIP) | shared; the ZIP is shared through Files' sheet; no exit history or recovery window (Android's `ApplicationExitInfo` and activity) |
@@ -92,23 +110,34 @@ Starling's source (Horizon with Starling's Android port) with the iOS layer on t
 
 ## Engine-edit ledger
 
-Every change to a file Starling has, in the order they were made.
+Every change to a file Starling has, in the order they were made. Paths are 0.9.0's, which moved most of the game
+module into area folders (`game/starling/`, `game/interface/`, `game/runtime/`, `game/world/`, `game/network/`,
+`game/modding/`); a row marked **upstream** was a change 0.9.0 has itself, so this port's went.
 
 | File | Change | Why |
 |---|---|---|
 | `horizon-client-render/src/android_controls/layout.rs` | Toggle Sprint and Inventory Walk Controls on by default; `defaults_rev` turns them on once in files saved before | Asked for on iOS; shared with Android |
 | `horizon-client-render/src/android_controls.rs` | Over an inventory, the MCPE Sneak button draws a Shift arrow (`shift_glyph`), filled while Shift is down | It is Shift there (quick move) |
-| `horizon-client/src/game/mobile_controls.rs` | Sneak latches Shift and Inventory closes over an inventory without the walk controls too; LMB and RMB no longer clear the touch state (Shift, walking); Shift ends with the inventory | Shift stayed on for taps but LMB and RMB dropped it |
-| `horizon-client-render/src/gfx/oit.rs` | Improved Transparency asks for `FLOAT32_BLENDABLE` only when `Rgba32Float` itself blends on the adapter | Metal reports the feature without blending the format: the depth-bounds pipeline panicked at world load (M2 iPad, Kelly-Inc/horizon-ios#25) |
-| `horizon-client/src/game/native_hooks.rs`, `game.rs` | `native_camera_pose_now` (the frame's camera as native mods see it; handed back unchanged, as this base has no camera-posing hook) and its call where the frame's view is made | The registry's Atlas mod reads the camera at its return; upstream Horizon f319701e8c has it |
-| `horizon-client/src/game/native_client_services.rs` (new), `game.rs` | `native_client_profiles`, `native_gui_nine_slice`, `native_send_chat`, as upstream Horizon f319701e8c has them | Host functions Atlas calls; upstream's own file name, so a sync meets them |
-| `packaging/android/native_mod_adapt.py` | `render.pixels.get()` becomes `&render.pixels[..]` (CHANGED) | Atlas reads the block textures as newer Horizon keeps them |
-| `horizon-client-render/src/dynamic_light.rs` | `select_iter` (`select` over any iterator, appended) | dynamiclights hands its sources from a drain, as newer Horizon has it |
-| `horizon-client-core/src/text.rs` | `Text::option_name_value` ("Caption: value" via `options.generic_value`) | dynamiclights' settings screen |
-| `horizon-client-render/src/widgets.rs`, `ui.rs` | `widgets::Action` and `ui::action_button` (the plain button here; newer Horizon adds a controller glyph) | dynamiclights' Done button |
-| `horizon-client/src/game/native_client_services.rs` | `native_set_mod_key`, `native_client_action_bar`, `native_apply_screen_blur` (false: Options and pause already blur) | dynamiclights' key binding, toggle message and screen |
-| `horizon-client/src/mobs/armor.rs` (new), `mobs.rs` | `mobs::armor::values`: armour and toughness as `hurt_after_armor` sums them | Jade's health-and-armour line |
-| `packaging/android/native_mod_adapt.py` | Rewrites: burning projectiles from `arrow.on_fire()` (no fire time here), `mob_hit()` as a pair, `key_pressed` with one key, a pet's body armour from `extra.head` | dynamiclights and Jade, pinned to newer Horizon |
+| `horizon-client/src/game/starling/mobile_controls/mod.rs` | Sneak latches Shift and Inventory closes over an inventory without the walk controls too; LMB and RMB no longer clear the touch state (Shift, walking); Shift ends with the inventory | Shift stayed on for taps but LMB and RMB dropped it |
+| `horizon-client-render/src/gfx/oit.rs` | **upstream** (0.9.0 asks the format, not only the feature bit) | Metal reports `FLOAT32_BLENDABLE` without blending `Rgba32Float`: the depth-bounds pipeline panicked at world load (M2 iPad, Kelly-Inc/horizon-ios#25) |
+| `horizon-client/src/game/native_hooks.rs`, `game.rs` | **upstream**: `native_camera_pose_now` | The registry's Atlas mod reads the camera at its return |
+| `horizon-client/src/game/modding/native_client_services.rs` | **upstream**: `native_client_profiles`, `native_gui_nine_slice`, `native_send_chat` (this port's file of the same name went) | Host functions Atlas calls |
+| `packaging/android/native_mod_adapt.py` | Starling's own again (0.9.0's is the larger one; the rules this port added for the 0.8.0 base went with that base) | The old-format mods are adapted to 0.9.0 by Starling's rules and `game/starling/native_compat.rs` |
+| `horizon-client-render/src/dynamic_light.rs` | **upstream**: `select_iter` | dynamiclights hands its sources from a drain |
+| `horizon-client-core/src/text.rs` | **upstream**: `Text::option_name_value` | dynamiclights' settings screen |
+| `horizon-client-render/src/widgets.rs`, `ui.rs` | **upstream**: `widgets::Action` and `ui::action_button` | dynamiclights' Done button |
+| `horizon-client/src/game/modding/native_client_services.rs` | **upstream** where 0.9.0 has them; what a built-in mod still lacks is answered by the Mods edition (`docs/shared-worlds-mods.md`) | dynamiclights' key binding, toggle message and screen |
+| `horizon-client/src/mobs/armor.rs` | **upstream**: `mobs::armor::values` | Jade's health-and-armour line |
+| `horizon-client/src/game/starling/setup/mod.rs`, `setup/account_form.rs` | Text typed with no key code (iOS's on-screen keyboard) goes into the first-run account form (`Form::type_text`) | Typing an offline name on first launch |
+| `horizon-gamecontroller/src/lib.rs`, `Cargo.toml` (block2, log) | Background time asked for or given back from another thread is done on the main thread (GCD), and has an expiration handler that gives it back | iOS no longer ends the game for background time never returned (a Microsoft sign-in in Safari) |
+| `horizon-client/src/ios.rs`, `game/runtime/loading_window.rs`, `game/runtime/no_resources.rs` | The window prefers the home bar hidden and defers the bottom and top edges' system gestures (`ios::window_attributes`) | The home bar fades, and a thumb at the edge doesn't open Type to Siri or the Control Center |
+| `horizon-client-render/src/android_controls/layout.rs` | `virtual_mouse_enabled` defaults to on on iOS, and `DEFAULTS_REV` 2 turns it on once in older iOS settings | The virtual mouse is on by default on iOS (Android unchanged) |
+| `horizon-client/src/game.rs` | A character that comes with no key code passes the open screen's character hooks (`screen_text_each`) whether or not a text box has the focus; the box takes it only when one has | Every character of the iPhone keyboard comes that way, and a native mod's own screen (Waymap's waypoint editor) is typed in through those hooks only. 0.9.0 has the hooks, behind a focused text box |
+| `horizon-client-input/src/window.rs`, `horizon-client-render/src/gfx.rs`, `horizon-client/src/game/interface/options.rs` | iOS paces the frame cap from the display (`display_paced_wait`, counted from `Renderer::acquired_at`) instead of the limiter's own clock | An iPhone presents only on its refreshes; the limiter beside them locked the frame rate at half (30) until something moved one of the two |
+| `horizon-client/src/android_control_ui.rs` | The virtual mouse's LMB and RMB over a menu are 64 x 30 (were 48 x 20), their names centred, press a little past what is drawn (`mouse_button_touch_rects`), sit at the right edge from the screen's middle down (were in the bottom corner), and a grip over them drags the pair anywhere once a finger has rested on it (`mouse_buttons_pos` in the touch settings; `layout.rs`, `game/starling/mobile_controls/mod.rs`). 0.9.0's own pair (`mouse_button_rects`) gave way to it | Asked for on iOS: they were easy to miss with a thumb; shared with Android |
+| `horizon-gamecontroller/src/lib.rs`, `horizon-ios-game/src/app.rs` | `request_high_frame_rate`: one display link whose preferred frame rate range is the screen's maximum, asked for at the first start | A ProMotion iPhone shows an app at 60 Hz unless something in it asks for more; the Info.plist key only allows it. As razlua/horizon-ios (Ferrite, MIT) does |
+| `horizon-client-render/src/graphics.rs` | Phones start with asynchronous entity culling and every block entity cache on (`phone_savings`), turned on once in a graphics file saved before (`.horizon-phone-savings`) | Less work for each frame; as razlua/horizon-ios does. Leaf culling Hidden and far detail Mobile are 0.9.0's own phone defaults now |
+| `horizon-client-render/src/extras.rs` | **upstream**: `wheel_cycles_settings` is off by default everywhere in 0.9.0 (this port's iOS default and its `phoneDefaults` migration went) | Scrolling the settings with a finger doesn't change them |
 | `horizon-client/src/lan/mod.rs`, `lan/conn.rs`, `game/integrated.rs`, `game/dedicated.rs` | The integrated server's own player logs in as the signed-in account's profile (`singleplayer_profile`), as official Horizon 441f49d57e has it | A player is the same player hosting a shared world or joining it (pets, stats, saved state) |
 | `horizon-client/src/save.rs` | `save::writes`: every region, `.dat` and saved-file write counted as it starts and ends | A shared world's checkpoint proves nothing wrote while it copied the files |
 | `horizon-client/src/title.rs`, `title/tests.rs` | Shared Worlds (`Mode::Shared`, `title/shared.rs`) in the main menu where the disabled Realms button was; `Action::SharedPlay`; shared worlds' folders left out of Singleplayer | Shared worlds |
@@ -122,17 +151,8 @@ Every change to a file Starling has, in the order they were made.
 | `horizon-friends/src/udp.rs`, `session.rs`, `stun.rs`, `crypto.rs`, `Cargo.toml` (quinn, rustls, rcgen, tokio) | After a TCP race that found nothing, and when both ends say `udp` in their hello: UDP hole punching (STUN from the socket, keyed probes) and QUIC with the host's certificate pinned, bridged to a loopback TCP stream; `HostEvent::Connected::udp`, `Tunnel::udp`; `HORIZON_FRIENDS_TCP_RACE=0` for tests | Players behind routers that drop TCP's crossing connections still play directly |
 | `horizon-shared-worlds/src/backups.rs`, `retention.rs`, `lease.rs`, `session.rs`; `horizon-client/src/shared_worlds.rs`, `title/shared.rs`, `game/shared_worlds.rs`, `shared_screen.rs` | Backups: the owner recorded when a world is shared (`world.json`), stamps for each copy, requests to load one (`load.json`: asked, approved by the owner, carried out by whichever game takes the world next, or the host's game closing and reopening it), the lease's `loaded` for Undo; retention by tiers under an 8 GB budget for the whole bucket; the Backups, Load and How to Set Up pages; Approve and Decline in the world's Friends screen | Shared worlds' backups, and setting up the storage without leaving the game |
 | `horizon-client/src/lan/mod.rs`, `lan/conn.rs`, `game/integrated.rs`, `shared_worlds.rs` | `OnlineMode::offline_guests` (`OnlineMode::shared_world`): a shared world's host, signed in or not, lets a login that names the offline profile of its name in as that profile and authenticates every other; `shared_worlds::me` is that offline profile without an account | Players who aren't signed in join and host shared worlds; signed-in ones still can't be passed for |
-| `horizon-client/src/game/setup.rs`, `game/setup/account_form.rs` | Text typed with no key code (iOS's on-screen keyboard) goes into the first-run account form (`Form::type_text`) | Typing an offline name on first launch |
 | `horizon-gamecontroller/src/lib.rs`, `Cargo.toml` (block2, log) | Background time asked for or given back from another thread is done on the main thread (GCD), and has an expiration handler that gives it back | iOS no longer ends the game for background time never returned (a Microsoft sign-in in Safari, a shared world's upload) |
-| `horizon-client/src/ios.rs`, `game.rs`, `game/no_resources.rs` | The window prefers the home bar hidden and defers the bottom and top edges' system gestures (`ios::window_attributes`) | The home bar fades, and a thumb at the edge doesn't open Type to Siri or the Control Center |
-| `horizon-client-render/src/android_controls/layout.rs` | `virtual_mouse_enabled` defaults to on on iOS, and `DEFAULTS_REV` 2 turns it on once in older iOS settings | The virtual mouse is on by default on iOS (Android unchanged) |
 | `horizon-client/src/game/friends.rs`, `game/saving.rs`, `game.rs` | The pause menu's Friends button is on in a shared world for guests too; the app leaving and coming back to the screen tells a shared world's host (`shared_away`, `shared_checkpoint_for_background`, `shared_back_in_front`) | Shared worlds: every player's Friends screen, and a host away is shown as away |
-| `horizon-client/src/game.rs` | A character that comes with no key code passes the open screen's character hooks (`screen_text_typed`) before the focused text box | Every character of the iPhone keyboard comes that way, and a native mod's own screen (Waymap's waypoint editor) is typed in through those hooks only |
-| `horizon-client-input/src/window.rs`, `horizon-client-render/src/gfx.rs`, `horizon-client/src/game/options.rs` | iOS paces the frame cap from the display (`display_paced_wait`, counted from `Renderer::acquired_at`) instead of the limiter's own clock | An iPhone presents only on its refreshes; the limiter beside them locked the frame rate at half (30) until something moved one of the two |
-| `horizon-client/src/android_control_ui.rs` | The virtual mouse's LMB and RMB over a menu are 64 x 30 (were 48 x 20), their names centred, press a little past what is drawn (`mouse_button_touch_rects`), sit at the right edge from the screen's middle down (were in the bottom corner), and a grip over them drags the pair anywhere (`mouse_buttons_pos` in the touch settings; `layout.rs`, `game/mobile_controls.rs`) | Asked for on iOS: they were easy to miss with a thumb; shared with Android |
-| `horizon-gamecontroller/src/lib.rs`, `horizon-ios-game/src/app.rs` | `request_high_frame_rate`: one display link whose preferred frame rate range is the screen's maximum, asked for at the first start | A ProMotion iPhone shows an app at 60 Hz unless something in it asks for more; the Info.plist key only allows it. As razlua/horizon-ios (Ferrite, MIT) does |
-| `horizon-client-render/src/graphics.rs` | Phones start with asynchronous entity culling and every block entity cache on (`phone_savings`), turned on once in a graphics file saved before (`.horizon-phone-savings`) | Less work for each frame; as razlua/horizon-ios does. Its leaf mode Hidden and its particle culling are newer upstream Horizon's and not in this base |
-| `horizon-client-render/src/extras.rs` | `wheel_cycles_settings` is off by default on iOS, and an older iOS extras file has it turned off once (`phoneDefaults`) | Scrolling the settings with a finger doesn't change them |
 | `horizon-client/src/shared_screen.rs`, `friends_screen.rs` | The shared world's Friends screen shows the invite code with Copy Code beside Done; `friends_screen::code_lines` shared | The code of a shared world's host |
 | `Cargo.toml`, `horizon-client/Cargo.toml`, `horizon-client-lib/Cargo.toml` | The `horizon-voice` crate (new), a member and a dependency | Voice chat in a shared world |
 | `horizon-client/src/lan/voice.rs` (new), `lan/conn.rs`, `lan/mod.rs` | The host's relay of voices between its players, off the tick: the offer to Horizon clients, `horizon:voice` taken in `read_loop`, `PlayerSender::send_now` and the writer's express lane (`Out::Express`), `Shared.voice` | Voice chat: voices aren't held back by the game's tick or by queued chunks |
@@ -143,7 +163,17 @@ Every change to a file Starling has, in the order they were made.
 | `horizon-client-render/src/android_controls/layout.rs`, `android_controls.rs`, `android_controls/editor.rs` | A fifteenth control, `Control::Voice` (the microphone, leftmost of the top row, red while muted; older layouts get it at its place); the editor's list three to a row; the factory top row spreads apart on a screen nearer square than a phone's | Voice chat's microphone button, and the top row not overlapping on an iPad |
 | `packaging/ios/GameInfo.plist` | `NSMicrophoneUsageDescription` says voice chat | The system's prompt names what the microphone is for |
 | `horizon-client-render/src/android_controls.rs` | On a screen nearer square than a phone's (an iPad), the factory top row spreads from its middle until its buttons stand apart | The top row's buttons overlapped on an iPad |
-| `horizon-client/src/game/update_offer.rs`, `game.rs`, `game/touch.rs`, `ios_releases.rs` (new), `game/mod_catalog.rs`, `game/native_builds_ios.rs` | Android's update prompt is iOS's too (`cfg` android or ios): it asks this repository's releases for the app's own edition (`ios_releases::EDITION`), and installs through the share sheet (`horizon_gamecontroller::share`); an app from a fork or with native mods is only told (`official_build`) | The game says when an update of its edition is out, and installs it |
+| `horizon-client/src/game/starling/update_offer.rs`, `game.rs`, `game/runtime/window_handler.rs`, `game/starling/touch/mod.rs`, `ios_releases.rs` (new), `game/starling/mod_catalog.rs`, `game/pocket/native_builds_ios.rs` | Android's update prompt is iOS's too (`cfg` android or ios): it asks this repository's releases for the app's own edition (`ios_releases::EDITION`), and installs through the share sheet (`horizon_gamecontroller::share`); an app from a fork or with native mods is only told (`official_build`) | The game says when an update of its edition is out, and installs it |
+| `horizon-client/src/entry.rs`, `game/runtime/resource_loader.rs`, `ios.rs` | 0.9.0's start (`prepare`, `start`) reads iOS's arguments as Android's, keeps the desktop's lease holder out of both phones, and hands the loading screen and the game to the app's event loop instead of making one (`ios::take_game`, `run_until_quit` elsewhere); the hooks' shutdown waits for the game's end (`ios::game_ended`) | UIKit makes one event loop a process, the app's; the game runs in it |
+| `horizon-ios-game/src/app.rs`, `Cargo.toml` | `install_platform` (the engine's seal, the mods' instrumentation, the platform socket, the render points) before the start, as `android_lib.rs`; `horizon_hooks::register(&horizon_friends::game::HOOKS)`; a restart asked for is a notice and the app's end (`horizon_gamecontroller::notice`, `presenting`) | 0.9.0 stops at its first mod guard without the platform; no invite code joins without the resolver; the engine can't start twice in a process |
+| `horizon-client/src/preparer.rs`, `game.rs`, `game/runtime/loading_screen.rs` | `retire_other_tables`: game files laid out from other tables than the app carries lose their manifest at the start, so the setup lays them out again; 0.9.0's `drop_downloads` is not called on iOS | An app installed over an older one (1.0.0) would read tables made for another engine; laying out again needs the official files |
+| `horizon-gamecontroller/src/lib.rs`, `horizon-client/src/ios.rs`, `game/starling/mobile_controls/mod.rs` | `safe_insets`: UIKit's safe area, of which only the sensor housing's edge counts (`housing_insets`) | 0.9.0's controls keep out of Android's camera cutout (`android::safe_insets`); UIKit insets both long edges and the home bar's strip, which would move controls that are in nobody's way |
+| `horizon-client/src/game/interface/hud_room.rs`, `chat.rs`, `screen_build.rs`, `game/runtime/window_handler.rs`, `horizon-client-render/src/graphics_ui.rs`, `options_file.rs`, `options_ui/draw.rs`, `settings_shell.rs` | 0.9.0's safe zones (HUD, buttons, menus) and their Display page are the phones' (`PHONE`, `cfg` android or ios); on iOS the page has the three safe zones and not the activity's four rows | Room at the edges for the HUD, the buttons and the menus on an iPhone too |
+| `horizon-client/src/game/interface/options.rs`, `startup_menu.rs`, `game/runtime/loading_screen.rs`, `game/starling/diagnostics.rs`, `game/starling/touch/mod.rs`, `touch/slots.rs`, `game/modding/mods/mod.rs`, `horizon-client-render/src/shader_ui.rs`, `controller_ui.rs`, `horizon-client/src/ui_theme.rs` | 0.9.0's phone behaviours named Android alone are the phones': the menus' 60 frames a second, the touch settings saved from the menu's options, the loading screen's cap, the diagnostics ZIP's share, the touch menu's finger, the virtual mouse's inventory preview, the registry names before the first setup, the catalog and the cost rows on the shader page, the computer-only controller rows; the boot screen names the app | The gate audit of the merge (Rule 3) |
+| `horizon-client/src/game/runtime/window_handler.rs`, `horizon-client-input/src/keybinds.rs` | A key without its modifiers is the logical key on iOS, as on Android (`key_without_modifiers`, `learn_layout`) | winit's UIKit backend has no modifier supplement |
+| `horizon-mod-package/src/mod_list.rs`, `selection/context.rs` | iOS's own text for a native mod that is not in the app (`NOT_BUILT`), and its data folder found as macOS's | The mods' page says what iOS can do; the launch context knows the platform |
+| `horizon-hdr/src/lib.rs`, `horizon-client-render/src/gfx/surface_setup.rs`, `gfx/ray_query.rs`, `gfx/hdr.rs`, `gfx/pack_shadow.rs`, `gfx/arena.rs` | What 0.9.0 gates on macOS for Metal is gated on Apple's platforms (`target_vendor = "apple"`); HDR output is not asked for on iOS; the shadow map's side limit and the arena's 32 MB page ceiling are a phone's | The same Metal, a phone's memory |
+| `horizon-client/src/game/pocket/shared_worlds.rs`, `pocket/voice.rs`, `lan/io_pool.rs`, `lan/conn.rs`, `horizon-friends/src/game.rs`, `lib.rs`, `guest.rs`, `title/preset_buttons.rs`, `title/draw.rs`, `save.rs`, `game/starling/old_mod_net.rs`, `game/world/autosave.rs`, `world_session.rs`, `game/runtime/window_handler.rs`, `game/interface/play_keys.rs` | On 0.9.0 (the rows above name 0.8.0's paths): the edition's game modules are in `game/pocket/`; voice chat's express lane is the connection's outbox (`Outbox::push_first`, at most 25 frames ahead of what waits) since connections are served by the io pool, and its relay enters and leaves with the play session (`PlayConn`); a friend's world is joined by the resolver (`horizon-friends` `game`), which reads the host's public tunnels after the code and notes the path (`join_path`); a guest's direct join tries each endpoint in turn, the tunnel's after its head start; Shared Worlds is button 82 beside Minecraft Realms; the write count is `save::write_count` and covers the durable writes; the shared channel rides the old mod messages; the manifest's and the lease's formats are 2 | 0.9.0 moved the game module into areas, rewrote the server's connections, put joining behind a hook, added Realms and a module named `save::writes`; a world 1.1.0 saved is not for 1.0.0 to open |
 
 ## Gate ledger
 

@@ -1,0 +1,23 @@
+# Horizon PE's mod builds (worker.js). Setting it up: README.md beside this file.
+name = "horizon-pe-mod-builds"
+main = "worker.js"
+compatibility_date = "2026-11-01"
+workers_dev = true
+
+[vars]
+# The repository whose `mod-build` workflow builds the app: this one, or your fork.
+REPO = "shopifygav222/horizon-pocket-edition-ios"
+# How many builds one device may start in a day, how many everyone may, and how many mods a build
+# takes. A build a player asks for that exists already is found, not started, and counts for nothing.
+PER_DEVICE_PER_DAY = "6"
+PER_DAY = "300"
+MAX_MODS = "24"
+
+# The counters (they expire by themselves). Create the namespace and put its id here:
+#   npx wrangler kv namespace create LIMITS
+[[kv_namespaces]]
+binding = "LIMITS"
+id = "PUT-THE-NAMESPACE-ID-HERE"
+
+# The token is a secret, never in this file:
+#   npx wrangler secret put GITHUB_TOKEN
