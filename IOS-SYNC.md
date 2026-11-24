@@ -156,6 +156,8 @@ module into area folders (`game/starling/`, `game/interface/`, `game/runtime/`, 
 | `horizon-client/src/game/runtime/loading_screen.rs` (`show_startup_console`) | The boot console while the game loads (0.9.0's, Android's) is iOS's too | A phone's start is the same on both |
 | `horizon-client-render/src/options_ui.rs` (`list_slider_at`) | The vanilla settings pages' sliders are ones a finger takes only moving clearly sideways, as the settings shell's | Scrolling Video Settings or Music & Sounds with a thumb changed the sliders it went over |
 | `horizon-client/src/preparer.rs` (`assemble`) | iOS's laying out fetches the original control textures too, as Android's preparing does | The first game after a setup or an update of the app drew the controls without their art |
+| `horizon-client/src/android_control_ui.rs` (`hub_launcher_button`, the hub's title, Pause in the Background's text) | No Launcher button in the Control Hub on iOS; the hub is "Horizon Control Hub" and the text names Horizon PE there | iOS has no launcher: the button saved the world and ended the game. The names are 1.0.0's |
+| `horizon-client/src/game/interface/startup_menu.rs` (`Event::RestartGame`) | The title's options ask iOS for a restart too, as the game's own do | A setting that needs a restart did nothing from the title |
 
 ## Gate ledger
 
