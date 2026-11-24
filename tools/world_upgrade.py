@@ -38,7 +38,12 @@ ITEM = 'minecraft:netherite_ingot'
 # Settings the newer game is right to write anew: what names the game's own version or state, not
 # a choice of the player's. `file: {keys}`; a file named with None is not compared at all.
 OWN = {
-    'options.txt': {'version', 'startedCleanly', 'lastServer'},
+    # renderDistance: both games are started with --render-distance (few chunks, a quick test),
+    # and the newer one saves what it was started with. A phone's game has no such argument.
+    'options.txt': {'version', 'startedCleanly', 'lastServer', 'renderDistance'},
+    # Starling 0.9.0's HDR settings: the interface's brightness is `hdrUiNits` now (read from the
+    # older `hdrUiBrightness`, graphics.rs), and the HDR key is a key binding like the others.
+    'horizon-graphics.txt': {'hdrUiBrightness', 'hdrKey'},
 }
 # What a game folder holds that is no settings file.
 NOT_SETTINGS = {'saves', 'logs', 'crash-reports', 'screenshots', 'resourcepacks', 'shaderpacks',
@@ -162,7 +167,7 @@ def lost_settings(before, after):
 def change_options(home):
     """Choices a player made, in the older game's options.txt: none of them a default."""
     path = home / 'options.txt'
-    wanted = {'fov': '0.25', 'gamma': '0.75', 'guiScale': '3', 'renderDistance': '7',
+    wanted = {'fov': '0.25', 'gamma': '0.75', 'guiScale': '3', 'entityDistanceScaling': '0.75',
               'maxFps': '90', 'bobView': 'false', 'key_key.jump': 'key.keyboard.j'}
     # The file is the game's own (`write_options`): one made up here would lack what the game
     # writes with it (its `version`), and a file without that is read as an ancient one.
@@ -246,7 +251,10 @@ def run(old, new, work):
         # 1. The older game: a start writes its settings, the player changes some, then plays.
         old_home = work / 'old'
         first = game(old, old_home)
+        # (The older game takes key presses only with a world open.)
+        open_world(first)
         write_options(first)
+        close_world(first)
         first.stop()
         chosen = change_options(old_home)
         play = game(old, old_home)
