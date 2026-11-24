@@ -28,7 +28,6 @@ pub mod game;
 pub mod ios;
 #[cfg(target_os = "ios")]
 pub use ios as android;
-pub mod mod_api;
 
 pub mod diagnostics;
 pub mod orb_limits;

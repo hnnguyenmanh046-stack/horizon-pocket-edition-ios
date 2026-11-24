@@ -202,9 +202,9 @@ fn folder_mods_on(off: &BTreeSet<String>) -> BTreeSet<String> {
         .map(|d| d.flatten().map(|e| e.path()).collect::<Vec<_>>())
         .unwrap_or_default()
         .into_iter()
-        .filter(|p| p.extension().is_some_and(|e| e == "hnmod"))
-        .filter_map(|p| horizon_mods::index::native::Bundle::read(&p).ok())
-        .map(|b| b.manifest.id)
+        .filter(|p| p.extension().is_some_and(|e| e == "hnmod" || e == "hmod"))
+        .filter_map(|p| horizon_mod_package::index::native::Any::read(&p).ok())
+        .map(|b| b.id().to_owned())
         .filter(|id| !off.contains(id))
         .collect()
 }
