@@ -24,24 +24,24 @@ mod test_log;
 #[cfg(test)]
 mod test_resources;
 pub use horizon_client_render::{
-    assets, atlas_sources, audio, audio_capture, auth, autotune, ban_notice, bidi, biome, block_edit,
-    block_entities, block_entity_anim, block_entity_render, block_sprites, block_states, bluemap,
-    bluemap_detect, border_render, breaking, brewing, camera, chat, chunk, chunk_map, cit,
-    cit_armor, cit_assets, cit_glint, client_resources, clouds, collisions, command_block,
-    containers, controller_ui, crash, custom_sky, datapack, dynamic_light, dynamic_resolution,
-    effects, elyby, environment, extras, fast_hash, fluid_models, fluid_render, fog, font, gfx,
-    gpu_drivers, graphics, graphics_style, graphics_ui, hdr_calibration, hud, hud_kit, hud_layout,
-    hud_overlays, inventory_effects, java_text, jigsaw_block, json_folder, level_loading, light,
-    lod, logging, mark_sprite, menu_blur, menu_style, mesher, minimap, mipmap, mod_browser,
-    mod_chunk_tickets, mod_list, mod_pipelines, model_library, models, mods_screen, monitor,
-    multiline_edit, native_emissive, offline_name, options_file, options_fixes, options_ui,
-    overlay, own_buttons, own_skin, pack_browser, pack_formats, pack_hooks, pack_palette,
-    pack_screen, packs, pad_cursor, pad_glyph, par, particles, poi_sections,
-    polytone_creative_tabs, polytone_post, post_chain, potent_sulfur, preedit, providers, pvp,
-    pvp_hud, random_source, resource_source, screen_draw, screen_effects, sculk, section_mask,
-    server_terrain, settings, shader_options, shader_pack_list, signs, skins, social, sound_engine,
-    sound_events, sound_preview, spans, split_layout, split_map, split_profiles, sprites,
-    streaming, structure_block, system_stats, tab_list, terrain_model, test_block,
+    assets, atlas_sources, audio, audio_capture, auth, autotune, ban_notice, bidi, biome,
+    block_edit, block_entities, block_entity_anim, block_entity_render, block_sprites,
+    block_states, bluemap, bluemap_detect, border_render, breaking, brewing, camera, chat, chunk,
+    chunk_map, cit, cit_armor, cit_assets, cit_glint, client_resources, clouds, collisions,
+    command_block, containers, controller_ui, crash, custom_sky, datapack, dynamic_light,
+    dynamic_resolution, effects, elyby, environment, extras, fast_hash, fluid_models, fluid_render,
+    fog, font, gfx, gpu_drivers, graphics, graphics_style, graphics_ui, hdr_calibration, hud,
+    hud_kit, hud_layout, hud_overlays, inventory_effects, java_text, jigsaw_block, json_folder,
+    level_loading, light, lod, logging, mark_sprite, menu_blur, menu_style, mesher, minimap,
+    mipmap, mod_browser, mod_chunk_tickets, mod_list, mod_pipelines, model_library, models,
+    mods_screen, monitor, multiline_edit, native_emissive, offline_name, options_file,
+    options_fixes, options_ui, overlay, own_buttons, own_skin, pack_browser, pack_formats,
+    pack_hooks, pack_palette, pack_screen, packs, pad_cursor, pad_glyph, par, particles,
+    poi_sections, polytone_creative_tabs, polytone_post, post_chain, potent_sulfur, preedit,
+    providers, pvp, pvp_hud, random_source, resource_source, screen_draw, screen_effects, sculk,
+    section_mask, server_terrain, settings, shader_options, shader_pack_list, signs, skins, social,
+    sound_engine, sound_events, sound_preview, spans, split_layout, split_map, split_profiles,
+    sprites, streaming, structure_block, system_stats, tab_list, terrain_model, test_block,
     test_instance_block, testgen, title_edition, trims, ui, vault, weather, widgets, world,
     worldborder, zip,
 };
@@ -118,6 +118,7 @@ pub mod item_sync;
 pub mod item_tooltip;
 pub mod join_seq;
 pub mod kinetics;
+pub mod mod_builds;
 pub mod move_gate;
 /// Game-owned JSON metadata conversion, shared by recipe and API adapters.
 pub use horizon_core::json_nbt;
@@ -182,9 +183,9 @@ pub mod social_screen;
 pub mod starling_mod_api;
 pub mod starling_releases;
 pub mod starling_store;
-pub mod world_geometry;
 pub mod voice_net;
 pub mod voice_screen;
+pub mod world_geometry;
 pub use horizon_server_files as server;
 pub mod controller_notice;
 pub mod server_packs;

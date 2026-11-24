@@ -388,6 +388,9 @@ impl ApplicationHandler for Game<'_> {
         let attributes = winit::platform::wayland::WindowAttributesExtWayland::with_name(
             attributes, "horizon", "horizon",
         );
+        // iOS: the home bar fades and the screen's edges go to the game first (ios.rs).
+        #[cfg(target_os = "ios")]
+        let attributes = crate::ios::window_attributes(attributes);
         // A game an agent started opens without the focus, as splitscreen's windows do: the
         // person keeps their keyboard and pointer until they click it (`unclaimed_window`).
         // X11 activates it anyway, and says so with a `Focused`.

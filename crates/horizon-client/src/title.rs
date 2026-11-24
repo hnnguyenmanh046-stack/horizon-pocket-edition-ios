@@ -32,8 +32,8 @@ mod missing_biome_regions;
 mod missing_mods;
 mod onboarding;
 pub mod preset_editors;
-mod splash;
 mod shared;
+mod splash;
 /// The main menu's Shared Worlds button (`preset_buttons.rs`), beside Minecraft Realms.
 const SHARED_WORLDS: u8 = 82;
 #[cfg(test)]

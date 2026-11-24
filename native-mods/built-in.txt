@@ -1,0 +1,4 @@
+# The native mods every build of this edition has (docs/shared-worlds-mods.md): folders of
+# native-mods/, which ios.yml is run with (its `mods`) for a release, and mod-build.yml for a build
+# with catalog mods on top.
+appleskin armor_status biomecompass connected_textures coords_hud dynamiclights enchantmenthints jade rightharvest shulker_peek smartf3 status_effect_hud treefall waymap zoom

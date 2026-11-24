@@ -97,6 +97,13 @@ pub enum NativeGameAct {
     PlayWithout,
     /// Another build server.
     BuildServer,
+    /// iOS (game/pocket/native_builds_ios.rs): the finished .ipa in the share sheet (SideStore,
+    /// AltStore, LiveContainer...).
+    #[cfg(target_os = "ios")]
+    Install,
+    /// iOS: the finished .ipa saved where the player picks in Files.
+    #[cfg(target_os = "ios")]
+    SaveIpa,
 }
 
 /// What the Mods screen shows of a mod besides its row: the manifest's descriptive fields and

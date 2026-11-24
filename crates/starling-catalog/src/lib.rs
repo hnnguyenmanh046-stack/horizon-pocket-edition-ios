@@ -197,10 +197,22 @@ pub fn hide_native_mods(ids: impl IntoIterator<Item = String>) {
     let _ = HIDDEN_NATIVE_MODS.set(ids.into_iter().collect());
 }
 
+/// Where a game plays only the native mods it knows it can build (iOS, whose app each mod is
+/// compiled into): the ones the Mods shelf lists, every other left out.
+static ONLY_NATIVE_MODS: std::sync::OnceLock<HashSet<String>> = std::sync::OnceLock::new();
+
+/// Lists only the native mods `ids` on the Mods shelf. Only the first call counts.
+pub fn only_native_mods(ids: impl IntoIterator<Item = String>) {
+    let _ = ONLY_NATIVE_MODS.set(ids.into_iter().collect());
+}
+
 fn hidden_native_mod(project: &Project) -> bool {
-    HIDDEN_NATIVE_MODS
+    (HIDDEN_NATIVE_MODS
         .get()
         .is_some_and(|ids| ids.contains(&project.id))
+        || ONLY_NATIVE_MODS
+            .get()
+            .is_some_and(|ids| !ids.contains(&project.id)))
         && is_native_mod(project)
 }
 

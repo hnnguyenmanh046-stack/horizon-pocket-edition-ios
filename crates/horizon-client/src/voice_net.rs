@@ -5,10 +5,7 @@
 //! ([`Link::attach`]), and the rest (the welcome, the list of players) waits for the game
 //! ([`Link::take`]). What this game sends (its state, its microphone's frames) goes out from
 //! whichever thread has it ([`Sender`]).
-use horizon_protocol::{
-    connection::ConnWriter,
-    packets::{configuration::CustomPayload, play},
-};
+use horizon_protocol::packets::{configuration::CustomPayload, play};
 use horizon_voice::{
     engine::Playout,
     wire::{CHANNEL, Down, Entry, VERSION},
@@ -129,7 +126,7 @@ impl Link {
 /// Sends this game's voice messages on its connection, from any thread.
 #[derive(Clone)]
 pub struct Sender {
-    pub(crate) writer: Arc<Mutex<Option<ConnWriter>>>,
+    pub(crate) writer: Arc<Mutex<Option<crate::net::queued_writer::QueuedWriter>>>,
     pub(crate) configuring: Arc<AtomicBool>,
 }
 
@@ -141,11 +138,13 @@ impl Sender {
             channel: CHANNEL.into(),
             data,
         });
-        let mut writer = self.writer.lock().unwrap_or_else(|e| e.into_inner());
+        let writer = self.writer.lock().unwrap_or_else(|e| e.into_inner());
         if self.configuring.load(Ordering::Relaxed) {
             return;
         }
-        if let Some(w) = writer.as_mut()
+        // The connection's writer is a queue its own thread empties (0.9.0): a voice frame
+        // waits there behind what the game sent just before, a few packets at most.
+        if let Some(w) = writer.as_ref()
             && w.send(&packet.encode()).is_err()
         {
             w.shutdown();

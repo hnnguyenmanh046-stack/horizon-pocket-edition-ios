@@ -345,20 +345,20 @@ fn local_items(home: &std::path::Path, shelf: Shelf) -> Vec<Local> {
             let mut mod_id = None;
             let mut native = false;
             if *folder == NATIVE_DIR {
-                let Some(bundle) = name
-                    .ends_with(".hnmod")
-                    .then(|| horizon_mods::index::native::Bundle::read(&path).ok())
+                // Either format a phone holds: Horizon's package, or the older bundle.
+                let Some(bundle) = (name.ends_with(".hmod") || name.ends_with(".hnmod"))
+                    .then(|| horizon_mod_package::index::native::Any::read(&path).ok())
                     .flatten()
                 else {
                     continue;
                 };
                 if entry.is_none() {
-                    title = format!("{} {}", bundle.manifest.id, bundle.manifest.version);
+                    title = format!("{} {}", bundle.id(), bundle.version());
                 }
-                mod_id = Some(bundle.manifest.id);
+                mod_id = Some(bundle.id().to_owned());
                 native = true;
             } else if *folder == DIR {
-                match horizon_mods::Package::read(&path) {
+                match horizon_mod_package::Package::read(&path) {
                     Ok(package) => {
                         if entry.is_none() {
                             title =
@@ -611,7 +611,14 @@ fn draw_confirm(ui: &mut Ui<'_>, title: &str, body: &str, drawn: &mut Vec<([f32;
         .min(h - 16.0);
     let panel = [(w - width) / 2.0, (h - height) / 2.0, width, height];
     ui.rounded(panel[0], panel[1], panel[2], panel[3], 14.0, color::bg());
-    ui.rounded(panel[0], panel[1], panel[2], panel[3], 14.0, color::raised());
+    ui.rounded(
+        panel[0],
+        panel[1],
+        panel[2],
+        panel[3],
+        14.0,
+        color::raised(),
+    );
     let head = fitted(
         ui,
         Face::Semibold,
@@ -1202,8 +1209,7 @@ impl Game<'_> {
                 self.refresh_mods_page(item.mod_id.as_deref());
             }
             Shelf::ResourcePacks => {
-                let infos =
-                    super::packs::pack_infos(&self.vanilla_root(), &self.server_packs.active);
+                let infos = self.resource_pack_infos();
                 self.ui.options.update_pack_infos(infos);
             }
             Shelf::ShaderPacks => self.after_shader_pack_removed(&item.file),
@@ -1410,11 +1416,20 @@ impl Game<'_> {
             .name("catalog search".into())
             .spawn(move || {
                 // The native mods Compile v2 can't play on this build are left off the shelf.
+                #[cfg(target_os = "android")]
                 if shelf == Shelf::Mods {
                     starling_catalog::hide_native_mods(
                         horizon_client::starling_store::catalog_hidden()
                             .iter()
                             .cloned(),
+                    );
+                }
+                // iOS: only the native mods this engine is known to build into the app are on
+                // the shelf (horizon_client::mod_builds).
+                #[cfg(target_os = "ios")]
+                if shelf == Shelf::Mods {
+                    starling_catalog::only_native_mods(
+                        horizon_client::mod_builds::buildable().iter().cloned(),
                     );
                 }
                 let found =

@@ -742,7 +742,10 @@ fn wordmark(atlas: &HudAtlas, batch: &mut HudBatch) {
     let (name, tagline) = if cfg!(target_os = "android") {
         ("Starling", "Minecraft on Android, in Rust")
     } else if cfg!(target_os = "ios") {
-        (horizon_client::APP_NAME, "Minecraft on iPhone and iPad, in Rust")
+        (
+            horizon_client::APP_NAME,
+            "Minecraft on iPhone and iPad, in Rust",
+        )
     } else {
         ("Horizon", "Rust based minecraft client")
     };

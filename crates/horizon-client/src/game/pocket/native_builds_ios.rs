@@ -1,76 +1,52 @@
 // game-module-cfg: target_os = "ios"
-//! iOS: native mods (docs/ios.md). iOS runs no code its app did not ship with, so where Starling's
-//! Android app swaps in a library its build service compiled (native_builds.rs), a native mod here
-//! is compiled into the app itself: this repository's `ios` workflow, run with the mods, builds an
-//! .ipa with them (the run's artifact, kept 30 days and never published as a release), which the
-//! player installs over this app.
+//! iOS: catalog mods (docs/ios.md). iOS runs no code its app did not ship with, so where Starling's
+//! Android app loads a library a mod was built into (native_builds.rs), a mod here is compiled
+//! into the app itself: a build of this app's release with the mods in, which the player installs
+//! over this app.
 //!
 //! The Mods page's top (`ModList::native_game`, drawn as Android's) says which mods this app was
-//! built with (`native-mods.json` beside its program), and when the native mods turned on are not
-//! all in it, builds the app with them: the player's GitHub token (Actions: read and write on this
-//! repository, kept in the Keychain) starts the workflow, the build is followed while they play,
-//! and the finished .ipa is downloaded with the same token and handed to the share sheet
-//! (SideStore, AltStore, LiveContainer or any other signer), or saved to Files.
+//! built with, and when the mods turned on are not all in it, builds the app with them: the mod
+//! builds service (packaging/mod-builds-worker, `horizon_client::mod_builds`) starts the build on
+//! GitHub for the player, who needs no account there. The build is followed while they play, and
+//! the finished .ipa is downloaded and handed to the share sheet (SideStore, AltStore,
+//! LiveContainer or any other signer), or saved to Files. The same mods asked for by anyone are
+//! one build: when someone built them already, the .ipa is there at once.
 //!
 //! A build that ends says so in a toast wherever the player is, and the title screen keeps a
 //! line about it under the account button until it is installed or dismissed, which opens the
 //! Mods page. One that ended while the app was closed is caught up with at the next start.
 use super::Game;
 use horizon_client::hud::HudBatch;
+use horizon_client::mod_builds::{self, Pending, State, mods_label};
 use horizon_client::mod_list::{NOT_BUILT, NativeGame, NativeGameAct, NativePage};
 use horizon_client::{options_ui::Page, text::Text, toasts::SystemToast, ui};
-use serde::{Deserialize, Serialize};
+use horizon_mod_package::index::native::Any;
 use serde_json::Value;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-/// Where the app was built from: the repository and branch whose `ios` workflow builds it again.
+/// Where the app was built from: an app of another repository than this port's own is not
+/// updated from this port's releases (`official_build`).
 const REPO: &str = match option_env!("HORIZON_IOS_REPO") {
     Some(repo) => repo,
     None => "shopifygav222/horizon-pocket-edition-ios",
 };
-const BRANCH: &str = match option_env!("HORIZON_IOS_BRANCH") {
-    Some(branch) => branch,
-    None => "main",
-};
-const WORKFLOW: &str = "ios.yml";
-/// GitHub's form for a fine-grained token, filled in: its name, a year, and Actions: Read and
-/// write. The repository is the player's to pick (GitHub can't pre-select one); the owner is the
-/// one signed in, which is the fork's owner.
-const TOKEN_FORM: &str = "https://github.com/settings/personal-access-tokens/new?name=Horizon+PE\
-    &description=Builds+native+mods+from+the+game&expires_in=365&actions=write";
-const API: &str = "https://api.github.com";
-/// The token, in the Keychain: this app's, on this device.
-const KEYCHAIN_SERVICE: &str = "dev.horizon.pocketedition.github";
-const KEYCHAIN_ACCOUNT: &str = "actions-token";
 /// The build being followed, in the private folder: it survives a restart of the app.
-const PENDING_FILE: &str = "native-build.json";
-/// What the program was built with, beside it (game/mods.rs BUILD_INFO).
-const BUILD_INFO: &str = "native-mods.json";
+const PENDING_FILE: &str = "mod-build.json";
+/// The number this device counts its builds by (`mod_builds::device`).
+const DEVICE_FILE: &str = "mod-builds-device";
+/// What the program was built with, beside it: the edition's own mods (tools/ios_native_mods.py
+/// `info`) and the catalog mods compiled in (tools/ios_native_sdk.py `add`).
+const BUILD_INFO: [&str; 2] = ["native-mods.json", "catalog-mods.json"];
 /// Where the finished .ipa is kept until it is installed: the private folder's.
 const BUILDS_DIR: &str = "native-builds";
 /// The largest download taken for an .ipa's artifact.
 const LARGEST_ARTIFACT: u64 = 512 << 20;
 /// How often a build under way is looked at.
 const POLL: Duration = Duration::from_secs(20);
-/// A build that has not shown up as a run by then was not started.
-const FIND_RUN: Duration = Duration::from_secs(5 * 60);
-
-/// A build the player asked for, as kept in [`PENDING_FILE`].
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-struct Pending {
-    /// The mod ids, sorted: the workflow's `mods` input.
-    mods: Vec<String>,
-    /// When it was asked for (seconds since 1970): its run is the first one after.
-    asked: u64,
-    run: Option<u64>,
-    number: Option<u64>,
-    page: Option<String>,
-    /// The finished .ipa, downloaded into [`BUILDS_DIR`].
-    ipa: Option<String>,
-    failed: Option<String>,
-}
+/// A build the service still doesn't know by then was not started.
+const NEVER_STARTED: Duration = Duration::from_secs(5 * 60);
 
 #[derive(Default)]
 struct Shared {
@@ -133,7 +109,7 @@ fn load_pending() -> Option<Pending> {
 /// The toast of a build ready to install.
 fn ready_toast() -> (String, String) {
     (
-        "Native mods build ready".to_owned(),
+        "Mods build ready".to_owned(),
         "Install it from Options > Mods".to_owned(),
     )
 }
@@ -147,25 +123,35 @@ fn forget_builds() {
     let _ = std::fs::remove_dir_all(builds_dir());
 }
 
-fn token() -> Option<String> {
-    let bytes = horizon_gamecontroller::keychain_get(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT)
-        .ok()
-        .flatten()?;
-    String::from_utf8(bytes).ok().filter(|t| !t.is_empty())
-}
-
-/// A GitHub token, as GitHub makes them: a prefix and letters, digits and underscores.
-fn looks_like_token(text: &str) -> bool {
-    (text.starts_with("github_pat_") || text.starts_with("ghp_"))
-        && (20..=255).contains(&text.len())
-        && text.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
-}
-
-/// The native mods this app was built with: (id, version), from [`BUILD_INFO`] beside its program.
+/// The mods this app was built with: (id, version), from the lists beside its program.
 pub(super) fn built_mods() -> Vec<(String, String)> {
+    let Ok(exe) = std::env::current_exe() else {
+        return Vec::new();
+    };
+    let mut built = BTreeMap::new();
+    for name in BUILD_INFO {
+        let info: Value = std::fs::read_to_string(exe.with_file_name(name))
+            .ok()
+            .and_then(|text| serde_json::from_str(&text).ok())
+            .unwrap_or_default();
+        for m in info["mods"].as_array().into_iter().flatten() {
+            if let Some(id) = m["id"].as_str() {
+                built.insert(
+                    id.to_owned(),
+                    m["version"].as_str().unwrap_or("?").to_owned(),
+                );
+            }
+        }
+    }
+    built.into_iter().collect()
+}
+
+/// The catalog mods compiled into this app, as a build is asked for with them (`id@version`).
+/// The edition's own mods are not among them: every build of the edition has those.
+fn built_catalog_mods() -> BTreeMap<String, String> {
     let info: Value = std::env::current_exe()
         .ok()
-        .and_then(|exe| std::fs::read_to_string(exe.with_file_name(BUILD_INFO)).ok())
+        .and_then(|exe| std::fs::read_to_string(exe.with_file_name(BUILD_INFO[1])).ok())
         .and_then(|text| serde_json::from_str(&text).ok())
         .unwrap_or_default();
     info["mods"]
@@ -175,83 +161,64 @@ pub(super) fn built_mods() -> Vec<(String, String)> {
         .filter_map(|m| {
             Some((
                 m["id"].as_str()?.to_owned(),
-                m["version"].as_str().unwrap_or("?").to_owned(),
+                m["version"].as_str()?.to_owned(),
             ))
         })
         .collect()
 }
 
 /// Whether this app is a release of this port's own repository as it came: not built in a
-/// player's fork. Only such an app is updated by installing the next release over it
-/// (game/update_offer.rs): a release builds no mods in a fork. This edition's releases come
-/// with their native mods, so those are no sign of a player's own build here.
+/// player's fork, and with no mods beyond its edition's. Only such an app is updated by
+/// installing the next release over it (game/starling/update_offer.rs): a release has no catalog
+/// mods.
 pub(super) fn official_build() -> bool {
-    REPO == horizon_client::ios_releases::REPOSITORY
+    REPO == horizon_client::ios_releases::REPOSITORY && built_catalog_mods().is_empty()
 }
 
-/// [`built_mods`] as `native-mods.json` holds it, for the Mods page's rows (game/mods.rs).
-pub(super) fn running_build_info() -> Option<String> {
-    let exe = std::env::current_exe().ok()?;
-    std::fs::read_to_string(exe.with_file_name(BUILD_INFO)).ok()
-}
-
-/// The ids of the native mods in the `horizon-native-mods` folder that are turned on.
-fn folder_mods_on(off: &BTreeSet<String>) -> BTreeSet<String> {
+/// The catalog mods in the `horizon-native-mods` folder that are turned on, by id with their
+/// version, and the ids of those there that no build takes (the older bundles, which change the
+/// game's own source).
+fn folder_mods_on(off: &BTreeSet<String>) -> (BTreeMap<String, String>, Vec<String>) {
     let folder = Game::game_dir().join(horizon_client::mod_list::NATIVE_DIR);
-    std::fs::read_dir(folder)
+    let mut on = BTreeMap::new();
+    let mut untaken = Vec::new();
+    let files = std::fs::read_dir(folder)
         .map(|d| d.flatten().map(|e| e.path()).collect::<Vec<_>>())
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|p| p.extension().is_some_and(|e| e == "hnmod"))
-        .filter_map(|p| horizon_mods::index::native::Bundle::read(&p).ok())
-        .map(|b| b.manifest.id)
-        .filter(|id| !off.contains(id))
-        .collect()
-}
-
-fn mods_label(mods: &[String]) -> String {
-    match mods {
-        [] => "no native mods".to_owned(),
-        [one] => one.clone(),
-        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
-    }
-}
-
-/// A form's value: every byte but the unreserved ones escaped.
-fn escape(text: &str) -> String {
-    text.bytes()
-        .map(|b| match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                (b as char).to_string()
+        .unwrap_or_default();
+    for path in files {
+        if !path
+            .extension()
+            .is_some_and(|e| e == "hnmod" || e == "hmod")
+        {
+            continue;
+        }
+        let Ok(found) = Any::read(&path) else {
+            continue;
+        };
+        if off.contains(found.id()) {
+            continue;
+        }
+        match &found {
+            Any::Flat(_) if mod_builds::names_a_mod(found.id(), found.version()) => {
+                on.insert(found.id().to_owned(), found.version().to_owned());
             }
-            _ => format!("%{b:02X}"),
-        })
-        .collect()
+            _ => untaken.push(found.id().to_owned()),
+        }
+    }
+    untaken.sort();
+    (on, untaken)
 }
 
-/// Seconds since 1970 of GitHub's time (`2026-11-12T16:58:38Z`).
-fn unix_time(text: &str) -> Option<u64> {
-    let number = |range: std::ops::Range<usize>| text.get(range)?.parse::<i64>().ok();
-    let (y, m, d) = (number(0..4)?, number(5..7)?, number(8..10)?);
-    let (hh, mm, ss) = (number(11..13)?, number(14..16)?, number(17..19)?);
-    let y = if m <= 2 { y - 1 } else { y };
-    let era = y.div_euclid(400);
-    let yoe = y - era * 400;
-    let mp = (m + 9) % 12;
-    let doy = (153 * mp + 2) / 5 + d - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    let days = era * 146_097 + doe - 719_468;
-    u64::try_from(days * 86_400 + hh * 3600 + mm * 60 + ss).ok()
-}
-
-/// What GitHub answered, read as JSON, or why not, in the player's words.
-fn github(method: &str, path: &str, token: &str, body: Option<&str>) -> Result<Value, String> {
-    let request = ureq::request(method, &format!("{API}{path}"))
-        .timeout(Duration::from_secs(30))
-        .set("Accept", "application/vnd.github+json")
-        .set("X-GitHub-Api-Version", "2022-11-28")
-        .set("User-Agent", "starling-ios")
-        .set("Authorization", &format!("Bearer {token}"));
+/// What the service answered at `path`, or why not, in the player's words. `body`: a request
+/// to start a build.
+fn ask(service: &str, path: &str, body: Option<&str>) -> Result<(String, State), String> {
+    let url = format!("{service}{path}");
+    let request = match body {
+        Some(_) => ureq::post(&url),
+        None => ureq::get(&url),
+    }
+    .timeout(Duration::from_secs(30))
+    .set("User-Agent", "HorizonPE");
     let response = match body {
         Some(body) => request
             .set("Content-Type", "application/json")
@@ -261,39 +228,30 @@ fn github(method: &str, path: &str, token: &str, body: Option<&str>) -> Result<V
     match response {
         Ok(response) => {
             let text = response.into_string().map_err(|e| e.to_string())?;
-            Ok(serde_json::from_str(&text).unwrap_or(Value::Null))
+            mod_builds::read_state(&text)
         }
         Err(ureq::Error::Status(code, response)) => {
             let said = response
                 .into_string()
                 .ok()
-                .and_then(|t| serde_json::from_str::<Value>(&t).ok())
-                .and_then(|v| v["message"].as_str().map(str::to_owned))
-                .unwrap_or_default();
-            Err(match code {
-                401 => {
-                    "GitHub doesn't accept the token (expired or copied wrong): paste a new one."
-                        .to_owned()
-                }
-                403 if said.contains("rate limit") => {
-                    "GitHub asks to wait a little (too many requests): try again in a few minutes."
-                        .to_owned()
-                }
-                403 | 404 => format!(
-                    "GitHub refused ({code}): the token can't run {REPO}'s Actions. Make it for \
-                     {REPO} with Actions: Read and write. If {REPO} isn't yours, fork it and use \
-                     the app built from your fork."
-                ),
-                _ => format!("GitHub said {code}: {said}"),
-            })
+                .and_then(|text| mod_builds::refusal(&text));
+            Err(said.unwrap_or_else(|| format!("The build service answered {code}.")))
         }
-        Err(e) => Err(format!("GitHub can't be reached: {e}")),
+        Err(e) => Err(format!("The build service can't be reached: {e}")),
     }
 }
 
-/// Starts the workflow with `mods`, then follows its run to its .ipa, downloaded, keeping
-/// [`Shared`] (and [`PENDING_FILE`]) up to date. Runs on its own thread.
-fn follow(shared: Arc<Mutex<Shared>>, start: bool) {
+/// Whether a refusal is the service's last word (a request it will refuse again), not a
+/// moment's trouble reaching it.
+fn refused_for_good(why: &str) -> bool {
+    !why.starts_with("The build service can't be reached")
+        && !why.starts_with("The build service answered 5")
+        && !why.starts_with("GitHub did not")
+}
+
+/// Asks the service for the build, then follows it to its .ipa, downloaded, keeping [`Shared`]
+/// (and [`PENDING_FILE`]) up to date. Runs on its own thread.
+fn follow(shared: Arc<Mutex<Shared>>, service: &'static str, device: String) {
     let set = |f: &dyn Fn(&mut Shared)| {
         let mut s = shared.lock().unwrap_or_else(PoisonError::into_inner);
         f(&mut s);
@@ -314,47 +272,40 @@ fn follow(shared: Arc<Mutex<Shared>>, start: bool) {
             }
             s.following = false;
             s.announce = Some((
-                "Native mods build failed".to_owned(),
+                "Mods build failed".to_owned(),
                 "See why in Options > Mods".to_owned(),
             ));
         })
     };
-    let Some(token) = token() else {
-        return fail("There is no GitHub token on this device: paste one first.".to_owned());
+    let keyed = |key: &str, progress: String| {
+        set(&|s| {
+            if let Some(p) = &mut s.pending {
+                p.key = Some(key.to_owned());
+            }
+            s.progress = progress.clone();
+        })
     };
-    if start {
-        let Some(p) = pending() else { return };
-        set(&|s| s.progress = "Asking GitHub to build it...".to_owned());
-        let body = serde_json::json!({"ref": BRANCH, "inputs": {"mods": p.mods.join(" ")}});
-        let path = format!("/repos/{REPO}/actions/workflows/{WORKFLOW}/dispatches");
-        if let Err(why) = github("POST", &path, &token, Some(&body.to_string())) {
-            return fail(why);
-        }
-    }
     loop {
-        let Some(p) = pending() else { return };
-        if p.failed.is_some() || p.ipa.is_some() {
-            set(&|s| s.following = false);
-            return;
-        }
-        let step = match p.run {
-            None => find_run(&p, &token),
-            Some(run) => check_run(run, &token),
+        let Some(p) = pending() else {
+            return set(&|s| s.following = false);
         };
-        match step {
-            Ok(Step::Wait(progress)) => set(&|s| s.progress = progress.clone()),
-            Ok(Step::Found { run, number, page }) => set(&|s| {
-                if let Some(p) = &mut s.pending {
-                    p.run = Some(run);
-                    p.number = Some(number);
-                    p.page = Some(page.clone());
-                }
-                s.progress = "GitHub is about to build it.".to_owned();
-            }),
-            Ok(Step::Artifact { id, size }) => {
-                let number = p.number.unwrap_or_default();
+        if !p.under_way() {
+            return set(&|s| s.following = false);
+        }
+        // Asked for until the service knows the build; then only read.
+        let answer = match &p.key {
+            None => {
+                let body = mod_builds::request(&p.tag, &p.mods, &device);
+                ask(service, "/v1/build", Some(&body))
+            }
+            Some(key) => ask(service, &format!("/v1/build/{key}"), None),
+        };
+        let minutes = now().saturating_sub(p.asked) / 60;
+        match answer {
+            Ok((key, State::Ready { size })) => {
+                keyed(&key, "Built. Downloading it.".to_owned());
                 let said = |progress: String| set(&|s| s.progress = progress.clone());
-                match download(id, size, number, &token, &said) {
+                match download(service, &key, size, &said) {
                     Ok(ipa) => {
                         return set(&|s| {
                             if let Some(p) = &mut s.pending {
@@ -369,146 +320,46 @@ fn follow(shared: Arc<Mutex<Shared>>, start: bool) {
                     }),
                 }
             }
-            Err(Fatal(why)) => return fail(why),
-            Ok(Step::Retry(why)) => {
-                set(&|s| s.progress = format!("Waiting for GitHub ({why})."));
+            Ok((key, State::Queued)) => keyed(
+                &key,
+                format!("Waiting for one of GitHub's Macs ({minutes} min so far)."),
+            ),
+            Ok((key, State::Building { .. })) => keyed(
+                &key,
+                format!("Building: {minutes} min so far, usually 30 to 60. Keep playing."),
+            ),
+            Ok((_, State::Failed { reason })) => {
+                return fail(format!(
+                    "{reason} One of the mods may not fit this game's version: turn it off and \
+                     build again."
+                ));
             }
+            // Known by its key and gone: asked for again, unless it never starts.
+            Ok((_, State::None)) if now().saturating_sub(p.asked) > NEVER_STARTED.as_secs() => {
+                return fail(
+                    "The build was asked for but never started. Try again later.".to_owned(),
+                );
+            }
+            Ok((_, State::None)) => set(&|s| {
+                if let Some(p) = &mut s.pending {
+                    p.key = None;
+                }
+                s.progress = "Asking for the build...".to_owned();
+            }),
+            Err(why) if refused_for_good(&why) => return fail(why),
+            Err(why) => set(&|s| s.progress = format!("{why} Trying again.")),
         }
         std::thread::sleep(POLL);
     }
 }
 
-enum Step {
-    Wait(String),
-    Found {
-        run: u64,
-        number: u64,
-        page: String,
-    },
-    /// The run built: its artifact, the .ipa in a zip.
-    Artifact {
-        id: u64,
-        size: u64,
-    },
-    /// GitHub can't be reached now: asked again at the next look.
-    Retry(String),
-}
-struct Fatal(String);
-
-/// The run the workflow started for `p`: the first after it was asked for, named with its mods.
-fn find_run(p: &Pending, token: &str) -> Result<Step, Fatal> {
-    let path = format!(
-        "/repos/{REPO}/actions/workflows/{WORKFLOW}/runs?event=workflow_dispatch&branch={}&per_page=20",
-        escape(BRANCH)
-    );
-    let runs = match github("GET", &path, token, None) {
-        Ok(runs) => runs,
-        Err(why) => return Ok(Step::Retry(why)),
-    };
-    let name = format!("native mods {} ·", p.mods.join(" "));
-    let found = runs["workflow_runs"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .find(|run| {
-            run["display_title"]
-                .as_str()
-                .is_some_and(|t| t.contains(&name))
-                && run["created_at"]
-                    .as_str()
-                    .and_then(unix_time)
-                    .is_some_and(|at| at + 120 >= p.asked)
-        });
-    match found {
-        Some(run) => Ok(Step::Found {
-            run: run["id"].as_u64().unwrap_or_default(),
-            number: run["run_number"].as_u64().unwrap_or_default(),
-            page: run["html_url"].as_str().unwrap_or_default().to_owned(),
-        }),
-        None if now().saturating_sub(p.asked) > FIND_RUN.as_secs() => Err(Fatal(
-            "GitHub accepted the build but never started it. See the repository's Actions page."
-                .to_owned(),
-        )),
-        None => Ok(Step::Wait("GitHub is starting the build...".to_owned())),
-    }
-}
-
-fn check_run(run: u64, token: &str) -> Result<Step, Fatal> {
-    let state = match github(
-        "GET",
-        &format!("/repos/{REPO}/actions/runs/{run}"),
-        token,
-        None,
-    ) {
-        Ok(state) => state,
-        Err(why) => return Ok(Step::Retry(why)),
-    };
-    let started = state["run_started_at"]
-        .as_str()
-        .or(state["created_at"].as_str())
-        .and_then(unix_time)
-        .unwrap_or_else(now);
-    let minutes = now().saturating_sub(started) / 60;
-    match state["status"].as_str().unwrap_or_default() {
-        "completed" => {}
-        "queued" | "waiting" | "requested" | "pending" => {
-            return Ok(Step::Wait(format!(
-                "Waiting for one of GitHub's Macs ({minutes} min so far)."
-            )));
-        }
-        _ => {
-            return Ok(Step::Wait(format!(
-                "Building on GitHub: {minutes} min so far, usually 30 to 60. Keep playing."
-            )));
-        }
-    }
-    match state["conclusion"].as_str().unwrap_or_default() {
-        "success" => {}
-        "cancelled" => return Err(Fatal("The build was cancelled on GitHub.".to_owned())),
-        _ => {
-            return Err(Fatal(
-                "The app didn't build with these mods: one may not fit this game's version. See the \
-                 build for which, turn it off, and build again."
-                    .to_owned(),
-            ));
-        }
-    }
-    let path = format!("/repos/{REPO}/actions/runs/{run}/artifacts");
-    let artifacts = match github("GET", &path, token, None) {
-        Ok(artifacts) => artifacts,
-        Err(why) => return Ok(Step::Retry(why)),
-    };
-    let found = artifacts["artifacts"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .find(|a| {
-            a["name"]
-                .as_str()
-                .is_some_and(|n| n.ends_with("-native-mods"))
-        });
-    match found {
-        Some(a) if a["expired"].as_bool() == Some(true) => Err(Fatal(
-            "GitHub no longer keeps that build (30 days): build again.".to_owned(),
-        )),
-        Some(a) => Ok(Step::Artifact {
-            id: a["id"].as_u64().unwrap_or_default(),
-            size: a["size_in_bytes"].as_u64().unwrap_or_default(),
-        }),
-        None => Err(Fatal(
-            "The build finished without an .ipa to install.".to_owned(),
-        )),
-    }
-}
-
-/// The run's artifact (`size` bytes, a zip holding the .ipa) downloaded with the token, and its
-/// .ipa taken out into [`builds_dir`] as `Starling-native-r<number>.ipa`. GitHub answers with
-/// a link to its storage, which ureq follows without the token.
+/// The build's artifact (`size` bytes, a zip holding the .ipa) downloaded through the service,
+/// which answers with GitHub's own short-lived link, and its .ipa taken out into [`builds_dir`]
+/// as `HorizonPE-mods-<key>.ipa`.
 fn download(
-    id: u64,
+    service: &str,
+    key: &str,
     size: u64,
-    number: u64,
-    token: &str,
     said: &dyn Fn(String),
 ) -> Result<std::path::PathBuf, String> {
     use std::io::{Read, Write};
@@ -523,11 +374,8 @@ fn download(
         .timeout_read(Duration::from_secs(60))
         .build();
     let response = agent
-        .get(&format!("{API}/repos/{REPO}/actions/artifacts/{id}/zip"))
-        .set("Accept", "application/vnd.github+json")
-        .set("X-GitHub-Api-Version", "2022-11-28")
-        .set("User-Agent", "starling-ios")
-        .set("Authorization", &format!("Bearer {token}"))
+        .get(&format!("{service}/v1/build/{key}/ipa"))
+        .set("User-Agent", "HorizonPE")
         .call()
         .map_err(|e| e.to_string())?;
     let zip_path = dir.join("build.zip");
@@ -546,19 +394,22 @@ fn download(
             shown = done >> 20;
             said(format!(
                 "Built. Downloading it: {shown} of {} MB.",
-                size.div_ceil(1 << 20)
+                size.div_ceil(1 << 20).max(shown)
             ));
         }
     }
     file.sync_all().map_err(|e| e.to_string())?;
     drop(file);
-    let ipa = dir.join(format!("HorizonPE-native-r{number}.ipa"));
+    if done > LARGEST_ARTIFACT {
+        return Err("more than a build".to_owned());
+    }
+    let ipa = dir.join(format!("HorizonPE-mods-{key}.ipa"));
     let archive = std::fs::File::open(&zip_path).map_err(|e| e.to_string())?;
     let mut archive = zip::ZipArchive::new(archive).map_err(|e| e.to_string())?;
     let mut found = None;
     for i in 0..archive.len() {
         let entry = archive.by_index(i).map_err(|e| e.to_string())?;
-        let name = entry.name().map_err(|e| e.to_string())?;
+        let name = entry.name();
         if name.ends_with(".ipa") && !name.contains('/') {
             found = Some(i);
             break;
@@ -574,7 +425,7 @@ fn download(
 }
 
 impl Game<'_> {
-    /// The native mods turned on in the folder that this app doesn't have yet are chosen for the
+    /// The catalog mods turned on in the folder that this app doesn't have yet are chosen for the
     /// next build (a box on their rows), and the page's top says what the app has and offers it.
     pub(super) fn offer_compile(&mut self) {
         for row in &mut self.settings.mods.installed {
@@ -585,61 +436,80 @@ impl Game<'_> {
         self.settings.mods.native_game = self.native_game();
     }
 
-    /// The mods a build is made with: those turned on in the folder, and the ones this app has
-    /// that are still on (a mod built in from elsewhere stays in).
-    fn wanted_mods(&self) -> (BTreeSet<String>, Vec<String>) {
+    /// What a build would be made with: the catalog mods turned on in the folder (`wanted`), and
+    /// with them the ones this app has that are still on (`build`, each `id@version`); and the
+    /// mods in the folder no build takes.
+    fn wanted_mods(&self) -> (BTreeSet<String>, Vec<String>, Vec<String>) {
         let off = &self.settings.mods.disabled;
-        let wanted = folder_mods_on(off);
-        let mut build: BTreeSet<String> = wanted.clone();
-        build.extend(
-            built_mods()
-                .into_iter()
-                .map(|(id, _)| id)
-                .filter(|id| !off.contains(id)),
-        );
-        (wanted, build.into_iter().collect())
+        let (folder, untaken) = folder_mods_on(off);
+        let wanted: BTreeSet<String> = folder.keys().cloned().collect();
+        // The folder's version of a mod is the one asked for: it is the newer.
+        let mut build = built_catalog_mods();
+        build.retain(|id, _| !off.contains(id));
+        build.extend(folder);
+        let build = build
+            .iter()
+            .map(|(id, version)| mod_builds::named(id, version))
+            .collect();
+        (wanted, build, untaken)
+    }
+
+    /// The release a build is made of: the newest of this edition the update check found, else
+    /// this app's own. A build with the mods is how an app that has some is updated.
+    fn build_tag(&self) -> Option<String> {
+        let version = self
+            .newer_release_version()
+            .or_else(|| crate::android::app_version().map(|(version, _)| version))?;
+        Some(mod_builds::tag(
+            horizon_client::ios_releases::EDITION,
+            &version,
+        ))
     }
 
     /// The Mods page's top: what this app was built with, then the build of the mods turned on
-    /// that it lacks, from the token to the install.
+    /// that it lacks, from asking for it to the install.
     fn native_game(&self) -> Option<NativeGame> {
         let built = built_mods();
-        let (wanted, build) = self.wanted_mods();
+        let catalog = built_catalog_mods();
+        let (wanted, build, untaken) = self.wanted_mods();
+        let update = self.newer_release_version();
         let state = shared(&self.native_builds);
         let pending = state.pending.clone();
-        if built.is_empty() && wanted.is_empty() && pending.is_none() {
+        if built.is_empty() && wanted.is_empty() && untaken.is_empty() && pending.is_none() {
             return None;
         }
         let mut game = NativeGame::default();
+        let name = horizon_client::ios_releases::EDITION.name();
         let version = crate::android::app_version().map_or_else(String::new, |(v, _)| v);
         let ids: Vec<String> = built.iter().map(|(id, v)| format!("{id} {v}")).collect();
         game.lines.push((
             if built.is_empty() {
-                format!("This app: Horizon PE {version} without native mods.")
+                format!("This app: {name} {version} without mods compiled in.")
             } else {
-                format!("This app: Horizon PE {version} with {}.", mods_label(&ids))
+                format!("This app: {name} {version} with {}.", mods_label(&ids))
             },
             false,
         ));
-        let have: BTreeSet<String> = built.into_iter().map(|(id, _)| id).collect();
-        let missing = !wanted.is_subset(&have);
         if let Some(p) = &pending {
-            let mods = mods_label(&p.mods);
+            let ids: Vec<String> = p
+                .mods
+                .iter()
+                .map(|m| mod_builds::id_of(m).to_owned())
+                .collect();
+            let mods = mods_label(&ids);
+            let of = p.tag.trim_start_matches('v');
             if let Some(why) = &p.failed {
                 game.lines
                     .push((format!("The build with {mods} failed. {why}"), true));
-                if p.page.is_some() {
-                    game.buttons
-                        .push(("See the build".to_owned(), NativeGameAct::ShowCompile));
-                }
                 game.buttons
                     .push(("Dismiss".to_owned(), NativeGameAct::PlayWithout));
             } else if p.ipa.is_some() {
                 game.lines.push((
                     format!(
-                        "Built with {mods} and downloaded. Install it over this app: your worlds, \
-                         settings and accounts stay. Install opens the share sheet: pick \
-                         SideStore, AltStore, LiveContainer or the app you sideload with."
+                        "{name} {of} with {mods} is built and downloaded. Install it over this \
+                         app: your worlds, settings and accounts stay. Install opens the share \
+                         sheet: pick SideStore, AltStore, LiveContainer or the app you sideload \
+                         with."
                     ),
                     false,
                 ));
@@ -651,80 +521,96 @@ impl Game<'_> {
                     .push(("Dismiss".to_owned(), NativeGameAct::PlayWithout));
             } else {
                 game.lines
-                    .push((format!("Building the app with {mods}."), false));
+                    .push((format!("Building {name} {of} with {mods}."), false));
                 if !state.progress.is_empty() {
                     game.lines.push((state.progress.clone(), false));
-                }
-                if p.page.is_some() {
-                    game.buttons
-                        .push(("See the build".to_owned(), NativeGameAct::ShowCompile));
                 }
                 game.buttons
                     .push(("Stop following".to_owned(), NativeGameAct::PlayWithout));
             }
         }
-        let building = pending
-            .as_ref()
-            .is_some_and(|p| p.failed.is_none() && p.ipa.is_none());
+        let building = pending.as_ref().is_some_and(Pending::under_way);
+        let have: BTreeSet<String> = catalog.keys().cloned().collect();
+        let asked: BTreeSet<&str> = build.iter().map(|m| mod_builds::id_of(m)).collect();
+        // Another version of a mod in the folder than the app has is a mod to build, too.
+        let same = build.iter().all(|m| {
+            let id = mod_builds::id_of(m);
+            catalog
+                .get(id)
+                .is_some_and(|version| mod_builds::named(id, version) == *m)
+        });
+        let missing = !wanted.is_subset(&have) || !same;
         let leftover: Vec<String> = have
             .iter()
-            .filter(|id| !build.contains(*id))
+            .filter(|id| !asked.contains(id.as_str()))
             .cloned()
             .collect();
-        if (missing || !leftover.is_empty()) && !building && build.is_empty() {
+        let ids: Vec<String> = asked.iter().map(|id| (*id).to_owned()).collect();
+        if !untaken.is_empty() {
             game.lines.push((
-                "Every native mod is off, so none of them runs. Installing the normal Horizon PE \
-                 build takes them out of the app."
-                    .to_owned(),
+                format!(
+                    "{} can't be built into the app: {} made in the older format, which changes \
+                     the game's own source. The catalog's version, if it has one, can.",
+                    mods_label(&untaken),
+                    if untaken.len() == 1 {
+                        "it is"
+                    } else {
+                        "they are"
+                    }
+                ),
+                true,
+            ));
+        }
+        let to_do = missing || !leftover.is_empty();
+        if building {
+            // Said above.
+        } else if to_do && build.is_empty() {
+            game.lines.push((
+                format!(
+                    "Every catalog mod is off, so none of them runs. Installing the normal \
+                     {name} release takes them out of the app."
+                ),
                 false,
             ));
-        } else if (missing || !leftover.is_empty()) && !building {
+        } else if build.len() > mod_builds::MOST_MODS {
             game.lines.push((
-                if missing {
-                    format!(
-                        "The native mods turned on aren't all in this app. On iOS they are \
-                         compiled into it: GitHub builds it with {} (about 30 to 60 minutes).",
-                        mods_label(&build)
-                    )
-                } else {
-                    format!(
-                        "{} is off but still in this app: a build with {} takes it out.",
-                        mods_label(&leftover),
-                        mods_label(&build)
-                    )
-                },
-                false,
+                format!(
+                    "A build takes at most {} mods, and {} are turned on: turn some off.",
+                    mod_builds::MOST_MODS,
+                    build.len()
+                ),
+                true,
             ));
-            if token().is_some() {
+        } else if to_do || (update.is_some() && !build.is_empty()) {
+            let what = match (&update, missing) {
+                (Some(new), _) => format!(
+                    "{name} {new} is out. This app has mods compiled in, so it is updated by \
+                     building {new} with them: {}.",
+                    mods_label(&ids)
+                ),
+                (None, true) => format!(
+                    "The mods turned on aren't all in this app. On iOS they are compiled into \
+                     it: a build with {} takes about 30 to 60 minutes, or no time when someone \
+                     built the same mods before. You can keep playing meanwhile.",
+                    mods_label(&ids)
+                ),
+                (None, false) => format!(
+                    "{} is off but still in this app: a build with {} takes it out.",
+                    mods_label(&leftover),
+                    mods_label(&ids)
+                ),
+            };
+            game.lines.push((what, false));
+            if mod_builds::service().is_some() {
                 game.buttons
-                    .push(("Build on GitHub".to_owned(), NativeGameAct::Compile));
-                game.buttons
-                    .push(("Make a token".to_owned(), NativeGameAct::MakeToken));
-                game.buttons
-                    .push(("Paste new token".to_owned(), NativeGameAct::Token));
+                    .push(("Build".to_owned(), NativeGameAct::Compile));
             } else {
                 game.lines.push((
-                    format!(
-                        "Builds run on GitHub, in {REPO}, where this app was built from, and only \
-                         its owner can start them. Not yours? Fork it on GitHub and use the app \
-                         built from your fork (its README says how)."
-                    ),
-                    false,
+                    "This build of the app has no build service to ask. On a computer, the \
+                     repository's mod-build workflow makes it (its README says how)."
+                        .to_owned(),
+                    true,
                 ));
-                game.lines.push((
-                    format!(
-                        "Then a token, once: Make a token opens GitHub's form, filled in. Under \
-                         Repository access choose Only select repositories and pick {}, generate \
-                         it, copy it, and press Paste GitHub token. It stays in this device's \
-                         Keychain.",
-                        REPO.rsplit('/').next().unwrap_or(REPO)
-                    ),
-                    false,
-                ));
-                game.buttons
-                    .push(("Make a token".to_owned(), NativeGameAct::MakeToken));
-                game.buttons
-                    .push(("Paste GitHub token".to_owned(), NativeGameAct::Token));
             }
         }
         if let Some((text, warning)) = &state.message {
@@ -737,7 +623,7 @@ impl Game<'_> {
         self.settings.mods.native_game = self.native_game();
     }
 
-    /// A native mod was turned on or off: the build it needs may be another.
+    /// A catalog mod was turned on or off: the build it needs may be another.
     pub(super) fn native_mod_toggled(&mut self, i: usize) {
         if self
             .settings
@@ -760,20 +646,7 @@ impl Game<'_> {
             .filter(|path| path.is_file());
         let mut message = None;
         match act {
-            NativeGameAct::Compile => self.start_build(),
-            NativeGameAct::ShowCompile => {
-                let page = shared(&self.native_builds)
-                    .pending
-                    .as_ref()
-                    .and_then(|p| p.page.clone())
-                    .unwrap_or_else(|| format!("https://github.com/{REPO}/actions"));
-                horizon_gamecontroller::open_url(&page);
-            }
-            NativeGameAct::MakeToken => {
-                if !horizon_gamecontroller::open_url(TOKEN_FORM) {
-                    message = Some((format!("Open this in Safari: {TOKEN_FORM}"), true));
-                }
-            }
+            NativeGameAct::Compile => message = self.start_build(),
             NativeGameAct::PlayWithout => {
                 let mut state = shared(&self.native_builds);
                 state.pending = None;
@@ -781,31 +654,6 @@ impl Game<'_> {
                 state.changes += 1;
                 save_pending(None);
                 forget_builds();
-            }
-            NativeGameAct::Token => {
-                let pasted = horizon_gamecontroller::clipboard_text().unwrap_or_default();
-                let pasted = pasted.trim();
-                message = Some(if !looks_like_token(pasted) {
-                    (
-                        "The clipboard holds no GitHub token: copy the token GitHub showed \
-                         (github_pat_...), then paste it again."
-                            .to_owned(),
-                        true,
-                    )
-                } else if horizon_gamecontroller::keychain_set(
-                    KEYCHAIN_SERVICE,
-                    KEYCHAIN_ACCOUNT,
-                    pasted.as_bytes(),
-                )
-                .is_ok()
-                {
-                    ("Token saved in the Keychain.".to_owned(), false)
-                } else {
-                    (
-                        "The Keychain didn't take the token: try again.".to_owned(),
-                        true,
-                    )
-                });
             }
             NativeGameAct::Install | NativeGameAct::SaveIpa => {
                 let opened = ipa.as_deref().is_some_and(|path| {
@@ -833,46 +681,49 @@ impl Game<'_> {
         self.refresh_native_game();
     }
 
-    /// Asks GitHub to build the app with the mods turned on, and follows the build.
-    fn start_build(&mut self) {
-        let (_, build) = self.wanted_mods();
-        if build.is_empty() {
-            return;
+    /// Asks the service to build the app with the mods turned on, and follows the build. What
+    /// to tell the player when it can't be asked.
+    fn start_build(&mut self) -> Option<(String, bool)> {
+        let (_, build, _) = self.wanted_mods();
+        if build.is_empty() || build.len() > mod_builds::MOST_MODS {
+            return None;
         }
+        let Some(service) = mod_builds::service() else {
+            return Some((
+                "This build of the app has no build service to ask.".to_owned(),
+                true,
+            ));
+        };
+        let Some(tag) = self.build_tag() else {
+            return Some((
+                "The app can't tell its own version, so it can't ask for a build of it.".to_owned(),
+                true,
+            ));
+        };
+        let device = mod_builds::device(&horizon_client::logging::private_home().join(DEVICE_FILE));
         let shared_state = self.native_builds.shared.clone();
         {
             let mut state = shared(&self.native_builds);
             if state.following {
-                return;
+                return None;
             }
             state.pending = Some(Pending {
+                tag,
                 mods: build,
                 asked: now(),
                 ..Pending::default()
             });
-            state.progress = "Asking GitHub to build it...".to_owned();
+            state.progress = "Asking for the build...".to_owned();
             state.message = None;
             state.following = true;
             state.changes += 1;
             save_pending(state.pending.as_ref());
         }
+        forget_builds();
         let _ = std::thread::Builder::new()
-            .name("native build".into())
-            .spawn(move || follow(shared_state, true));
-    }
-
-    /// A row's own button: a native mod not in this app builds it, as the page's top does.
-    pub(super) fn native_builds_button(&mut self, i: usize) -> bool {
-        let not_built = self
-            .settings
-            .mods
-            .installed
-            .get(i)
-            .is_some_and(|row| row.problem.as_deref() == Some(NOT_BUILT));
-        if not_built {
-            self.native_game_act(NativeGameAct::Compile);
-        }
-        not_built
+            .name("mod build".into())
+            .spawn(move || follow(shared_state, service, device));
+        None
     }
 
     /// The title screen's line about a build, and where it is, on the title's main page: along the
@@ -934,10 +785,16 @@ impl Game<'_> {
             self.native_builds.loaded = true;
             let mut pending = load_pending();
             // The app now running is that build's: done.
-            let have: Vec<String> = built_mods().into_iter().map(|(id, _)| id).collect();
+            let have: Vec<String> = built_catalog_mods()
+                .iter()
+                .map(|(id, version)| mod_builds::named(id, version))
+                .collect();
+            let this = crate::android::app_version().map(|(version, _)| {
+                mod_builds::tag(horizon_client::ios_releases::EDITION, &version)
+            });
             if pending
                 .as_ref()
-                .is_some_and(|p| p.ipa.is_some() && p.mods == have)
+                .is_some_and(|p| p.mods == have && Some(&p.tag) == this.as_ref())
             {
                 pending = None;
                 save_pending(None);
@@ -951,9 +808,8 @@ impl Game<'_> {
             {
                 p.ipa = None;
             }
-            let follow_it = pending
-                .as_ref()
-                .is_some_and(|p| p.failed.is_none() && p.ipa.is_none());
+            let service = mod_builds::service();
+            let follow_it = service.is_some() && pending.as_ref().is_some_and(Pending::under_way);
             // A build that waits to be installed says so again at each start.
             let waiting = pending.as_ref().is_some_and(|p| p.ipa.is_some());
             {
@@ -963,11 +819,13 @@ impl Game<'_> {
                 state.announce = waiting.then(ready_toast);
                 state.changes += 1;
             }
-            if follow_it {
+            if let (true, Some(service)) = (follow_it, service) {
                 let shared_state = self.native_builds.shared.clone();
+                let device =
+                    mod_builds::device(&horizon_client::logging::private_home().join(DEVICE_FILE));
                 let _ = std::thread::Builder::new()
-                    .name("native build".into())
-                    .spawn(move || follow(shared_state, false));
+                    .name("mod build".into())
+                    .spawn(move || follow(shared_state, service, device));
             }
         }
         let announce = shared(&self.native_builds).announce.take();
@@ -990,41 +848,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn github_times_read_as_seconds() {
-        assert_eq!(unix_time("1970-01-01T00:00:00Z"), Some(0));
-        assert_eq!(unix_time("2026-11-12T16:58:38Z"), Some(1_794_502_718));
-        assert_eq!(unix_time("2000-02-29T12:00:00Z"), Some(951_825_600));
-        assert_eq!(unix_time("nonsense"), None);
-    }
-
-    #[test]
-    fn tokens_are_told_from_other_text() {
-        assert!(looks_like_token("github_pat_11ABCDEFG0123456789_abcdefXYZ"));
-        assert!(looks_like_token("ghp_0123456789abcdefABCDEF0123456789abcd"));
-        assert!(!looks_like_token("github_pat_ has a space"));
-        assert!(!looks_like_token("hello"));
-    }
-
-    #[test]
-    fn the_token_form_is_one_link() {
-        assert!(!TOKEN_FORM.contains(char::is_whitespace));
-        assert!(TOKEN_FORM.contains("?name=Horizon+PE&description="));
-        assert!(TOKEN_FORM.ends_with("&expires_in=365&actions=write"));
-    }
-
-    #[test]
-    fn query_values_are_escaped() {
-        assert_eq!(escape("starling-ios"), "starling-ios");
-        assert_eq!(escape("feature/ios mods"), "feature%2Fios%20mods");
-    }
-
-    #[test]
-    fn mod_lists_read_as_words() {
-        assert_eq!(mods_label(&[]), "no native mods");
-        assert_eq!(mods_label(&["a".into()]), "a");
-        assert_eq!(
-            mods_label(&["a".into(), "b".into(), "c".into()]),
-            "a, b and c"
-        );
+    fn only_a_refusal_ends_a_build() {
+        assert!(refused_for_good("This device has started 6 builds today."));
+        assert!(refused_for_good(
+            "This app's version has no builds with mods."
+        ));
+        assert!(!refused_for_good(
+            "The build service can't be reached: timed out"
+        ));
+        assert!(!refused_for_good("The build service answered 502."));
+        assert!(!refused_for_good("GitHub did not start the build (500)."));
     }
 }
