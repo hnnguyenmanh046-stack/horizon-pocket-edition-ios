@@ -26,23 +26,24 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install rustfmt
         run: |
-          rustup toolchain install stable --profile minimal --component rustfmt
-          rustup default stable
+          bash tools/ci/rustup_install.sh --profile minimal --component rustfmt
+      # The game's modules are found by the build (crates/horizon-client/src/game, no `mod` line
+      # cargo fmt follows), so they are formatted by path, as Starling's own CI checks them.
       - name: Formatting
         run: |
           cargo fmt --all
+          find crates/horizon-client/src/game -name '*.rs' -print0 | xargs -0 rustfmt --edition 2024 --config skip_children=true
           git diff --exit-code
 
   desktop:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 240
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust and the ALSA and udev headers the client links against
         run: |
           sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev
-          rustup toolchain install stable --profile minimal --component clippy
-          rustup default stable
+          bash tools/ci/rustup_install.sh --profile minimal --component clippy
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: guard-desktop
@@ -60,6 +61,7 @@ jobs:
       - name: Test the iOS port's host-side code
         run: |
           cargo test -p horizon-ios-prepare
+          cargo test -p horizon-gamecontroller
           cargo test -p horizon-client-render --lib -- auth:: android_controls keypad::
       # Shared worlds: the crate itself (shared-worlds.yml also runs it against an S3 server), the
       # title's screens, the in-game screen, the list, the host's login identity, the save's write
@@ -70,7 +72,7 @@ jobs:
           cargo test -p horizon-shared-worlds
           cargo test -p horizon-friends
           cargo test -p horizon-relay --test tunnel --test udp
-          cargo test -p horizon-client-lib --lib -- title:: shared_screen:: friends_screen:: shared_worlds:: lan::conn:: save::writes::
+          cargo test -p horizon-client-lib --lib -- title:: shared_screen:: friends_screen:: shared_worlds:: lan::conn:: save::write_count::
       # Voice chat: its crate (voice.yml also builds it for the phones), the host's relay, the
       # client's link, the screens and the microphone button.
       - name: Test voice chat
@@ -78,11 +80,11 @@ jobs:
         run: |
           cargo test -p horizon-voice
           cargo test -p horizon-client-lib --lib -- lan::voice:: voice_net:: voice_screen:: game::voice::
-          cargo test -p horizon-client-lib --lib -- ios_releases:: starling_releases::
+          cargo test -p horizon-client-lib --lib -- ios_releases:: starling_releases:: preparer::
 
   android:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 240
     steps:
       - uses: actions/checkout@v4
       - name: Install the NDK Starling's APK pins
@@ -91,8 +93,7 @@ jobs:
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/28.2.13676358" >> "$GITHUB_ENV"
       - name: Install Rust for Android and cargo-ndk
         run: |
-          rustup toolchain install stable --profile minimal --component clippy --target aarch64-linux-android
-          rustup default stable
+          bash tools/ci/rustup_install.sh --profile minimal --component clippy --target aarch64-linux-android
           cargo install cargo-ndk --version 3.5.4 --locked
       - uses: Swatinem/rust-cache@v2
         with:

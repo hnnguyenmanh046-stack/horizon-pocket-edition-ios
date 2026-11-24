@@ -28,11 +28,14 @@ pub enum Stage {
     Accumulate,
 }
 
-/// What the device must support: max blending on 32-bit float targets. The feature bit alone
-/// isn't enough: wgpu's Metal adapter reports `FLOAT32_BLENDABLE`, but Metal can't blend
-/// `Rgba32Float`, and with `TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES` on the device the depth
-/// bounds pipeline is then refused at world load (a panic: seen on an M2 iPad). So the bounds
-/// format itself must say it blends; without it Improved Transparency stays off.
+/// What the device must support: max blending on 32-bit float targets.
+///
+/// `FLOAT32_BLENDABLE` is a Vulkan/WebGPU feature. wgpu's Metal adapter reports
+/// it, but Metal's physical format features refuse blending on `Rgba32Float`.
+/// Our device requests `TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES`, so
+/// `create_render_pipeline` validates blend state against those physical
+/// features and rejects OIT's depth-bounds pipeline at world load. Ask the
+/// format, not just the feature bit.
 pub fn features(adapter: &wgpu::Adapter) -> wgpu::Features {
     features_for(
         adapter.features(),
@@ -40,13 +43,15 @@ pub fn features(adapter: &wgpu::Adapter) -> wgpu::Features {
     )
 }
 
-/// [`features`] from what the adapter says, apart so it is testable without a GPU.
+/// The feature bit alone is not enough: the depth-bounds target must actually
+/// be blendable on this adapter. Kept separate so the decision is testable
+/// without a GPU.
 fn features_for(
-    adapter: wgpu::Features,
-    bounds: wgpu::TextureFormatFeatureFlags,
+    adapter_features: wgpu::Features,
+    bounds_flags: wgpu::TextureFormatFeatureFlags,
 ) -> wgpu::Features {
-    if bounds.contains(wgpu::TextureFormatFeatureFlags::BLENDABLE) {
-        adapter & wgpu::Features::FLOAT32_BLENDABLE
+    if bounds_flags.contains(wgpu::TextureFormatFeatureFlags::BLENDABLE) {
+        adapter_features & wgpu::Features::FLOAT32_BLENDABLE
     } else {
         wgpu::Features::empty()
     }
@@ -211,7 +216,7 @@ impl Oit {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Horizon improved transparency"),
             source: wgpu::ShaderSource::Wgsl(
-                (include_str!("../terrain.wgsl").to_owned()
+                (super::terrain_shader()
                     + include_str!("../oit.wgsl")
                     + include_str!("../oit_world.wgsl"))
                 .into(),
@@ -272,7 +277,14 @@ impl Oit {
                 ..Default::default()
             })
         };
-        let constants = [("SPRITE_ARRAYS", sprites[0]), ("SPRITE_SPLIT", sprites[1])];
+        let constants = [
+            ("SPRITE_ARRAYS", sprites[0]),
+            ("SPRITE_SPLIT", sprites[1]),
+            (
+                "HDR_WRITE_LIGHT",
+                f64::from(u8::from(format == super::LINEAR_FRAME)),
+            ),
+        ];
         let add = wgpu::BlendOperation::Add;
         let depth = |write| {
             Some(wgpu::DepthStencilState {
@@ -483,7 +495,10 @@ impl Oit {
                 fragment: Some(wgpu::FragmentState {
                     module: &cloud_shader,
                     entry_point: Some(fragment),
-                    compilation_options: Default::default(),
+                    compilation_options: wgpu::PipelineCompilationOptions {
+                        constants: &constants[2..],
+                        ..Default::default()
+                    },
                     targets: &stage_targets(stage),
                 }),
                 multiview_mask: None,
@@ -507,7 +522,14 @@ impl Oit {
                 Stage::Accumulate,
             ),
         ];
-        let features = Features::new(device, &layouts, features[0], features[1], features[2]);
+        let features = Features::new(
+            device,
+            &layouts,
+            features[0],
+            features[1],
+            features[2],
+            format,
+        );
         Self {
             uniform,
             layouts,
@@ -698,13 +720,16 @@ impl Oit {
             ),
         ] {
             {
-                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                let pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some(label),
                     timestamp_writes: timing.as_deref_mut().and_then(|t| t.writes(label)),
                     color_attachments: &first,
                     depth_stencil_attachment: read_only(terrain_depth),
                     ..Default::default()
                 });
+                let pixels = super::pixel_count(terrain_depth);
+                let mut pass =
+                    super::pack_timing::counted(timing.as_deref_mut(), pass, pixels, label);
                 pass.set_bind_group(GROUP, group, &[]);
                 draw(&mut pass, stage);
             }
@@ -912,16 +937,30 @@ impl Oit {
 mod tests {
     use super::*;
 
+    /// Metal reports `FLOAT32_BLENDABLE` but its physical `Rgba32Float`
+    /// features are not `BLENDABLE`. Requesting the feature there made OIT
+    /// build an invalid depth-bounds pipeline at world load
+    /// (`crash-2026-11-12_22.06.31-client.txt`).
     #[test]
-    fn improved_transparency_needs_the_bounds_format_to_blend() {
+    fn a_reported_feature_does_not_enable_oit_without_blendable_bounds() {
         let reported = wgpu::Features::FLOAT32_BLENDABLE;
-        let blends = wgpu::TextureFormatFeatureFlags::BLENDABLE;
-        let none = wgpu::TextureFormatFeatureFlags::empty();
-        // Metal: the bit, but not the format.
-        assert_eq!(features_for(reported, none), wgpu::Features::empty());
-        assert_eq!(features_for(reported, blends), reported);
         assert_eq!(
-            features_for(wgpu::Features::empty(), blends),
+            features_for(reported, wgpu::TextureFormatFeatureFlags::empty()),
+            wgpu::Features::empty()
+        );
+        assert_eq!(
+            features_for(reported, wgpu::TextureFormatFeatureFlags::BLENDABLE),
+            wgpu::Features::FLOAT32_BLENDABLE
+        );
+    }
+
+    #[test]
+    fn blendable_bounds_without_the_feature_request_nothing() {
+        assert_eq!(
+            features_for(
+                wgpu::Features::empty(),
+                wgpu::TextureFormatFeatureFlags::BLENDABLE
+            ),
             wgpu::Features::empty()
         );
     }
@@ -945,7 +984,7 @@ mod tests {
     #[test]
     fn the_terrain_shader_validates() {
         validate(
-            &(include_str!("../terrain.wgsl").to_owned()
+            &(crate::gfx::terrain_shader()
                 + include_str!("../oit.wgsl")
                 + include_str!("../oit_world.wgsl")),
             &[
@@ -988,7 +1027,7 @@ mod tests {
         );
         let border = stages("border");
         validate(
-            &(include_str!("../border.wgsl").to_owned()
+            &(super::super::border_shader()
                 + include_str!("../oit.wgsl")
                 + include_str!("../oit_border.wgsl")),
             &border.iter().map(String::as_str).collect::<Vec<_>>(),

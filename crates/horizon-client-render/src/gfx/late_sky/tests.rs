@@ -32,6 +32,23 @@ const PARTS: [Part; 5] = [
     Part::DarkDisc,
 ];
 
+/// A Mali starts with the usual order, where the test 2 measured it faster; Adreno and the rest
+/// keep the late sky.
+#[test]
+fn a_mali_starts_with_the_sky_before_terrain() {
+    for mali in ["Mali-G57 MC2", "Mali-G52", "ARM Mali-G610 MC6"] {
+        assert!(!on_by_default(mali), "{mali}");
+    }
+    for other in [
+        "Adreno (TM) 740",
+        "Adreno (TM) 710",
+        "PowerVR B-Series BXM-8-256",
+        "Samsung Xclipse 920",
+    ] {
+        assert!(on_by_default(other), "{other}");
+    }
+}
+
 #[test]
 fn the_late_sky_draws_the_usual_pixels() {
     let instance = test_gpu::instance();
@@ -50,7 +67,12 @@ fn the_late_sky_draws_the_usual_pixels() {
     let kept = reuse.on(&device);
     let terrain_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("Late sky terrain"),
-        source: wgpu::ShaderSource::Wgsl(terrain_source::terrain_shader(false)),
+        // As the renderer builds it: the HDR prelude (`HDR_WRITE_LIGHT`) in front.
+        source: wgpu::ShaderSource::Wgsl(
+            (include_str!("../../hdr_light.wgsl").to_owned()
+                + &terrain_source::terrain_shader(false))
+                .into(),
+        ),
     });
     let bindings = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: None,
@@ -188,7 +210,7 @@ fn the_late_sky_draws_the_usual_pixels() {
         cache: None,
     };
     let usual_celestial = device.create_render_pipeline(&celestial);
-    let stars = Stars::new(&device, FORMAT);
+    let stars = Stars::new(&device, (FORMAT, false));
     let late = LateSky::new(
         &TerrainModule {
             kept: &kept,
@@ -407,7 +429,7 @@ fn the_late_sky_draws_the_usual_pixels() {
                 mapped_at_creation: false,
             });
             let mut encoder = device.create_command_encoder(&Default::default());
-            stars.prepare(&mut uploads, &mut encoder, view_proj, 1.0);
+            stars.prepare(&mut uploads, &mut encoder, view_proj, 1.0, &globals);
             uploads.finish(&encoder);
             {
                 let view = target.create_view(&Default::default());

@@ -264,3 +264,72 @@ pub fn share(path: &std::path::Path) -> bool {
     }
     true
 }
+
+/// UIKit's alert with one button, over whatever shows. False when it could not open.
+pub fn notice(title: &str, message: &str, button: &str) -> bool {
+    let Some(window) = key_window() else {
+        return false;
+    };
+    let (title, message, button) = (
+        NSString::from_str(title),
+        NSString::from_str(message),
+        NSString::from_str(button),
+    );
+    // SAFETY: main-thread UIKit calls with live objects; the action's handler and the
+    // presentation's completion may be nil.
+    unsafe {
+        let root: Option<Retained<AnyObject>> = msg_send![&*window, rootViewController];
+        let Some(root) = root else {
+            return false;
+        };
+        let shown = topmost(root);
+        // UIAlertControllerStyleAlert.
+        let style: isize = 1;
+        let alert: Option<Retained<AnyObject>> = msg_send![
+            class!(UIAlertController),
+            alertControllerWithTitle: &*title,
+            message: &*message,
+            preferredStyle: style
+        ];
+        let Some(alert) = alert else {
+            return false;
+        };
+        let handler: *const c_void = std::ptr::null();
+        // UIAlertActionStyleDefault.
+        let default: isize = 0;
+        let action: Option<Retained<AnyObject>> = msg_send![
+            class!(UIAlertAction),
+            actionWithTitle: &*button,
+            style: default,
+            handler: handler
+        ];
+        let Some(action) = action else {
+            return false;
+        };
+        let _: () = msg_send![&*alert, addAction: &*action];
+        let completion: *const c_void = std::ptr::null();
+        let _: () = msg_send![
+            &*shown,
+            presentViewController: &*alert,
+            animated: true,
+            completion: completion
+        ];
+    }
+    true
+}
+
+/// Whether anything (a notice, a sheet) shows over the game's own view controller.
+pub fn presenting() -> bool {
+    let Some(window) = key_window() else {
+        return false;
+    };
+    // SAFETY: properties of the live key window and its controller, on the main thread.
+    unsafe {
+        let root: Option<Retained<AnyObject>> = msg_send![&*window, rootViewController];
+        let Some(root) = root else {
+            return false;
+        };
+        let over: Option<Retained<AnyObject>> = msg_send![&*root, presentedViewController];
+        over.is_some()
+    }
+}

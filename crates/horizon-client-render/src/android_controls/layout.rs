@@ -215,8 +215,9 @@ impl JoystickStyle {
         } else {
             2.0
         };
+        // From 0%, as the editor sets them (#258).
         self.stick_opacity = if self.stick_opacity.is_finite() {
-            self.stick_opacity.clamp(0.1, 1.0)
+            self.stick_opacity.clamp(0.0, 1.0)
         } else {
             0.90
         };
@@ -231,7 +232,7 @@ impl JoystickStyle {
             2.0
         };
         self.base_opacity = if self.base_opacity.is_finite() {
-            self.base_opacity.clamp(0.1, 1.0)
+            self.base_opacity.clamp(0.0, 1.0)
         } else {
             0.72
         };
@@ -548,6 +549,9 @@ pub struct Settings {
     pub ui_vibrate: bool,
     #[serde(default = "default_feedback_enabled")]
     pub show_control_hub: bool,
+    /// The controls and the chat keep out of the camera cutout's strip (#166).
+    #[serde(default = "default_true")]
+    pub avoid_cutout: bool,
     #[serde(deserialize_with = "deserialize_visibility")]
     pub button_visibility: [u8; 15],
     pub horizontal_margin: f32,
@@ -711,6 +715,7 @@ impl Default for Settings {
             vibrate: true,
             ui_vibrate: false,
             show_control_hub: true,
+            avoid_cutout: true,
             button_visibility: [0; 15],
             horizontal_margin: 0.0,
             vertical_margin: 0.0,
@@ -1325,6 +1330,57 @@ impl Settings {
         })
     }
 
+    /// Deletes a user-created preset of `style`; the protected Default stays. A deleted preset the
+    /// system had active, or remembered, gives way to Default.
+    pub fn delete_preset(
+        &mut self,
+        game_home: &std::path::Path,
+        style: ControlStyle,
+        id: &str,
+    ) -> std::io::Result<()> {
+        let clean = Self::sanitize_profile_name(id);
+        if clean == "default" {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "The Default preset is protected and cannot be deleted",
+            ));
+        }
+        std::fs::remove_file(Self::system_dir(game_home, style).join(format!("{clean}.json")))?;
+        let remembered = match style {
+            ControlStyle::Mcpe => &mut self.active_mcpe_preset,
+            ControlStyle::GoyControl => &mut self.active_goy_preset,
+        };
+        if Self::sanitize_profile_name(remembered) == clean {
+            *remembered = "default".into();
+        }
+        if self.control_style == style && Self::sanitize_profile_name(&self.preset_id) == clean {
+            self.select_preset(game_home, style, "default");
+            Ok(())
+        } else {
+            self.save_to(&game_home.join("horizon-touch.json"))
+        }
+    }
+
+    /// `name`, or `name 2`, `name 3`... when a preset of `style` already shows that name: saving
+    /// from the same preset twice gives two presets told apart.
+    pub fn unique_preset_name(
+        game_home: &std::path::Path,
+        style: ControlStyle,
+        name: &str,
+    ) -> String {
+        let taken: Vec<String> = Self::list_presets(game_home, style)
+            .into_iter()
+            .map(|p| p.name.to_lowercase())
+            .collect();
+        if !taken.contains(&name.to_lowercase()) {
+            return name.to_owned();
+        }
+        (2..=999)
+            .map(|n| format!("{name} {n}"))
+            .find(|candidate| !taken.contains(&candidate.to_lowercase()))
+            .unwrap_or_else(|| format!("{name} copy"))
+    }
+
     /// Selects and activates a preset within `style`, preserving both systems' remembered selections.
     pub fn select_preset(&mut self, game_home: &std::path::Path, style: ControlStyle, id: &str) {
         let prev_mcpe = self.active_mcpe_preset.clone();
@@ -1354,6 +1410,7 @@ impl Settings {
         loaded.invert_y = prev_invert_y;
         loaded.virtual_mouse_enabled = prev_vm_enabled;
         loaded.keyboard_button = self.keyboard_button;
+        loaded.avoid_cutout = self.avoid_cutout;
         loaded.virtual_mouse_sensitivity = prev_vm_sens;
         loaded.virtual_mouse_pointer_scale = prev_pointer_scale;
         loaded.vibrate = prev_vibrate;
@@ -1405,6 +1462,7 @@ impl Settings {
         loaded.invert_y = prev_invert_y;
         loaded.virtual_mouse_enabled = prev_vm_enabled;
         loaded.keyboard_button = self.keyboard_button;
+        loaded.avoid_cutout = self.avoid_cutout;
         loaded.virtual_mouse_sensitivity = prev_vm_sens;
         loaded.virtual_mouse_pointer_scale = prev_pointer_scale;
         loaded.vibrate = prev_vibrate;
@@ -1461,7 +1519,8 @@ impl Settings {
         }
         let style = self.control_style;
         let new_id = Self::allocate_unique_preset_id(game_home, style, trimmed_name);
-        let display_name: String = trimmed_name.chars().take(48).collect();
+        let shown: String = trimmed_name.chars().take(44).collect();
+        let display_name = Self::unique_preset_name(game_home, style, &shown);
         let display_desc: String = if description.trim().is_empty() {
             format!("Custom {} preset", style.label())
         } else {
@@ -1873,6 +1932,7 @@ impl Settings {
             let prev_invert_y = self.invert_y;
             let prev_vm_enabled = self.virtual_mouse_enabled;
             let keyboard_button = self.keyboard_button;
+            let avoid_cutout = self.avoid_cutout;
             let prev_vm_sens = self.virtual_mouse_sensitivity;
             let prev_pointer_scale = self.virtual_mouse_pointer_scale;
             let prev_vibrate = self.vibrate;
@@ -1886,6 +1946,7 @@ impl Settings {
             self.invert_y = prev_invert_y;
             self.virtual_mouse_enabled = prev_vm_enabled;
             self.keyboard_button = keyboard_button;
+            self.avoid_cutout = avoid_cutout;
             self.virtual_mouse_sensitivity = prev_vm_sens;
             self.virtual_mouse_pointer_scale = prev_pointer_scale;
             self.vibrate = prev_vibrate;
@@ -1924,6 +1985,7 @@ impl Settings {
         loaded.invert_y = active.invert_y;
         loaded.virtual_mouse_enabled = active.virtual_mouse_enabled;
         loaded.keyboard_button = active.keyboard_button;
+        loaded.avoid_cutout = active.avoid_cutout;
         loaded.virtual_mouse_sensitivity = active.virtual_mouse_sensitivity;
         loaded.virtual_mouse_pointer_scale = active.virtual_mouse_pointer_scale;
         loaded.vibrate = active.vibrate;
@@ -2010,6 +2072,34 @@ impl Settings {
 }
 pub fn contains([x, y, w, h]: [f32; 4], p: [f32; 2]) -> bool {
     (x..=x + w).contains(&p[0]) && (y..=y + h).contains(&p[1])
+}
+
+/// A `width` x `height` surface's safe insets (pixels: left, top, right, bottom) as fractions
+/// of its width and height, a quarter of a side at most.
+pub fn safe_area(width: u32, height: u32, insets: [u32; 4]) -> [f32; 4] {
+    let [left, top, right, bottom] = insets.map(|v| v as f32);
+    let (w, h) = (width.max(1) as f32, height.max(1) as f32);
+    [left / w, top / h, right / w, bottom / h].map(|v| v.clamp(0.0, 0.25))
+}
+
+/// How far `rect` (x, y, w, h as fractions of the surface) moves to keep out of the `safe`
+/// insets (fractions: left, top, right, bottom). Only a side with an inset pushes, and only
+/// what reaches into it moves; a rect too big for the room between two insets is centred in it.
+pub fn safe_shift([x, y, w, h]: [f32; 4], safe: [f32; 4]) -> [f32; 2] {
+    let axis = |start: f32, size: f32, low: f32, high: f32| {
+        let mut moved = start;
+        if high > 0.0 {
+            moved = moved.min(1.0 - high - size);
+        }
+        if low > 0.0 {
+            moved = moved.max(low);
+        }
+        if low > 0.0 && high > 0.0 && moved + size > 1.0 - high {
+            moved = (low + 1.0 - high - size) / 2.0;
+        }
+        moved - start
+    };
+    [axis(x, w, safe[0], safe[2]), axis(y, h, safe[1], safe[3])]
 }
 
 #[cfg(test)]
@@ -2300,6 +2390,54 @@ mod tests {
     }
 
     #[test]
+    fn a_deleted_preset_is_gone_and_the_active_one_gives_way_to_default() {
+        let tmp =
+            std::env::temp_dir().join(format!("horizon-preset-delete-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let mut settings = Settings::default_for_style(ControlStyle::Mcpe);
+        // Saving from Default twice: two presets, told apart by name.
+        let first = settings
+            .save_new_preset(&tmp, "Default Custom", "")
+            .unwrap();
+        let second = settings
+            .save_new_preset(&tmp, "Default Custom", "")
+            .unwrap();
+        assert_eq!(first.name, "Default Custom");
+        assert_eq!(second.name, "Default Custom 2");
+        assert_eq!(settings.preset_id, second.id);
+
+        // The one not in use goes, and the active one stays.
+        settings
+            .delete_preset(&tmp, ControlStyle::Mcpe, &first.id)
+            .unwrap();
+        assert!(
+            !tmp.join(format!("controls/mcpe/{}.json", first.id))
+                .exists()
+        );
+        assert_eq!(settings.preset_id, second.id);
+
+        // The active one goes too: Default takes its place, here and remembered.
+        settings
+            .delete_preset(&tmp, ControlStyle::Mcpe, &second.id)
+            .unwrap();
+        assert_eq!(settings.preset_id, "default");
+        assert_eq!(settings.active_mcpe_preset, "default");
+        let names: Vec<_> = Settings::list_presets(&tmp, ControlStyle::Mcpe)
+            .into_iter()
+            .map(|p| p.id)
+            .collect();
+        assert_eq!(names, ["default"]);
+
+        // Default is protected.
+        assert!(
+            settings
+                .delete_preset(&tmp, ControlStyle::Mcpe, "default")
+                .is_err()
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
     fn virtual_mouse_and_floating_menu_settings_persist_across_system_switches() {
         let tmp = std::env::temp_dir().join(format!("horizon-vm-persist-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
@@ -2311,12 +2449,14 @@ mod tests {
             vibrate: false,
             auto_jump: true,
             toggle_sprint: true,
+            avoid_cutout: false,
             ..Default::default()
         };
         settings.sanitize();
         assert!(settings.sprint_toggle);
 
         settings.switch_control_system(&tmp, ControlStyle::GoyControl);
+        assert!(!settings.avoid_cutout);
         assert!(!settings.virtual_mouse_enabled);
         assert_eq!(settings.virtual_mouse_sensitivity, 1.75);
         assert_eq!(settings.virtual_mouse_pointer_scale, 1.6);
@@ -2407,5 +2547,45 @@ mod tests {
         let again = Settings::load_from(&path);
         assert!(!again.sprint_toggle && !again.toggle_sprint && !again.inventory_controls);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn safe_insets_are_fractions_of_their_side() {
+        assert_eq!(
+            safe_area(2400, 1080, [120, 54, 0, 0]),
+            [0.05, 0.05, 0.0, 0.0]
+        );
+        // A strip wider than a quarter of the screen counts as a quarter.
+        assert_eq!(
+            safe_area(2400, 1080, [0, 0, 1200, 0]),
+            [0.0, 0.0, 0.25, 0.0]
+        );
+        assert_eq!(safe_area(0, 0, [0; 4]), [0.0; 4]);
+    }
+
+    #[test]
+    fn only_what_reaches_into_an_inset_moves_out_of_it() {
+        let left = [0.05, 0.0, 0.0, 0.0];
+        // Into the left strip: out to its edge, no further, and not up or down.
+        let shift = safe_shift([0.02, 0.5, 0.1, 0.2], left);
+        assert!((shift[0] - 0.03).abs() < 1e-6, "{shift:?}");
+        assert_eq!(shift[1], 0.0);
+        // Clear of the strip: it stays.
+        assert_eq!(safe_shift([0.3, 0.5, 0.1, 0.2], left), [0.0, 0.0]);
+        // Past the right edge, which has no inset: nothing pushes it back.
+        assert_eq!(safe_shift([0.95, 0.5, 0.1, 0.2], left), [0.0, 0.0]);
+        // The right and bottom strips push the other way: its right edge from 0.98 to 0.95,
+        // its bottom from 1.0 to 0.95.
+        let shift = safe_shift([0.92, 0.9, 0.06, 0.1], [0.0, 0.0, 0.05, 0.05]);
+        assert!((shift[0] + 0.03).abs() < 1e-6, "{shift:?}");
+        assert!((shift[1] + 0.05).abs() < 1e-6, "{shift:?}");
+    }
+
+    #[test]
+    fn a_rect_wider_than_the_room_between_two_insets_is_centred_in_it() {
+        // The room is 0.05 to 0.9, its middle 0.475.
+        let shift = safe_shift([0.3, 0.0, 0.95, 0.1], [0.05, 0.0, 0.1, 0.0]);
+        let middle = 0.3 + shift[0] + 0.95 / 2.0;
+        assert!((middle - 0.475).abs() < 1e-6, "{middle}");
     }
 }

@@ -10,8 +10,35 @@ use winit::window::WindowId;
 const GAME_STACK: usize = 16 << 20;
 const GAME_STACK_LEFT: usize = 8 << 20;
 
-/// The mod API level this game serves, kept in the program as the desktop's main.rs keeps it.
-static MOD_API_LEVEL: [u8; 27] = horizon_mods::api_level::MARK;
+/// The mark that says this program is the game, kept in it as the desktop's main.rs keeps it
+/// (horizon-official).
+static GAME_IDENTITY: [u8; horizon_mod_package::game_identity::MARK.len()] =
+    horizon_mod_package::game_identity::MARK;
+
+/// What the desktop's mod host installs before the engine starts (horizon-mod-host's
+/// `main_with`), in its order, as Starling's Android library does (android_lib.rs
+/// `install_platform`): the engine's seal, the mods' instrumentation, the engine platform socket
+/// (packages, registration data, parts, profiler) and the render points. Without these the game
+/// stops at its first mod guard ("engine platform socket is not installed").
+fn install_platform() -> Result<(), String> {
+    horizon_engine_slots::install_seal(mod_points::__private::seal)
+        .map_err(|error| format!("engine seal: {error}"))?;
+    mod_platform::__private::initialize()
+        .map_err(|error| format!("mod instrumentation is unavailable: {error}"))?;
+    horizon_engine_slots::install_platform(horizon_engine_slots::Platform {
+        install_packages: mod_platform::__private::install_packages,
+        install_registration_data: mod_platform::__private::install_registration_data,
+        install_parts: mod_platform::__private::install_parts,
+        profiler_is_enabled: mod_platform::__private::profiler::is_enabled,
+        profiler_start: mod_platform::__private::profiler::start,
+        profiler_stop: mod_platform::__private::profiler::stop,
+        profiler_summary: mod_platform::__private::profiler::summary,
+        profiler_firefox_profile: mod_platform::__private::profiler::firefox_profile,
+    })
+    .map_err(|error| error.to_string())?;
+    mod_render::render::install();
+    Ok(())
+}
 
 fn on_game_stack<R>(callback: impl FnOnce() -> R) -> R {
     stacker::maybe_grow(GAME_STACK_LEFT, GAME_STACK, callback)
@@ -86,7 +113,7 @@ fn ram_limit_mb() -> String {
 }
 
 pub fn main() {
-    std::hint::black_box(&MOD_API_LEVEL);
+    std::hint::black_box(&GAME_IDENTITY);
     let (home, private) = folders();
     let _ = std::fs::create_dir_all(&home);
     let _ = std::fs::create_dir_all(&private);
@@ -126,6 +153,12 @@ pub fn main() {
     ) {
         eprintln!("Horizon: could not initialize diagnostics: {error}");
     }
+    // The engine's seal, the mods' instrumentation and platform socket, before anything
+    // registers: once a process.
+    if let Err(error) = install_platform() {
+        eprintln!("Horizon: {error}");
+        return;
+    }
     let event_loop = match EventLoop::new() {
         Ok(event_loop) => event_loop,
         Err(e) => {
@@ -138,6 +171,7 @@ pub fn main() {
         private,
         game: None,
         started: false,
+        closing: false,
     };
     if let Err(e) = event_loop.run_app(&mut app) {
         eprintln!("Horizon: the event loop failed: {e}");
@@ -152,6 +186,9 @@ struct App {
     game: Option<Box<dyn ApplicationHandler>>,
     /// The first start happened (at the first `resumed`).
     started: bool,
+    /// The game ended to start again, which takes a new process: the app closes once the
+    /// notice that says so is answered.
+    closing: bool,
 }
 
 impl App {
@@ -159,7 +196,7 @@ impl App {
     fn start_game(&mut self, event_loop: &ActiveEventLoop) {
         let (home, private) = (self.home.clone(), self.private.clone());
         let game = on_game_stack(|| {
-            horizon_client::entry::start(Default::default(), || {
+            horizon_client::entry::set_after_log(move || {
                 log::info!(
                     "Horizon: iOS, game folder {}, private files {}, arguments {:?}",
                     home.display(),
@@ -178,6 +215,15 @@ impl App {
                 // The saved Microsoft sign-in renews while the game loads.
                 horizon_client::accounts::resume();
             });
+            // The code mods are the ones this app was built with (iOS runs no code it did not
+            // ship with), loaded as the desktop's mod host loads the ones beside its program.
+            let (entries, slots, native) = crate::built_mods::built();
+            horizon_client::entry::start(
+                native,
+                move |native, launch| horizon_mod_host::load_code(entries, &slots, native, launch),
+                horizon_mod_host::code_runtime(),
+                horizon_client::entry::prepare(),
+            );
             horizon_client::ios::started_game()
         });
         let Some(mut game) = game else {
@@ -208,13 +254,36 @@ impl App {
                 drop(game);
             });
         }
-        // The game ended as it meant to: the recording stops and the session is marked clean.
+        // The game ended as it meant to: its hooks hear it, the recording stops and the
+        // session is marked clean.
+        horizon_client::ios::game_ended();
         horizon_client::performance::stop();
         if !restart {
             horizon_client::diagnostics::finish();
         }
         if restart {
-            self.start_game(event_loop);
+            // The engine registers its mods and seals its tables once a process, so starting
+            // again takes a new one, as Android's restart of its activity is. iOS starts no app
+            // for another: the player opens it again, and the game goes on from what it left
+            // for its next start (the world it was opening, game/starling/world_content.rs).
+            log::info!("Horizon: the game ended to start again: asking to reopen the app");
+            log::logger().flush();
+            let name = horizon_client::APP_NAME;
+            let shown = horizon_gamecontroller::notice(
+                &horizon_client::lang::get_or("pocket.restart.title", "Open %s again")
+                    .replace("%s", name),
+                &horizon_client::lang::get_or(
+                    "pocket.restart.message",
+                    "Your game is saved. %s has to start again to go on, and iOS lets no app \
+                     open itself: tap OK, then open %s again.",
+                )
+                .replace("%s", name),
+                &horizon_client::lang::get_or("gui.ok", "OK"),
+            );
+            if !shown {
+                std::process::exit(0);
+            }
+            self.closing = true;
         } else {
             // Quit Game: the game is over and saved, and iOS has no way for an app to ask to
             // be closed, so the process ends here. Without this the app stayed open on an
@@ -274,6 +343,16 @@ impl ApplicationHandler for App {
         // which the game installs from.
         for file in winit::platform::ios::take_opened_files() {
             horizon_client::ios::put_in_inbox(&file.path);
+        }
+        if self.closing {
+            // The notice was answered: the app closes, and its next start goes on.
+            if !horizon_gamecontroller::presenting() {
+                std::process::exit(0);
+            }
+            event_loop.set_control_flow(winit::event_loop::ControlFlow::WaitUntil(
+                std::time::Instant::now() + std::time::Duration::from_millis(100),
+            ));
+            return;
         }
         self.with_game(event_loop, |game| game.about_to_wait(event_loop));
     }

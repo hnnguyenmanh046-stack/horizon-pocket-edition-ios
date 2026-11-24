@@ -55,6 +55,9 @@ enum Control {
     UdpReady { ok: bool },
 }
 
+/// Streams of the direct race a session authenticates, at most.
+const MAX_RACE_STREAMS: usize = 16;
+
 fn send(w: &mut SecureWriter<TcpStream>, c: &Control) -> io::Result<()> {
     w.write_control(&serde_json::to_vec(c).map_err(io::Error::other)?)
 }
@@ -98,7 +101,8 @@ fn tcp_race() -> bool {
 /// A direct stream protected as the session's own: the host keeps it only once the guest
 /// marked it.
 fn authenticate(raw: TcpStream, key: &Key, role: Role) -> Option<Secure> {
-    raw.set_read_timeout(Some(Duration::from_secs(6))).ok()?;
+    // One deadline for all of its handshake: a read timeout alone restarts with every byte.
+    let _deadline = crate::deadline(&raw, Duration::from_secs(6)).ok()?;
     let mut s = secure(raw, key, role).ok()?;
     if role == Role::Host && !matches!(recv(&mut s.0), Ok(Control::Use)) {
         return None;
@@ -169,7 +173,10 @@ pub(crate) fn settle(
         let _ = std::thread::Builder::new()
             .name("horizon-friends-auth".into())
             .spawn(move || {
-                for raw in raw_rx {
+                // A few streams a session, each with one deadline for all of its handshake: whoever
+                // knows a live session id could otherwise open stream after stream to the direct
+                // port and drip bytes, a thread for each.
+                for raw in raw_rx.into_iter().take(MAX_RACE_STREAMS) {
                     let (key, atx) = (key.clone(), atx.clone());
                     let _ = std::thread::Builder::new()
                         .name("horizon-friends-auth".into())
