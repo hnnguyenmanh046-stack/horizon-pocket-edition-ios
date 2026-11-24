@@ -11,6 +11,7 @@ on:
       - .github/workflows/native-mods-check.yml
       - packaging/android/native_mod_adapt.py
       - packaging/ios/native_stage.sh
+      - packaging/ios/native_stage_cfg.py
       - tools/ios_native_mods.py
   workflow_dispatch:
     inputs:

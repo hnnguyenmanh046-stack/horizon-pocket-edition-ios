@@ -71,6 +71,7 @@ jobs:
           node --test packaging/mod-builds-worker/worker.test.mjs
           python3 tools/mod_build_key.py --self-test
           python3 tools/ios_native_sdk.py --self-test
+          python3 packaging/ios/native_stage_cfg.py --self-test
 
   desktop:
     runs-on: ubuntu-latest
