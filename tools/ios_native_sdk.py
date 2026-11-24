@@ -260,12 +260,16 @@ pub fn built() -> (
                 .map_err(|error| error.to_string())
         }});
     match packages {{
-        Ok(packages) => (
-            vec![
-{entries}            ],
-            Vec::new(),
-            packages,
-        ),
+        Ok(packages) => {{
+            // In stderr.log, before the game's own log opens (the Simulator's check reads it).
+            eprintln!("Horizon: mods built into this app: {names}");
+            (
+                vec![
+{entries}                ],
+                Vec::new(),
+                packages,
+            )
+        }}
         Err(error) => {{
             eprintln!("Horizon: the mods this app was built with are left out: {{error}}");
             Default::default()
