@@ -126,8 +126,11 @@ fn guest(args: &[String]) {
     .unwrap_or_else(|e| panic!("guest: couldn't join: {e}"));
     let took = started.elapsed().as_millis();
     let (direct, tunneled, udp) = (joined.direct, joined.tunneled, joined.udp);
-    let (port, done) = joined.serve_loopback().unwrap();
-    let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    let loopback = joined.serve_loopback().unwrap();
+    let done = loopback.thread;
+    let mut s = TcpStream::connect(("127.0.0.1", loopback.port)).unwrap();
+    // The session is given only to the connection that sends its token first (0.9.0).
+    s.write_all(&loopback.token).unwrap();
     s.set_read_timeout(Some(Duration::from_secs(60))).unwrap();
     let payload: Vec<u8> = (0..1usize << 20).map(|i| (i * 7 + i / 251) as u8).collect();
     let mut w = s.try_clone().unwrap();

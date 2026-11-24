@@ -2767,6 +2767,7 @@ mod tests {
             far: Arc::default(),
             recorder: Arc::new(Mutex::new(None)),
             serial: next_serial(),
+            voice: Arc::default(),
         };
         let (thread_writer, thread_configuring, thread_recorder) = (
             session.writer.clone(),
@@ -3069,6 +3070,7 @@ mod tests {
             far: Arc::default(),
             recorder: Arc::new(Mutex::new(None)),
             serial: next_serial(),
+            voice: Arc::default(),
         };
         let recorder = TestRecorder::default();
         session.start_recording(recorder.clone(), |_| {});
