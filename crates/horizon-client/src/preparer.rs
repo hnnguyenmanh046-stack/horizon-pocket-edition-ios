@@ -7,6 +7,7 @@
 mod install;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
+use std::time::Instant;
 
 /// Where the preparing is.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -14,7 +15,7 @@ pub enum Stage {
     #[default]
     Idle,
     /// Fetching the Java runtime: bytes so far, and in all.
-    Java(u64, u64),
+    Java(u64, u64, Instant),
     /// Unpacking it.
     Unpacking,
     /// horizon-prepare at work: its last line.
@@ -69,8 +70,9 @@ pub fn start(resources: PathBuf) {
         *shared() = Stage::Failed("On 32-bit x86, import prepared resources as a .starling file. An Android x86 Java 25 runtime is not available.".into());
         return;
     };
+    let started = Instant::now();
     #[cfg(not(target_os = "ios"))]
-    let first = Stage::Java(0, runtime.size);
+    let first = Stage::Java(0, runtime.size, started);
     {
         let mut stage = shared();
         if matches!(
@@ -84,12 +86,11 @@ pub fn start(resources: PathBuf) {
     let spawned = std::thread::Builder::new()
         .name("preparer".into())
         .spawn(move || {
-            let started = std::time::Instant::now();
             // iOS runs no Java: the app carries what horizon-prepare made in CI.
             let result = if cfg!(target_os = "ios") {
                 assemble(&resources)
             } else {
-                run(&resources)
+                run(&resources, started)
             };
             *shared() = match result {
                 Ok(()) => {
@@ -110,7 +111,7 @@ pub fn start(resources: PathBuf) {
     }
 }
 
-fn run(resources: &Path) -> Result<(), String> {
+fn run(resources: &Path, started: Instant) -> Result<(), String> {
     let runtime = starling_account::java::android_runtime(std::env::consts::ARCH)
         .ok_or("No Java runtime is available for this architecture.")?;
     let server_jar = crate::accounts::server_jar()
@@ -130,7 +131,7 @@ fn run(resources: &Path) -> Result<(), String> {
             *shared() = if done >= total {
                 Stage::Unpacking
             } else {
-                Stage::Java(done, total)
+                Stage::Java(done, total, started)
             };
         },
         &|| false,
@@ -260,6 +261,25 @@ pub fn complete_sounds(resources: &Path) {
     }
 }
 
+/// Once the game has loaded the prepared `resources`, the official files they were prepared
+/// from go (accounts::drop_files), on a thread of their own: thousands of files to delete. Not
+/// while the resources lack their sounds, which `complete_sounds` still takes from them.
+pub fn drop_downloads(resources: &Path) {
+    let root = crate::accounts::files_root();
+    if !crate::platform::registered()
+        || !resources.join("assets/minecraft/sounds.json").is_file()
+        || !(root.exists() || root.with_file_name("minecraft.dropped").exists())
+    {
+        return;
+    }
+    if let Err(e) = std::thread::Builder::new()
+        .name("drop-downloads".into())
+        .spawn(crate::accounts::drop_files)
+    {
+        log::warn!("Horizon: the fetched game files stay: {e}");
+    }
+}
+
 /// horizon-prepare copies into the kit's prepared folder: a link to `resources` stands in for
 /// it while it does.
 #[cfg(unix)]
@@ -335,6 +355,12 @@ pub fn put_shader_pack(game_folder: &Path) {
             dir.display()
         ),
     }
+}
+
+/// The std the wasm mods linked against, which earlier versions put in the app's own files: gone
+/// with the wasm mods (Starling runs none since 2026-11-20).
+pub fn remove_wasm_std() {
+    let _ = std::fs::remove_file(crate::logging::private_home().join("horizon-wasm-std.wasm"));
 }
 
 /// CRC-32 (IEEE), to tell one skin from the next.
