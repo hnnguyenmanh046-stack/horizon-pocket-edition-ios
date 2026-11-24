@@ -113,7 +113,9 @@ jobs:
           if ! bash packaging/ios/native_stage.sh . "$RUNNER_TEMP/native/bundles" > "$RUNNER_TEMP/out/$MOD.stage.log" 2>&1; then
             result apply; tail -60 "$RUNNER_TEMP/out/$MOD.stage.log"; exit 1
           fi
-          if ! cargo check --keep-going -p horizon-client --lib --message-format short > "$RUNNER_TEMP/out/$MOD.check.log" 2>&1; then
+          # The compiler's whole messages: the staged source is not the mod's own files, and the
+          # code each error shows is how it is found in them.
+          if ! cargo check --keep-going -p horizon-client --lib > "$RUNNER_TEMP/out/$MOD.check.log" 2>&1; then
             result compile; grep -E '^(error|warning: unused)' -A0 "$RUNNER_TEMP/out/$MOD.check.log" | head -60; exit 1
           fi
           result ok
@@ -151,7 +153,13 @@ jobs:
               log = {"fetch": "fetch", "apply": "stage", "compile": "check"}.get(result, "check")
               text = (out / f"{mod}.{log}.log").read_text(errors="replace") if (out / f"{mod}.{log}.log").exists() else ""
               if result == "compile":
-                  lines = [l for l in text.splitlines() if re.match(r"^\S+:\d+:\d+: error", l)][:8]
+                  every = text.splitlines()
+                  lines = []
+                  for i, l in enumerate(every):
+                      if re.match(r"^error(\[E\d+\])?: ", l) and "could not compile" not in l:
+                          where = next((w.strip() for w in every[i + 1 : i + 4] if w.strip().startswith("-->")), "")
+                          lines.append(f"{l} {where}".strip())
+                  lines = lines[:12]
               else:
                   lines = text.strip().splitlines()[-8:]
               rows.append(f"### {mod}: {result}\n```\n" + "\n".join(lines) + "\n```")

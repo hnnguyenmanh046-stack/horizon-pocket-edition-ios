@@ -1,6 +1,6 @@
 //! Starling on iOS (this port): the app's program. UIKit makes one event loop a process, here,
 //! and what runs in it is the game Starling's own start makes (`horizon_client::entry::start`,
-//! handed over by `horizon_client::ios::take_game`), every callback on a 16 MB stack: iOS gives
+//! handed over by `horizon_client::ios::take_game`), every callback on a 64 MiB stack: iOS gives
 //! its main thread 1 MB, and the game goes deeper than that (the desktop links its main thread
 //! with 8 MB; Horizon Android's iOS port crashed at Play without it).
 //!

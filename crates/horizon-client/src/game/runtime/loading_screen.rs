@@ -152,7 +152,8 @@ pub(super) enum WorldRenderer {
 pub(super) const TITLE_FRAME_WAIT: Duration = Duration::from_secs(1);
 impl Loading {
     fn show_startup_console(&self) -> bool {
-        cfg!(target_os = "android")
+        // Horizon PE: a phone's start, on iOS as on Android.
+        cfg!(any(target_os = "android", target_os = "ios"))
             && self.failure.is_none()
             && !self.setup.starting
             && self.menu.pending.is_none()

@@ -13,7 +13,7 @@ on:
     inputs:
       official:
         description: The official Horizon commit to test against
-        default: c98a51a664c8ce8ec166ecedd85bb47b3687b336
+        default: 441f49d57e344bd56b90fd4af5c4e443ff3937c9
 permissions:
   contents: read
 concurrency:
@@ -27,7 +27,7 @@ env:
   CARGO_INCREMENTAL: "0"
   CARGO_PROFILE_FAST_DEBUG: "0"
   CARGO_PROFILE_RELEASE_DEBUG: "0"
-  OFFICIAL: ${{ inputs.official || 'c98a51a664c8ce8ec166ecedd85bb47b3687b336' }}
+  OFFICIAL: ${{ inputs.official || '441f49d57e344bd56b90fd4af5c4e443ff3937c9' }}
 
 jobs:
   compat:
