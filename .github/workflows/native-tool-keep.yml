@@ -19,10 +19,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: native-mods-check
-          save-if: false
       - uses: actions/cache/restore@v4
         with:
           path: ~/.cache/starling-native
@@ -31,21 +27,14 @@ jobs:
         run: |
           set -uo pipefail
           mkdir -p keep
-          ls -la ~/.cache/starling-native 2>/dev/null || echo "no tool in the cache"
-          find ~/.cache/starling-native -maxdepth 3 -type f 2>/dev/null | head -50
+          find ~/.cache/starling-native -maxdepth 3 -type f 2>/dev/null | head -50 || true
           if [ -d ~/.cache/starling-native ]; then
             tar -C ~/.cache -czf keep/starling-native-linux-x64.tar.gz starling-native
             for tool in ~/.cache/starling-native/mixins-*/bin/horizon-mixins; do
-              [ -x "$tool" ] && "$tool" --version || true
+              "$tool" --version || true
               sha256sum "$tool" || true
             done
           fi
-          ls ~/.cargo/git/db ~/.cargo/git/checkouts 2>/dev/null || echo "cargo holds no git sources"
-          found=$(find ~/.cargo/git -maxdepth 2 -iname '*mixins*' 2>/dev/null | tr '\n' ' ')
-          if [ -n "$found" ]; then
-            tar -C ~/.cargo -czf keep/horizon-mixins-cargo-git.tar.gz $(for f in $found; do echo "${f#$HOME/.cargo/}"; done)
-          fi
-          find ~/.cargo/registry -maxdepth 3 -iname '*mixins*' 2>/dev/null | head
           ls -la keep
       - uses: actions/upload-artifact@v4
         with:
