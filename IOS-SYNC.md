@@ -22,7 +22,9 @@ developed on `starling-ios` until it moved to `main`.
   between the branches. Then the README's links (the same file on every branch) name the new releases.
 
 - **Base:** starling-client/starling `starling` @ `ff303502a4` (tag `v0.9.0`, Horizon as of its `c98a51a664`,
-  2026-11-08; the last Starling release under the MIT licence). Remote: `starling`. Horizon PE 1.0.0 was built on
+  2026-11-08; the last Starling release under the MIT licence), plus the one fix Starling made on
+  that line after the release (`sync-horizon-7` `1cc7b9f9b7`, MIT: 0.9.0 drew terrain without the shader
+  pack on a phone's Auto profile, so no shadows and no reflections). Remote: `starling`. Horizon PE 1.0.0 was built on
   `ac874422ed` (tag `v0.8.0`); 1.1.0 is the move to 0.9.0, made on `sync/0.9.0` (and `sync/0.9.0-shared-worlds`,
   `sync/0.9.0-shared-worlds-mods`) before it was merged. Starling took Horizon Android's control system, account
   profiles with Ely.by, skins, catalog and Diagnostics itself in 0.8.0, so this port carries none of its own: the
