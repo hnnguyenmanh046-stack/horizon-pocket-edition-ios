@@ -55,7 +55,7 @@ Metal: no Java, no emulation.
 | [Which one should I get?](#which-one-should-i-get) | [Shader packs](#shader-packs) | [For developers](#for-developers) |
 | [Features](#features) | [Shared worlds and voice chat](#shared-worlds-and-voice-chat) | [Credits](#credits) |
 | [Install](#install) | [The built-in mods](#the-built-in-mods) | [License](#license) |
-| | [Native mods](#native-mods) | |
+| | [Catalog mods](#catalog-mods) | |
 
 ## Download
 
@@ -119,7 +119,7 @@ Horizon PE, and is there again when you return.
 - Iris and OptiFine **shader packs**, translated to Metal on the phone. Starling Visuals is included.
 - Resource packs and skins.
 - A built-in **catalog** of mods, shader packs and resource packs.
-- **Native mods** built into the app for you by GitHub: [Native mods](#native-mods).
+- **Catalog mods** built into the app for you, from inside the game: [Catalog mods](#catalog-mods).
 
 **In the Shared Worlds editions**
 
@@ -155,13 +155,13 @@ sideloading app: [SideStore](https://sidestore.io), [AltStore](https://altstore.
 **Updating:** the game tells you. When a newer release of **your edition** is out, the title screen
 shows a card: **Update** downloads it and opens the share sheet, where you pick your sideloading app
 (or Save to Files). It installs over the app; worlds, settings, accounts and mods stay. **Tomorrow**
-asks again in a day. An app built in your own fork (for native mods) is told how to update the fork
-instead.
+asks again in a day. An app with catalog mods built in is updated from the Mods page instead, which
+builds the newer version with your mods ([Catalog mods](#catalog-mods)).
 
 **Switching edition:** install the other edition's `.ipa` over the app. Nothing is lost.
 
-**Want native mods?** They need the app built in your own fork instead of a release:
-[Native mods](#native-mods), step 1.
+**Want more mods?** Install them from the catalog and tap **Build** on the Mods page:
+[Catalog mods](#catalog-mods).
 
 **Your files** are in the Files app under **On My iPhone > Horizon PE**: `saves` (worlds),
 `resourcepacks`, `shaderpacks`, `mods`, `screenshots` and `logs`. Open a world, pack, skin or mod
@@ -336,67 +336,44 @@ page says the number, to copy to another phone); Armor Status has a **Size** set
 Hints show under the virtual mouse's pointer as well as for a tapped item, and a tapped item's
 tooltip is right beside it. [Every default and change](docs/shared-worlds-mods.md)
 
-## Native mods
+## Catalog mods
 
 *The Shared Worlds + Mods edition already has [fifteen](#the-built-in-mods): this is for adding
-your own, to any edition.*
+more, to any edition.*
 
-Native mods change the game's code, and iOS only runs code an app shipped with. So a native mod is
-**built into the app**: GitHub compiles a new `.ipa` with the mods you pick, you install it over your
-app, and your worlds stay. Builds run in the GitHub repository the app came from, and only its owner
-can start them, so you need **your own fork** and the app built from it.
+A mod with code of its own has to be **built into the app**, because iOS only runs code an app
+shipped with. From 1.1.0 the game does that for you: no GitHub account, no fork, no token.
 
-**1. Your own copy (once)**
+1. **Options > Mods > Catalog**: install the mods you want (the ones marked "native mod" are the
+   ones that need a build).
+2. On the Mods page, tap **Build**, and keep playing.
+3. If someone built the same mods before, it is ready at once. Otherwise it takes 30 to 60
+   minutes, and the title screen says **Mods ready: install** when it is done. Tap it, then
+   **Install...**, and pick your sideloading app in the share sheet. It installs over your app:
+   worlds, settings and accounts stay.
 
-1. On [GitHub](https://github.com) (signed in), open this repository and tap **Fork**. For a
-   Shared Worlds edition, untick **Copy the `main` branch only**. Then **Create fork**. Keep it
-   public: then GitHub's build machines are free.
-2. In your fork, open **Actions** and enable workflows (GitHub asks once).
-3. **Actions > ios > Run workflow**. Under **Use workflow from**, leave `main` for Horizon PE, or pick
-   `shared-worlds` or `shared-worlds-mods` for those editions (for the last, also put its fifteen
-   mods in **Native mods to build in**: [the list](docs/shared-worlds-mods.md#building-it-yourself)).
-   Tick **Make and keep the unsigned .ipa**, run it.
-   In about an hour the run has a `horizon-pe-ios-<number>` artifact: install that `.ipa`
-   ([Install](#install)). The app remembers the branch it was built from, and builds its mods there.
-
-**2. A token (once a year)**
-
-1. In the game, **Options > Mods > Make a token**. GitHub's token form opens, filled in (name, one
-   year, **Actions: Read and write**).
-2. Under **Repository access** pick **Only select repositories** and choose your fork.
-3. **Generate token**, copy it (GitHub shows it once), and in the game tap **Paste GitHub token**.
-   It stays in your phone's Keychain and only goes to GitHub.
-
-**3. Build**
-
-1. **Options > Mods > Catalog**: install the native mods you want.
-2. On the Mods page, tap **Build on GitHub**, and keep playing.
-3. In 30 to 60 minutes the title screen says **Mods ready: install**. Tap it, then **Install...**,
-   and pick your sideloading app in the share sheet.
-
-To **remove** a native mod, remove it and build again, or just turn it off in **Options > Mods**.
-To **update**, tap **Sync fork > Update branch** on your fork's GitHub page (on the branch your app
-was built from), then build again.
+To **remove** a mod, turn it off in **Options > Mods** (it stops at once), or build again without
+it to take it out of the app. To **update** an app that has mods, tap **Build** again when the
+Mods page says a newer version is out: it builds the newer version with your mods.
 
 <details>
-<summary><b>If a build fails</b></summary>
+<summary><b>Good to know</b></summary>
 
-- **"GitHub refused (403)" or "(404)":** the token isn't for the repository this app was built from.
-  Make it for your fork with **Actions: Read and write**, and use the app built from your fork.
-- **"Mods build failed":** open the run in your fork's **Actions** tab to see why. Usually a mod made
-  for another game version; build again without it.
-- **Token expired** (after a year): **Make a token**, then **Paste new token**.
-- **Nothing starts:** workflows aren't enabled in your fork (step 1.2), or the fork doesn't have the
-  branch your app was built from (step 1.1).
-- **Without the game:** **Actions > ios > Run workflow** with mod ids in **Native mods to build in**
-  (for example `wrench fps_overlay`).
+- **Which mods:** the catalog on your phone lists the mods this version of the game can build. A
+  mod that changes the game's own source can't be built from the catalog, and some mods are made
+  for a newer Horizon than this port is on.
+- **Limits:** six new builds a day for one device. A build that already exists doesn't count.
+- **Privacy:** the build service is sent the game's version, the mods you picked and a random
+  number your app made up. It keeps no account and no record of who asked for what.
+- **"The build failed":** one of the mods did not compile for this version. Turn it off and build
+  again.
+- **Builds are kept seven days** on GitHub; after that, asking again builds it again.
+- **Your own fork** can run its own build service in ten minutes, free:
+  [packaging/mod-builds-worker](packaging/mod-builds-worker/README.md).
 
 </details>
 
-Every mod is checked against the registry's size and SHA-256 before it is built, and every build is
-started once in the iOS Simulator before you get it. Builds are kept in your fork's Actions for 30
-days. Not every mod in the catalog builds for this port yet: a mod made for another version of the
-game can fail, and the build says which. More detail: [docs/ios.md](docs/ios.md#native-mods).
+More detail: [docs/ios.md](docs/ios.md#catalog-mods).
 
 ## Help
 
@@ -422,7 +399,9 @@ No Mac needed: GitHub builds the app.
 | --- | --- |
 | [`ios.yml`](.github/workflows/ios.yml) | Compiles the game for iOS, lints it, prepares the game files, bundles the app (checking it carries none of Mojang's files) and starts it in the iOS Simulator. Dispatched with **Make and keep the unsigned .ipa**, it keeps the app |
 | [`ios-guard.yml`](.github/workflows/ios-guard.yml) | Formatting, and Starling's desktop and Android builds still compile |
-| [`native-mods-check.yml`](.github/workflows/native-mods-check.yml) | Builds every native mod of the catalog against this source, one job each |
+| [`mod-build.yml`](.github/workflows/mod-build.yml) | Builds a release with catalog mods compiled in, for the game's Build button (through [the mod builds service](packaging/mod-builds-worker/README.md)) |
+| [`catalog-mods-check.yml`](.github/workflows/catalog-mods-check.yml) | Compiles every catalog mod a build can take against this source, and writes the list the game's catalog offers from |
+| [`native-mods-check.yml`](.github/workflows/native-mods-check.yml) | Builds every older-format native mod (the Mods edition's fifteen among them) against this source, one job each |
 | `shared-worlds.yml`, `shared-worlds-e2e.yml`, `voice.yml` | On the `shared-worlds` branches: the shared worlds and voice crates' tests, and two games sharing one world end to end |
 
 On a Mac with Xcode: `rustup target add aarch64-apple-ios`, `python3 tools/ios_prepare.py` (needs Java

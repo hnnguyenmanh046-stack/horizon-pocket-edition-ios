@@ -24,76 +24,78 @@ What differs from Android, because iOS does not allow it or does it another way:
   mods, is told how to update there instead. There is no separate recovery window before the
   game starts.
 
-## Native mods
+## Catalog mods
 
-A native mod changes the game's own code, and iOS runs no code its app did not ship with, so on
-iOS a native mod is compiled into the app. GitHub does the compiling; everything else happens in
-the game.
+A mod with code of its own changes what the game does, and iOS runs no code its app did not ship
+with. So on iOS such a mod is compiled into the app: a build of the app with the mods you picked,
+which you install over the one you have. Your worlds, settings and accounts stay.
 
-**First, the app from your own fork.** Builds run on GitHub, in the repository the app was built
-from, and only that repository's owner can start them: the app from someone else's repository
-can't build mods for you. Sign in to GitHub, open this repository and tap **Fork**; in your fork's
-**Actions** tab, allow workflows to run (GitHub asks once); then **Actions > ios > Run workflow**
-with **Make and keep the unsigned .ipa** ticked, and install that app (the README's Install). It
-costs nothing: GitHub's macOS machines are free for public repositories.
+From 1.1.0 the game asks for that build itself. You need no GitHub account, no fork and no token.
 
-**Once: a GitHub token.** On the Mods page, **Make a token** opens GitHub's token form, filled in:
-its name, one year, and **Actions: Read and write** (the same form: [this link](https://github.com/settings/personal-access-tokens/new?name=Horizon+PE&description=Builds+native+mods+from+the+game&expires_in=365&actions=write)).
-Under **Repository access** choose **Only select repositories** and pick your fork, then **Generate
-token** and copy it; GitHub shows it once. The game keeps it in the phone's Keychain and sends it
-only to GitHub, to start builds and follow them. It lasts a year: then make another the same way
-and press **Paste new token**.
+**In the game:**
 
-**Then, in the game:**
-
-1. Options > Mods > **Catalog**: native mods are listed with the content mods, marked
-   "(native mod)". Install the ones you want, as on Android.
-2. Back on the Mods page, its top says which native mods this app has, and that the ones turned
-   on aren't all in it. The first time, copy your token and press **Paste GitHub token**; then
-   press **Build on GitHub**. If GitHub refuses, the page says why: most often the token was made
-   for another repository than the one the app was built from.
-3. Keep playing. The game follows the build (about 30 to 60 minutes), then downloads it with the
-   same token. When it is ready (or if it failed) a toast says so wherever you are, and the title
-   screen shows a line under the account button until you install or dismiss it; tapping it
-   opens the Mods page. If the app was closed when the build finished, it catches up the next
-   time it starts. **See the build** opens it on GitHub. (GitHub can also tell you on your phone:
-   github.com > Settings > Notifications > Actions, untick "Only notify for failed workflows", and
-   the GitHub app notifies when your build finishes.)
+1. Options > Mods > **Catalog**: the mods with code are listed with the content mods, marked
+   "(native mod)". Install the ones you want. The catalog lists only the ones this version of the
+   game is known to build (see "Which mods" below).
+2. Back on the Mods page, its top says which mods this app has, and that the ones turned on aren't
+   all in it. Press **Build**.
+3. Keep playing. If someone already built the same mods for the same version of the game, the
+   build is ready at once. If not, GitHub builds it (about 30 to 60 minutes) and the game follows
+   it. When it is ready, or if it failed, a toast says so wherever you are, and the title screen
+   shows a line under the account button until you install or dismiss it; tapping it opens the
+   Mods page. If the app was closed when the build finished, it catches up the next time it starts.
 4. Press **Install...**: the share sheet opens with the .ipa; pick **SideStore**, **AltStore**,
    **LiveContainer** or the app you sideload with (**Save to Files** keeps a copy instead). It
-   installs over Horizon PE: the same app, so worlds, settings and accounts stay. Options > Mods
-   lists the mods that are in it; each turns off there like any other, without building again.
-   The downloaded .ipa is deleted once the new app runs, or when you press Dismiss.
+   installs over Horizon PE: the same app. Options > Mods lists the mods that are in it; each
+   turns off there like any other, without building again. The downloaded .ipa is deleted once
+   the new app runs, or when you press Dismiss.
 
-A build has every native mod turned on in the folder, and keeps the mods this app already has that
-are still on. A mod turned off stops at once; the Mods page then offers a build without it, which
-takes it out of the app. With every native mod off, the normal Horizon PE build has none.
+A build has every catalog mod turned on in the folder, and keeps the mods this app already has
+that are still on. A mod turned off stops at once; the Mods page then offers a build without it,
+which takes it out of the app. With every catalog mod off, the normal release has none.
 
-**Without the game:** open your fork's **Actions** tab, pick **ios**, then **Run workflow**,
-and type the mods' ids in **Native mods to build in** (`wrench fps_overlay coords_hud`). An id is a
-folder of `native-mods/` here (Starling's own, reviewed), or a native mod of Horizon's registry
-for Minecraft 26.3: its file's name without the version (`fps_overlay` for
-`fps_overlay-2.0.0.hnmod`). `python3 tools/ios_native_mods.py list INDEX` lists them all, with the
-registry's index.json (https://horizon-rust.github.io/horizon-mods/index.json) as INDEX. The .ipa
-is the run's artifact, `horizon-pe-ios-<number>-native-mods`, kept 30 days. Builds are never
-published as releases, but anyone signed in to GitHub can download a public repository's run
-artifacts: they hold the game and the mods picked, nothing else.
+**Updating an app that has mods.** A release has no catalog mods, so it does not install over an
+app that has some without taking them out. When a newer version is out, the Mods page says so and
+**Build** makes the newer version with your mods.
 
-**What the build does:** it checks each mod first (an unknown id stops it within a minute),
-downloads it from the registry's own GitHub releases and checks its size and SHA-256, applies it
-to Starling's source as Starling's own Android mod builds do (horizon-mixins,
-`packaging/ios/native_stage.sh`), compiles the app and starts it once in the iOS Simulator with
-the mods in.
+**Who builds it.** The game asks the mod builds service (a small program the app's maker runs on
+Cloudflare, `packaging/mod-builds-worker`), which starts this repository's `mod-build` workflow on
+GitHub and hands the finished .ipa back. A build is named by the game's version and its mods, so
+the same request from anyone is the same build, made once. The service is sent the version, the
+mods and a random number your app made up once (it counts how many builds a device started today,
+six at most); it keeps no account, no address and no list of who asked for what. GitHub keeps each
+build for seven days; after that, asking again builds it again. Builds are never published as
+releases, but anyone signed in to GitHub can download a public repository's build files: they hold
+the game and the mods picked, nothing else.
 
-**What can go wrong:** registry mods are written for Horizon, and Starling is a different branch
-of the same game. Most apply as they are (the build adapts the ones made before Horizon split its
-client into crates), but one that hooks or calls something Starling changed fails the build: the
-Mods page says it failed, and See the build shows the mod's file in the log. Turn that mod off and
-build again. A `.hnmod` you imported yourself that is in neither the registry nor `native-mods/`
-can't be fetched by GitHub: the build says which.
+**Which mods.** A build takes the catalog's native mods that use only the game's mod API. A mod
+that changes the game's own source (Horizon's older "mixin" format, and the newer mods with
+`[native.mixin]`, `[native.bridge]` or `[native.module]` in their manifest) is not built from the
+catalog, nor is one with a build script or a dependency that is not a public Rust crate. Of the
+rest, the `catalog-mods-check` workflow compiles each against this version's mod API, and the
+catalog on the phone lists only the ones that compile (`packaging/ios/catalog-buildable.json`):
+the catalog's mods are written for Horizon's newest version, and this port is on Starling 0.9.0's.
+The Shared Worlds + Mods edition's fifteen built-in mods are in the older format and are part of
+that edition's source (`native-mods/`): every build of it has them.
 
-Native mods are not sandboxed: their code runs with the app's full access. Only the registry's
-reviewed mods and this repository's `native-mods/` can be built in.
+**What the build does.** It checks the request first (`tools/mod_build_key.py`: every mod is a
+catalog mod's `id@version`), downloads each mod's package from the catalog's own GitHub releases
+and checks its size and SHA-256, makes it a crate of the app's program
+(`tools/ios_native_sdk.py`), compiles the app with it and puts the mod's package beside the
+program, where the engine reads it. The build has no secret and may only read the repository.
+
+**What can go wrong.** "The build failed at: Build the game" means a mod did not compile after
+all (a new version of it since the list was made): turn it off and build again. "This device has
+started 6 builds today": tomorrow there are more. "This build of the app has no build service to
+ask": the app was built without one (a fork that did not set it up, below).
+
+**Without the service** (a fork, or by hand): on GitHub, **Actions > mod-build > Run workflow**,
+choose the release's tag under **Use workflow from**, and type the mods as
+`id@version,id@version`. The .ipa is the run's artifact `mod-build-<key>`. A fork that wants the
+in-game Build runs its own service: `packaging/mod-builds-worker/README.md` (ten minutes, free).
+
+Catalog mods are not sandboxed: their code runs with the app's full access. Only the catalog's
+reviewed mods can be built in.
 
 ## Installed packs and mods
 

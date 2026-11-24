@@ -1416,11 +1416,20 @@ impl Game<'_> {
             .name("catalog search".into())
             .spawn(move || {
                 // The native mods Compile v2 can't play on this build are left off the shelf.
+                #[cfg(target_os = "android")]
                 if shelf == Shelf::Mods {
                     starling_catalog::hide_native_mods(
                         horizon_client::starling_store::catalog_hidden()
                             .iter()
                             .cloned(),
+                    );
+                }
+                // iOS: only the native mods this engine is known to build into the app are on
+                // the shelf (horizon_client::mod_builds).
+                #[cfg(target_os = "ios")]
+                if shelf == Shelf::Mods {
+                    starling_catalog::only_native_mods(
+                        horizon_client::mod_builds::buildable().iter().cloned(),
                     );
                 }
                 let found =

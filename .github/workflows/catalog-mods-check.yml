@@ -1,0 +1,109 @@
+name: catalog-mods-check
+# Which of the catalog's native mods this engine builds into the app. Each mod a build can take (one
+# that uses only the mod API: tools/ios_native_sdk.py `survey`) is compiled against this source's
+# mod API, alone, for the desktop: what its code asks of the API is the same on a phone. The result
+# is packaging/ios/catalog-buildable.json (the `catalog-buildable` artifact, to commit): the game's
+# catalog offers only the mods in it, so nobody is offered a mod whose build would fail. The
+# summary names every mod left out, with why.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/catalog-mods-check.yml
+permissions:
+  contents: read
+concurrency:
+  group: catalog-mods-check-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  HORIZON_TELEMETRY_URL: "off"
+  CARGO_TERM_COLOR: never
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install Rust
+        run: bash tools/ci/rustup_install.sh --profile minimal
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: catalog-mods
+          cache-on-failure: true
+      - name: Unpack the catalog's native mods
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 https://horizon-rust.github.io/horizon-mods/index.json -o "$RUNNER_TEMP/index.json"
+          python3 tools/ios_native_sdk.py survey "$RUNNER_TEMP/index.json" "$RUNNER_TEMP/survey.json"
+      # The API the mods are compiled against, once, so each mod's own errors are only its own.
+      - name: Build the mod API
+        run: cargo check -p horizon-mod-api
+      - name: Compile each mod alone
+        run: |
+          set -uo pipefail
+          mkdir -p "$RUNNER_TEMP/logs"
+          python3 - "$RUNNER_TEMP/survey.json" "$RUNNER_TEMP/logs" <<'PY'
+          import json, pathlib, subprocess, sys
+          survey, logs = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+          rows = json.loads(survey.read_text(encoding="utf-8"))
+          for mod, row in sorted(rows.items()):
+              package = row.get("package")
+              if not package:
+                  continue
+              run = subprocess.run(["cargo", "check", "-p", package, "--message-format", "short"],
+                                   capture_output=True, text=True)
+              (logs / f"{mod}.log").write_text(run.stdout + run.stderr, encoding="utf-8")
+              if run.returncode == 0:
+                  row["built"] = True
+              else:
+                  errors = [l for l in run.stderr.splitlines() if ": error" in l or l.startswith("error")]
+                  row["failed"] = errors[:3] or ["it did not compile"]
+              print(f"{mod} {row['version']}: {'ok' if row.get('built') else 'FAILED'}", flush=True)
+          survey.write_text(json.dumps(rows, indent=1) + "\n", encoding="utf-8")
+          PY
+      - name: Write the list and the report
+        run: |
+          set -euo pipefail
+          python3 - "$RUNNER_TEMP/survey.json" packaging/ios/catalog-buildable.json <<'PY'
+          import datetime, json, os, pathlib, sys
+          rows = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+          path = pathlib.Path(sys.argv[2])
+          before = json.loads(path.read_text(encoding="utf-8"))
+          built = {mod: row["version"] for mod, row in sorted(rows.items()) if row.get("built")}
+          path.write_text(json.dumps({
+              "engine": before["engine"],
+              "checked": datetime.date.today().isoformat(),
+              "mods": built,
+          }, indent=1) + "\n", encoding="utf-8")
+          failed = {m: r for m, r in rows.items() if "failed" in r}
+          refused = {m: r for m, r in rows.items() if "refused" in r}
+          lines = [f"## Catalog mods this engine builds: {len(built)} of {len(rows)}", "",
+                   f"{len(failed)} do not compile against this engine's mod API; {len(refused)} are not mods a build takes.",
+                   "", "### Do not compile", "", "| Mod | Version | First error |", "|---|---|---|"]
+          for mod, row in sorted(failed.items()):
+              first = row["failed"][0].replace("|", "\\|")[:200]
+              lines.append(f"| {mod} | {row['version']} | `{first}` |")
+          lines += ["", "### Not taken", "", "| Mod | Version | Why |", "|---|---|---|"]
+          for mod, row in sorted(refused.items()):
+              lines.append(f"| {mod} | {row['version']} | {row['refused'].replace('|', ' ')[:200]} |")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as out:
+              out.write("\n".join(lines) + "\n")
+          print(f"{len(built)} built, {len(failed)} failed, {len(refused)} not taken")
+          PY
+          cp "$RUNNER_TEMP/survey.json" "$RUNNER_TEMP/logs/survey.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: catalog-buildable
+          path: packaging/ios/catalog-buildable.json
+          retention-days: 30
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: catalog-mods-logs
+          path: ${{ runner.temp }}/logs/
+          retention-days: 14
