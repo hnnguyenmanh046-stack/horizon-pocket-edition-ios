@@ -43,13 +43,23 @@ class Refused(Exception):
     pass
 
 
+def older_format(version):
+    """Whether a registry version's file is a mixin bundle (.hnmod). The registry's "native-mod"
+    kind is the newer package (.hmod) too, which tools/ios_native_sdk.py builds in instead."""
+    return str(version.get("file", {}).get("url", "")).endswith(".hnmod")
+
+
 def native(index):
-    """The registry's native mods with a version for this game, by id."""
+    """The registry's native mods in the older format with a version for this game, by id."""
     out = {}
     for project in index.get("projects", []):
         if project.get("kind") != "native-mod":
             continue
-        versions = [v for v in project.get("versions", []) if v.get("game") == GAME and not v.get("revoked")]
+        versions = [
+            v
+            for v in project.get("versions", [])
+            if v.get("game") == GAME and not v.get("revoked") and older_format(v)
+        ]
         if versions:
             out[project["id"]] = (project, versions[0])
     return out
@@ -146,7 +156,10 @@ def fetch(index, out, ids):
                 report["fetched"].append({"id": mod, "version": version_of(dest), "from": "native-mods/"})
                 continue
             if mod not in registry:
-                raise Refused(f"not in native-mods/, and no native mod of the registry for {GAME}")
+                raise Refused(
+                    f"not in native-mods/, and no older-format native mod of the registry for {GAME}"
+                    " (a catalog mod goes in ios.yml's catalog_mods instead)"
+                )
             project, version = registry[mod]
             file = version["file"]
             data = download(file["url"], int(file["size"]), file["sha256"])
