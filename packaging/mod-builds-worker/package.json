@@ -1,0 +1,10 @@
+{
+  "name": "horizon-pe-mod-builds",
+  "private": true,
+  "type": "module",
+  "description": "Horizon PE's mod builds: starts and finds the app's builds with catalog mods (a Cloudflare Worker)",
+  "scripts": {
+    "test": "node --test worker.test.mjs",
+    "deploy": "wrangler deploy"
+  }
+}
