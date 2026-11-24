@@ -674,14 +674,14 @@ pub fn set_world_player(world: &Path, uuid: u128) -> Result<(), String> {
         lan::playerdata,
         save::{put, read_dat, uuid_from_tag, uuid_tag, write_dat},
     };
-    use horizon_world::nbt::Tag;
+    use horizon_core::nbt::Tag;
     let path = world.join("level.dat");
     let mut root = read_dat(&path).ok_or("the world's level.dat doesn't read")?;
     let Some(data) = root.get_mut("Data") else {
         return Err("the world's level.dat holds no world".into());
     };
     let legacy = match data {
-        Tag::Compound(map) => map.remove(&horizon_world::nbt::JavaString::from("Player")),
+        Tag::Compound(map) => map.remove(&horizon_core::nbt::JavaString::from("Player")),
         _ => None,
     };
     if let Some(player) = legacy {

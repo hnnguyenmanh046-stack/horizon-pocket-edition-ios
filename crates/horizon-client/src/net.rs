@@ -349,6 +349,7 @@ impl Session {
             far: Arc::new(crate::lod_net::Inbox::default()),
             recorder: Arc::new(Mutex::new(None)),
             serial: next_serial(),
+            voice: Arc::default(),
         }
     }
     fn start(
