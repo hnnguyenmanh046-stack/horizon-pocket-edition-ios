@@ -611,7 +611,14 @@ fn draw_confirm(ui: &mut Ui<'_>, title: &str, body: &str, drawn: &mut Vec<([f32;
         .min(h - 16.0);
     let panel = [(w - width) / 2.0, (h - height) / 2.0, width, height];
     ui.rounded(panel[0], panel[1], panel[2], panel[3], 14.0, color::bg());
-    ui.rounded(panel[0], panel[1], panel[2], panel[3], 14.0, color::raised());
+    ui.rounded(
+        panel[0],
+        panel[1],
+        panel[2],
+        panel[3],
+        14.0,
+        color::raised(),
+    );
     let head = fitted(
         ui,
         Face::Semibold,
