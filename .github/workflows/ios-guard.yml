@@ -34,6 +34,27 @@ jobs:
           cargo fmt --all
           find crates/horizon-client/src/game -name '*.rs' -print0 | xargs -0 rustfmt --edition 2024 --config skip_children=true
           git diff --exit-code
+      # The lockfile is committed as cargo resolves it for this workspace (Starling's, with this
+      # port's crates): the native mods' staging reads it --locked (packaging/ios/native_stage.sh),
+      # and a release is built from the versions that were tested.
+      - name: The lockfile is the one cargo resolves
+        id: lock
+        if: ${{ !cancelled() }}
+        run: |
+          git checkout -- .
+          cargo metadata --format-version 1 > /dev/null
+          if ! git diff --quiet -- Cargo.lock; then
+            mkdir -p lock && cp Cargo.lock lock/
+            git diff --stat -- Cargo.lock
+            echo '::error::Cargo.lock is not what cargo resolves: commit the artifact cargo-lock'
+            exit 1
+          fi
+      - uses: actions/upload-artifact@v4
+        if: ${{ failure() && steps.lock.outcome == 'failure' }}
+        with:
+          name: cargo-lock
+          path: lock/Cargo.lock
+          retention-days: 7
 
   # The mod builds service (packaging/mod-builds-worker): its Worker against a GitHub in memory,
   # and the workflow's side of a build's key, which must be the Worker's.
