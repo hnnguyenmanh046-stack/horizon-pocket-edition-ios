@@ -161,7 +161,7 @@ impl Game<'_> {
         self.android_custom_token_edge(name, down);
         #[cfg(not(any(target_os = "android", target_os = "ios")))]
         if let Some(code) = horizon_client::keybinds::key_code(name) {
-            self.native_key_event(code, down, false);
+            self.native_panel_key_event(code, down, false);
         }
     }
 }
