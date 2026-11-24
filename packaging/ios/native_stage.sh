@@ -35,6 +35,9 @@ if [ ! -x "$tools/bin/horizon-mixins" ]; then
 fi
 
 commit=$(git -C "$source" rev-parse HEAD)
+# horizon-mod-host's build script names the game build by `git rev-parse HEAD` unless this says
+# it (as native_build.sh): the same for the build that follows, which ios.yml exports too.
+export HORIZON_GAME_BUILD_ID=$commit
 work=$(cd "$(mktemp -d)" && pwd -P)
 trap 'rm -rf "$work"' EXIT
 
@@ -67,6 +70,19 @@ lines.remove(attr)
 lib.write_text("\n".join(lines), encoding="utf-8")
 EOF
 
+# As native_build.sh, in its order. Horizon declares the game's modules in files its build script
+# writes (`include!` of OUT_DIR), which horizon-mixins cannot follow: they are written out as plain
+# module lines in this copy first (horizon-materialize, crates/horizon-mod-api-gen), before the
+# mods are adapted: native_mod_adapt.py finds where things went in the module tree it leaves.
+cargo fetch --locked --manifest-path "$work/source/Cargo.toml" > /dev/null
+CARGO_TARGET_DIR=$cache/materialize-target cargo run --quiet --locked --offline \
+  --manifest-path "$work/source/Cargo.toml" -p horizon-mod-api-gen --bin horizon-materialize \
+  -- "$work/source"
+# What horizon-mixins refuses in the fork's source, made readable in this copy: modules named
+# through a parent folder move next to their module, and the prebuilt game's `#[replaceable]`
+# markers go (Starling's native_mixins_source.py).
+python3 "$source/packaging/android/native_mixins_source.py" "$work/source"
+
 # The bundles, each pinned to the commit built here when it pins one (Starling's commits are not
 # Horizon's; a mod that calls what Starling changed fails in the compiler, which names it).
 mkdir "$work/mods"
@@ -90,13 +106,21 @@ EOF
 python3 "$source/packaging/android/native_mod_adapt.py" "$work/source" "$work/mods"
 
 echo "native_stage: $commit with $(ls "$work/mods" | tr '\n' ' ')"
-cargo fetch --locked --manifest-path "$work/source/Cargo.toml" > /dev/null
 "$tools/bin/horizon-mixins" apply --workspace "$work/source" --mods "$work/mods" --out "$work/stage"
 
 # horizon-android builds android_lib.rs again: the workspace is whole for Cargo.
 git -C "$source" show "HEAD:crates/horizon-android/Cargo.toml" > "$work/stage/crates/horizon-android/Cargo.toml"
 rm -f "$work/stage/crates/horizon-android/plan-stub.rs"
+# horizon-mixins' own note of what it hooked is no part of the source (native_build.sh leaves it
+# out of its build folder too).
+rm -f "$work/stage/native-hooks.json"
 rm -rf "$work/stage/target" "$work/stage/.git"
 
+# The stage over the tree. What the stage no longer has goes from the tree too: Starling's
+# native_mixins_source.py moves modules next to their parents, and a module left at its old place
+# as well would be found twice (native_build.sh copies with rsync --delete).
+git -C "$source" ls-files -z | while IFS= read -r -d '' file; do
+  [ -e "$work/stage/$file" ] || rm -f "$source/$file"
+done
 cp -R "$work/stage/." "$source/"
 echo "native_stage: the mods are in $source"
