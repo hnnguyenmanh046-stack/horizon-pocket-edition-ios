@@ -5,9 +5,11 @@ use winit::event::{DeviceEvent, DeviceId, StartCause, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::window::WindowId;
 
-/// The stack every event-loop callback runs on, and how much of it must be left before one: the
-/// desktop's main thread has 8 MB; a joining splitscreen player's Game is ~67 KB of it alone.
-const GAME_STACK: usize = 16 << 20;
+/// The stack every event-loop callback runs on, and how much of it must be left before one.
+/// The desktop's and Android's main threads reserve 136 MiB from 0.9.0 (horizon-guest-stack, for
+/// wasm mods, which iOS does not run); 64 MiB is address space only, used as far as the game goes
+/// (built-in mods run on it), and the same as the integrated server's thread here.
+const GAME_STACK: usize = 64 << 20;
 const GAME_STACK_LEFT: usize = 8 << 20;
 
 /// The mark that says this program is the game, kept in it as the desktop's main.rs keeps it
