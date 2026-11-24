@@ -7,7 +7,8 @@ program: its package joins the workspace, the program names its hooks, and the a
 where the game reads it.
 
     python3 tools/ios_native_sdk.py add INDEX OUT id@version...   # rewrites this checkout: a CI runner's
-    python3 tools/ios_native_sdk.py list INDEX                    # the catalog's mods a build can take
+    python3 tools/ios_native_sdk.py list INDEX                    # the catalog's native mods, id@version
+    python3 tools/ios_native_sdk.py survey INDEX REPORT           # every one a build can take, as a package here
     python3 tools/ios_native_sdk.py check PACKAGE.hmod            # whether a build can take this one
     python3 tools/ios_native_sdk.py --self-test
 
@@ -18,6 +19,12 @@ folder, which `app.rs` hands the engine as the desktop's mod host does its own) 
 to that crate's dependencies. OUT gets `horizon-native-mods/<id>/`, each mod's whole package: the
 build copies it beside the app's program, where the engine reads a built mod's manifest and content
 (`horizon_mod_package::runtime::Runtime::load`). It also prints, as JSON, what it built in.
+
+`survey` unpacks the newest version of every native mod of the catalog that a build can take as a
+workspace package, without touching the program, and writes REPORT: for each mod its version and
+either the package to compile (`hmod-<id>`) or why a build refuses it. The catalog-mods-check
+workflow compiles those packages and records which this engine builds
+(packaging/ios/catalog-buildable.json, which the game's catalog offers from).
 
 A build takes what Starling's own store takes: a mod that uses only the mod API. One with
 `[native.*]` tables (mixins, bridges, modules: changes to the game's own source), a build script, or a
@@ -268,6 +275,65 @@ pub fn built() -> (
 '''
 
 
+def unpack(folder: Path, mod_id: str, files: dict[str, bytes], p: dict) -> None:
+    """The mod as the workspace package `folder/<id>/`, with its entry for the program."""
+    work = folder / mod_id
+    for name, data in files.items():
+        target = work / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
+    (work / "Cargo.toml").write_text(package_manifest(p), encoding="utf-8")
+    with open(work / "src" / "lib.rs", "a", encoding="utf-8") as lib:
+        lib.write(ENTRY.format(api=p["api"], id=mod_id, hooks=p["hooks"]))
+
+
+def workspace_member() -> None:
+    """The mods' folder joins the workspace."""
+    root = ROOT / "Cargo.toml"
+    text = root.read_text(encoding="utf-8")
+    line = f'"{MODS_DIR}/*"'
+    if line in text:
+        return
+    head = "members = [\n"
+    if text.count(head) != 1:
+        sys.exit("ios_native_sdk: Cargo.toml has no single `members = [` to add the mods' folder to")
+    root.write_text(text.replace(head, f"{head}    {line},\n", 1), encoding="utf-8")
+
+
+def survey(index: Path, report: Path) -> None:
+    listed, _ = projects(index)
+    folder = ROOT / MODS_DIR
+    if folder.exists():
+        shutil.rmtree(folder)
+    rows = {}
+    for mod_id in sorted(listed):
+        versions = listed[mod_id].get("versions") or []
+        if not versions:
+            continue
+        version = versions[0].get("version", "")
+        row = {"version": version}
+        try:
+            if not ID.fullmatch(mod_id) or not VERSION.fullmatch(version):
+                raise Refused(f"{mod_id}@{version} is not a name a build takes")
+            files = members(fetch(versions[0]["file"]))
+            p = plan(files)
+            if (p["id"], p["version"]) != (mod_id, version):
+                raise Refused(f"the package says it is {p['id']} {p['version']}")
+            unpack(folder, mod_id, files, p)
+            row["package"] = f"hmod-{mod_id}"
+        except Refused as why:
+            row["refused"] = str(why)
+        except Exception as error:  # A package that does not read is a mod no build takes.
+            row["refused"] = f"its package does not read: {error}"
+        rows[mod_id] = row
+        print(f"{mod_id} {version}: {row.get('package') or row['refused']}", file=sys.stderr)
+    if any("package" in row for row in rows.values()):
+        workspace_member()
+    report.write_text(json.dumps(rows, indent=1) + "\n", encoding="utf-8")
+    taken = sum("package" in row for row in rows.values())
+    print(f"{taken} of {len(rows)} native mods are packages to compile")
+
+
 def add(index: Path, out: Path, wanted: list[str]) -> None:
     asked = []
     for item in wanted:
@@ -293,22 +359,15 @@ def add(index: Path, out: Path, wanted: list[str]) -> None:
                 raise Refused(f"{mod_id} {version}: the package says it is {p['id']} {p['version']}")
         except Refused as why:
             sys.exit(f"ios_native_sdk: {why}")
-        work = folder / mod_id
+        # The package as it came, for the app: the engine reads a built mod's manifest and content.
         for name, data in files.items():
-            for target in (work / name, out / "horizon-native-mods" / mod_id / name):
-                target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_bytes(data)
-        (work / "Cargo.toml").write_text(package_manifest(p), encoding="utf-8")
-        with open(work / "src" / "lib.rs", "a", encoding="utf-8") as lib:
-            lib.write(ENTRY.format(api=p["api"], id=mod_id, hooks=p["hooks"]))
+            target = out / "horizon-native-mods" / mod_id / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+        unpack(folder, mod_id, files, p)
         plans.append(p)
 
-    root = ROOT / "Cargo.toml"
-    text = root.read_text(encoding="utf-8")
-    if f'"{MODS_DIR}/*"' not in text:
-        if text.count("members = [\n") != 1:
-            sys.exit("ios_native_sdk: Cargo.toml has no single `members = [` to add the mods' folder to")
-        root.write_text(text.replace("members = [\n", f'members = [\n    "{MODS_DIR}/*",\n', 1), encoding="utf-8")
+    workspace_member()
     manifest = GAME / "Cargo.toml"
     text = manifest.read_text(encoding="utf-8")
     head = "[target.'cfg(target_os = \"ios\")'.dependencies]\n"
@@ -397,6 +456,8 @@ def main() -> None:
         self_test()
     elif len(args) >= 4 and args[0] == "add":
         add(Path(args[1]), Path(args[2]).resolve(), args[3:])
+    elif len(args) == 3 and args[0] == "survey":
+        survey(Path(args[1]), Path(args[2]).resolve())
     elif len(args) == 2 and args[0] == "list":
         listing(Path(args[1]))
     elif len(args) == 2 and args[0] == "check":

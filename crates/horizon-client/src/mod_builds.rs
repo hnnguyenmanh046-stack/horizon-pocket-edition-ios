@@ -15,6 +15,53 @@ use std::path::Path;
 /// variable of the repository it was built in): none in a build made without one.
 const BUILT_WITH: Option<&str> = option_env!("HORIZON_MOD_BUILDS_URL");
 
+/// The catalog's native mods this engine builds into the app, as the catalog-mods-check
+/// workflow found them when the app was built (packaging/ios/catalog-buildable.json): each
+/// compiled against this source's mod API.
+const BUILDABLE: &str = include_str!("../../../packaging/ios/catalog-buildable.json");
+
+/// The ids of the list `text` for the engine `engine`; None when it is not a list or is another
+/// engine's.
+fn buildable_in(text: &str, engine: Option<&str>) -> Option<(String, std::collections::BTreeSet<String>)> {
+    let list: serde_json::Value = serde_json::from_str(text).ok()?;
+    let of = list["engine"].as_str()?;
+    if engine.is_some_and(|engine| engine != of) {
+        return None;
+    }
+    let mods = list["mods"]
+        .as_object()?
+        .keys()
+        .filter(|id| names_a_mod(id, "0"))
+        .cloned()
+        .collect();
+    Some((of.to_owned(), mods))
+}
+
+/// The catalog's native mods a build of this app can take, by id: the list the app was built
+/// with, or the repository's newer one for the same engine (mods published since), asked for
+/// once. It blocks: the catalog asks from its search thread.
+pub fn buildable() -> &'static std::collections::BTreeSet<String> {
+    static LIST: std::sync::OnceLock<std::collections::BTreeSet<String>> =
+        std::sync::OnceLock::new();
+    LIST.get_or_init(|| {
+        let (engine, built_with) = buildable_in(BUILDABLE, None).unwrap_or_default();
+        let url = format!(
+            "https://raw.githubusercontent.com/{}/main/packaging/ios/catalog-buildable.json",
+            crate::ios_releases::REPOSITORY
+        );
+        ureq::AgentBuilder::new()
+            .timeout_connect(std::time::Duration::from_secs(10))
+            .timeout_read(std::time::Duration::from_secs(20))
+            .build()
+            .get(&url)
+            .call()
+            .ok()
+            .and_then(|response| response.into_string().ok())
+            .and_then(|text| buildable_in(&text, Some(&engine)))
+            .map_or(built_with, |(_, newer)| newer)
+    })
+}
+
 /// The most mods a build takes (the service's own limit is its to change; this is the app's).
 pub const MOST_MODS: usize = 24;
 
@@ -266,6 +313,21 @@ mod tests {
         assert_ne!(again, "me");
         assert_eq!(device(&path), again);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_buildable_list_is_this_engines_or_none() {
+        let (engine, built_with) = buildable_in(BUILDABLE, None).expect("the list the app carries");
+        assert!(!engine.is_empty());
+        assert!(built_with.iter().all(|id| names_a_mod(id, "0")));
+        let text = r#"{"engine":"starling-0.9.0","mods":{"zoom":"1.0.0","Bad Id":"1","gamma":"2"}}"#;
+        let (of, mods) = buildable_in(text, Some("starling-0.9.0")).unwrap();
+        assert_eq!(of, "starling-0.9.0");
+        assert_eq!(mods.into_iter().collect::<Vec<_>>(), ["gamma", "zoom"]);
+        // Another engine's list, and what is no list.
+        assert!(buildable_in(text, Some("starling-0.10.0")).is_none());
+        assert!(buildable_in("<html>", None).is_none());
+        assert!(buildable_in(r#"{"engine":"x"}"#, None).is_none());
     }
 
     #[test]
