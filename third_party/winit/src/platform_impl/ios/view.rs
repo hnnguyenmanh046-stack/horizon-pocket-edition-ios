@@ -17,7 +17,9 @@ use objc2_ui_kit::{
 use super::app_state::{self, EventWrapper};
 use super::window::WinitUIWindow;
 use crate::dpi::PhysicalPosition;
-use crate::event::{ElementState, Event, Force, KeyEvent, Touch, TouchPhase, WindowEvent};
+use crate::event::{
+    ElementState, Event, Force, KeyEvent, MouseScrollDelta, Touch, TouchPhase, WindowEvent,
+};
 use crate::keyboard::{
     Key, KeyCode, KeyLocation, ModifiersState, NamedKey, PhysicalKey,
 };
@@ -25,11 +27,27 @@ use crate::platform_impl::platform::DEVICE_ID;
 use crate::platform_impl::KeyEventExtra;
 use crate::window::{WindowAttributes, WindowId as RootWindowId};
 
+#[link(name = "UIKit", kind = "framework")]
+extern "C" {
+    fn UIAccessibilityIsAssistiveTouchRunning() -> objc2::runtime::Bool;
+}
+
+fn assistive_touch_running() -> bool {
+    // SAFETY: a plain UIKit query with no arguments.
+    unsafe { UIAccessibilityIsAssistiveTouchRunning() }.as_bool()
+}
+
 pub struct WinitViewState {
     pinch_gesture_recognizer: RefCell<Option<Retained<UIPinchGestureRecognizer>>>,
     doubletap_gesture_recognizer: RefCell<Option<Retained<UITapGestureRecognizer>>>,
     rotation_gesture_recognizer: RefCell<Option<Retained<UIRotationGestureRecognizer>>>,
     pan_gesture_recognizer: RefCell<Option<Retained<UIPanGestureRecognizer>>>,
+    /// Hears a mouse wheel's or a trackpad's scroll, which iOS keeps from GameController while
+    /// its pointer is on screen.
+    scroll_gesture_recognizer: RefCell<Option<Retained<UIPanGestureRecognizer>>>,
+    scroll_last: Cell<CGPoint>,
+    /// Touches iOS made from a mouse's click, left out as they came.
+    dropped_touches: RefCell<std::collections::HashSet<u64>>,
 
     // for iOS delta references the start of the Gesture
     rotation_last_delta: Cell<CGFloat>,
@@ -321,6 +339,44 @@ declare_class!(
             app_state::handle_nonuser_event(mtm, gesture_event);
         }
 
+        #[method(scrollGesture:)]
+        fn scroll_gesture(&self, recognizer: &UIPanGestureRecognizer) {
+            let Some(window) = self.window() else { return };
+            let translation = recognizer.translationInView(Some(self));
+            let (dx, dy) = match recognizer.state() {
+                UIGestureRecognizerState::Began => {
+                    self.ivars().scroll_last.set(translation);
+                    (0.0, 0.0)
+                }
+                UIGestureRecognizerState::Changed | UIGestureRecognizerState::Ended => {
+                    let last = self.ivars().scroll_last.replace(translation);
+                    (translation.x - last.x, translation.y - last.y)
+                }
+                _ => {
+                    self.ivars().scroll_last.set(CGPoint { x: 0.0, y: 0.0 });
+                    (0.0, 0.0)
+                }
+            };
+            if (dx == 0.0 && dy == 0.0) || !super::hardware_mouse::scroll_gesture_allowed() {
+                return;
+            }
+            // A wheel notch is about this many points of a scroll gesture.
+            const POINTS_PER_LINE: f64 = 12.0;
+            let event = EventWrapper::StaticEvent(Event::WindowEvent {
+                window_id: RootWindowId(window.id()),
+                event: WindowEvent::MouseWheel {
+                    device_id: DEVICE_ID,
+                    delta: MouseScrollDelta::LineDelta(
+                        (dx / POINTS_PER_LINE) as f32,
+                        (dy / POINTS_PER_LINE) as f32,
+                    ),
+                    phase: TouchPhase::Moved,
+                },
+            });
+            let mtm = MainThreadMarker::new().unwrap();
+            app_state::handle_nonuser_event(mtm, event);
+        }
+
         // Remain a responder during gameplay while an empty input view hides the software keyboard.
         #[method(inputView)]
         fn input_view(&self) -> Option<&UIView> {
@@ -419,6 +475,9 @@ impl WinitView {
             doubletap_gesture_recognizer: RefCell::new(None),
             rotation_gesture_recognizer: RefCell::new(None),
             pan_gesture_recognizer: RefCell::new(None),
+            scroll_gesture_recognizer: RefCell::new(None),
+            scroll_last: Cell::new(CGPoint { x: 0.0, y: 0.0 }),
+            dropped_touches: RefCell::new(std::collections::HashSet::new()),
 
             rotation_last_delta: Cell::new(0.0),
             pinch_last_delta: Cell::new(0.0),
@@ -556,6 +615,25 @@ impl WinitView {
             if touch_type == UITouchType::IndirectPointer && self.ivars().mouse.captured() {
                 continue;
             }
+            // With AssistiveTouch on, iOS makes a finger's touch of a mouse's click as well as
+            // GameController's own click: the game would click twice. A touch that begins while
+            // a mouse is in use is that, and is left out until it ends.
+            if touch_type == UITouchType::Direct {
+                let id = touch as *const UITouch as u64;
+                let phase = touch.phase();
+                let mut dropped = self.ivars().dropped_touches.borrow_mut();
+                if matches!(phase, UITouchPhase::Began) {
+                    if super::hardware_mouse::mouse_recently_used() && assistive_touch_running() {
+                        dropped.insert(id);
+                        continue;
+                    }
+                } else if dropped.contains(&id) {
+                    if matches!(phase, UITouchPhase::Ended | UITouchPhase::Cancelled) {
+                        dropped.remove(&id);
+                    }
+                    continue;
+                }
+            }
             let force = if os_supports_force {
                 let trait_collection = self.traitCollection();
                 let touch_capability = trait_collection.forceTouchCapability();
@@ -647,7 +725,34 @@ impl WinitView {
         self.update_mice();
     }
 
+    /// Once: a pan that only a scroll can start (no finger is allowed to). iOS 13.4+.
+    fn ensure_scroll_recognizer(&self) {
+        if self.ivars().scroll_gesture_recognizer.borrow().is_some() {
+            return;
+        }
+        let mtm = MainThreadMarker::from(self);
+        unsafe {
+            let pan = UIPanGestureRecognizer::initWithTarget_action(
+                mtm.alloc(),
+                Some(self),
+                Some(sel!(scrollGesture:)),
+            );
+            let supported: bool = msg_send![&*pan, respondsToSelector: sel!(setAllowedScrollTypesMask:)];
+            if !supported {
+                return;
+            }
+            let no_touches: Retained<objc2::runtime::AnyObject> =
+                msg_send_id![objc2::class!(NSArray), array];
+            let _: () = msg_send![&*pan, setAllowedTouchTypes: &*no_touches];
+            let _: () = msg_send![&*pan, setAllowedScrollTypesMask: 3isize];
+            pan.setDelegate(Some(ProtocolObject::from_ref(self)));
+            self.addGestureRecognizer(&pan);
+            self.ivars().scroll_gesture_recognizer.replace(Some(pan));
+        }
+    }
+
     pub(crate) fn update_mice(&self) {
+        self.ensure_scroll_recognizer();
         if let Some(window) = self.window() {
             let size = self.bounds().size;
             let scale = self.contentScaleFactor() as f64;
