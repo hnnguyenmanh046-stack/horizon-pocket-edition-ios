@@ -55,9 +55,14 @@ on:
 permissions:
   contents: read
 concurrency:
-  # A build with mods doesn't stop the plain one, nor one with other mods.
-  group: ios-${{ github.ref }}-${{ inputs.mods }}-${{ inputs.catalog_mods }}
-  cancel-in-progress: true
+  # Run on its own: a newer run of the same build replaces the older one; a build with mods
+  # doesn't stop the plain one, nor one with other mods. Called by another workflow (mod-build.yml,
+  # where `github.workflow` is the caller's name): never stopped and stopping nothing, each call a
+  # group of its own. A player waits on that build, and the caller already makes the same request
+  # wait for the first. (A called workflow's `inputs` are not all there when this is read: two
+  # builds once stopped each other.)
+  group: ${{ github.workflow == 'ios' && format('ios-{0}-{1}-{2}', github.ref, inputs.mods, inputs.catalog_mods) || format('ios-called-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.workflow == 'ios' }}
 env:
   HORIZON_TELEMETRY_URL: "off"
   # Release with fewer codegen passes: the release profile's single unit and LTO cost minutes.
@@ -76,7 +81,87 @@ env:
   HORIZON_MOD_BUILDS_URL: ${{ vars.HORIZON_MOD_BUILDS_URL }}
 
 jobs:
+  # The older-format native mods (the Mods edition's fifteen) applied to the source, once, on
+  # Linux, for both Apple jobs. horizon-mixins, the tool that applies them, is built from Horizon's
+  # repository at a pinned commit: here it comes from this repository's cache, else from what
+  # native-tool-keep.yml kept of it, so a build does not need that repository to be there.
+  stage:
+    if: ${{ inputs.mods }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      # First, so a mod id that isn't one stops the run in seconds.
+      - name: Fetch and check the native mods
+        env:
+          MODS: ${{ inputs.mods }}
+        run: |
+          set -euo pipefail -f
+          # The registry is asked only for a mod that is not in native-mods/: without it, those are all there are.
+          curl -fsSL --retry 3 https://horizon-rust.github.io/horizon-mods/index.json -o "$RUNNER_TEMP/index.json" \
+            || echo '{"projects": []}' > "$RUNNER_TEMP/index.json"
+          python3 tools/ios_native_mods.py fetch "$RUNNER_TEMP/index.json" "$RUNNER_TEMP/native" ${MODS//,/ }
+          python3 tools/ios_native_mods.py info "$RUNNER_TEMP/native" "$GITHUB_SHA" > "$RUNNER_TEMP/native-mods.json"
+      - name: Install Rust
+        run: bash tools/ci/rustup_install.sh --profile minimal
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: native-mods-check
+          save-if: false
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/starling-native
+          key: native-mixins-${{ runner.os }}-${{ hashFiles('packaging/android/native_build.sh') }}
+      - name: The kept tool, when the cache has none
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rev=$(sed -n 's/^MIXINS_REV=\([0-9a-f]\{40\}\)$/\1/p' packaging/android/native_build.sh)
+          tool=$HOME/.cache/starling-native/mixins-${rev:0:12}/bin/horizon-mixins
+          if [ -x "$tool" ]; then
+            echo "horizon-mixins is in the cache"
+            exit 0
+          fi
+          run=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=horizon-mixins-kept&per_page=20" \
+            --jq '[.artifacts[] | select(.expired | not)][0].workflow_run.id // empty')
+          if [ -n "$run" ]; then
+            gh run download "$run" --repo "$GITHUB_REPOSITORY" --name horizon-mixins-kept --dir "$RUNNER_TEMP/kept"
+            mkdir -p "$HOME/.cache"
+            tar -C "$HOME/.cache" -xzf "$RUNNER_TEMP/kept/starling-native-linux-x64.tar.gz"
+          fi
+          if [ -x "$tool" ]; then
+            echo "::notice::horizon-mixins ${rev:0:12} taken from what native-tool-keep kept"
+          else
+            echo "::warning::no kept horizon-mixins ${rev:0:12}: it is built from Horizon's repository"
+          fi
+      - name: Apply the native mods to the source
+        run: |
+          set -euo pipefail
+          bash packaging/ios/native_stage.sh . "$RUNNER_TEMP/native/bundles" 2>&1 | tee "$RUNNER_TEMP/native-stage.log"
+          mkdir -p "$RUNNER_TEMP/staged"
+          python3 tools/ios_native_mods.py names "$RUNNER_TEMP/native" > "$RUNNER_TEMP/staged/names.txt"
+          echo "::notice::built with $(cat "$RUNNER_TEMP/staged/names.txt")"
+          cp "$RUNNER_TEMP/native-mods.json" "$RUNNER_TEMP/staged/native-mods.json"
+          cp "$RUNNER_TEMP/native-stage.log" "$RUNNER_TEMP/staged/native-stage.log"
+          tar --exclude=./.git --exclude=./target -czf "$RUNNER_TEMP/staged/staged-source.tar.gz" .
+          ls -l "$RUNNER_TEMP/staged"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: staged-source
+          path: ${{ runner.temp }}/staged/
+          retention-days: 1
+          if-no-files-found: error
+
   ipa:
+    # After the stage when there is one (a build without those mods has none).
+    needs: stage
+    if: ${{ !cancelled() && (needs.stage.result == 'success' || needs.stage.result == 'skipped') }}
     runs-on: macos-26
     timeout-minutes: 240
     env:
@@ -88,16 +173,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      # First, so a mod id that isn't one stops the run in seconds.
-      - name: Fetch and check the native mods
-        if: ${{ inputs.mods }}
-        env:
-          MODS: ${{ inputs.mods }}
-        run: |
-          set -euo pipefail -f
-          curl -fsSL --retry 3 https://horizon-rust.github.io/horizon-mods/index.json -o "$RUNNER_TEMP/index.json"
-          python3 tools/ios_native_mods.py fetch "$RUNNER_TEMP/index.json" "$RUNNER_TEMP/native" ${MODS//,/ }
-          python3 tools/ios_native_mods.py info "$RUNNER_TEMP/native" "$GITHUB_SHA" > "$RUNNER_TEMP/native-mods.json"
       - name: Check the Apple toolchain
         run: bash tools/ci/ios-toolchain.sh
       - name: Install Rust and its iOS standard library
@@ -112,16 +187,21 @@ jobs:
           cache-on-failure: true
           # A build with mods reads the plain build's cache and keeps none of its own.
           save-if: ${{ !inputs.mods && !inputs.catalog_mods }}
-      - uses: actions/cache@v4
+      # The source with the older-format native mods applied, as the `stage` job left it.
+      - uses: actions/download-artifact@v4
         if: ${{ inputs.mods }}
         with:
-          path: ~/.cache/starling-native
-          key: native-mixins-${{ runner.os }}-${{ hashFiles('packaging/android/native_build.sh') }}
-      - name: Apply the native mods to the source
+          name: staged-source
+          path: ${{ runner.temp }}/staged
+      - name: Take the source with the native mods applied
         if: ${{ inputs.mods }}
         run: |
-          bash packaging/ios/native_stage.sh . "$RUNNER_TEMP/native/bundles" 2>&1 | tee native-stage.log
-          echo "::notice::built with $(python3 tools/ios_native_mods.py names "$RUNNER_TEMP/native")"
+          set -euo pipefail
+          # Every file of the checkout goes first: the stage moves and drops some.
+          git ls-files -z | xargs -0 rm -f
+          tar -xzf "$RUNNER_TEMP/staged/staged-source.tar.gz"
+          cp "$RUNNER_TEMP/staged/native-mods.json" "$RUNNER_TEMP/native-mods.json"
+          echo "::notice::built with $(cat "$RUNNER_TEMP/staged/names.txt")"
       # After the old-format mods: the stage writes the source anew, and these are crates beside it.
       - name: Add the catalog mods to the program
         if: ${{ inputs.catalog_mods }}
@@ -234,7 +314,7 @@ jobs:
         if: ${{ failure() && inputs.mods }}
         run: |
           echo '::error::the build with native mods failed. A mod made for another game version may not apply (native-stage.log) or compile (the build step names its file): build again without it.'
-          tail -40 native-stage.log 2>/dev/null || true
+          tail -40 "$RUNNER_TEMP/staged/native-stage.log" 2>/dev/null || true
       - name: Preserve the Xcode log
         if: failure()
         uses: actions/upload-artifact@v4
@@ -263,8 +343,9 @@ jobs:
           if-no-files-found: error
 
   simulator:
+    needs: stage
     # Not for the mod builds service's builds (mod-build.yml), which a player waits on.
-    if: ${{ inputs.simulator || !inputs.artifact }}
+    if: ${{ !cancelled() && (needs.stage.result == 'success' || needs.stage.result == 'skipped') && (inputs.simulator || !inputs.artifact) }}
     runs-on: macos-26
     timeout-minutes: 180
     env:
@@ -276,16 +357,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      # First, so a mod id that isn't one stops the run in seconds.
-      - name: Fetch and check the native mods
-        if: ${{ inputs.mods }}
-        env:
-          MODS: ${{ inputs.mods }}
-        run: |
-          set -euo pipefail -f
-          curl -fsSL --retry 3 https://horizon-rust.github.io/horizon-mods/index.json -o "$RUNNER_TEMP/index.json"
-          python3 tools/ios_native_mods.py fetch "$RUNNER_TEMP/index.json" "$RUNNER_TEMP/native" ${MODS//,/ }
-          python3 tools/ios_native_mods.py info "$RUNNER_TEMP/native" "$GITHUB_SHA" > "$RUNNER_TEMP/native-mods.json"
       - name: Install Rust and its iOS Simulator standard library
         run: |
           bash tools/ci/rustup_install.sh --profile minimal --target "$IOS_TARGET"
@@ -294,16 +365,21 @@ jobs:
           shared-key: ios-${{ env.IOS_TARGET }}
           cache-on-failure: true
           save-if: ${{ !inputs.mods && !inputs.catalog_mods }}
-      - uses: actions/cache@v4
+      # The source with the older-format native mods applied, as the `stage` job left it.
+      - uses: actions/download-artifact@v4
         if: ${{ inputs.mods }}
         with:
-          path: ~/.cache/starling-native
-          key: native-mixins-${{ runner.os }}-${{ hashFiles('packaging/android/native_build.sh') }}
-      - name: Apply the native mods to the source
+          name: staged-source
+          path: ${{ runner.temp }}/staged
+      - name: Take the source with the native mods applied
         if: ${{ inputs.mods }}
         run: |
-          bash packaging/ios/native_stage.sh . "$RUNNER_TEMP/native/bundles" 2>&1 | tee native-stage.log
-          echo "::notice::built with $(python3 tools/ios_native_mods.py names "$RUNNER_TEMP/native")"
+          set -euo pipefail
+          # Every file of the checkout goes first: the stage moves and drops some.
+          git ls-files -z | xargs -0 rm -f
+          tar -xzf "$RUNNER_TEMP/staged/staged-source.tar.gz"
+          cp "$RUNNER_TEMP/staged/native-mods.json" "$RUNNER_TEMP/native-mods.json"
+          echo "::notice::built with $(cat "$RUNNER_TEMP/staged/names.txt")"
       # After the old-format mods: the stage writes the source anew, and these are crates beside it.
       - name: Add the catalog mods to the program
         if: ${{ inputs.catalog_mods }}
