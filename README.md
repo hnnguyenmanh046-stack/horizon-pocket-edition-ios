@@ -402,6 +402,8 @@ No Mac needed: GitHub builds the app.
 | [`mod-build.yml`](.github/workflows/mod-build.yml) | Builds a release with catalog mods compiled in, for the game's Build button (through [the mod builds service](packaging/mod-builds-worker/README.md)) |
 | [`catalog-mods-check.yml`](.github/workflows/catalog-mods-check.yml) | Compiles every catalog mod a build can take against this source, and writes the list the game's catalog offers from |
 | [`native-mods-check.yml`](.github/workflows/native-mods-check.yml) | Builds every older-format native mod (the Mods edition's fifteen among them) against this source, one job each |
+| [`world-upgrade.yml`](.github/workflows/world-upgrade.yml) | The release before makes a world, a player and settings; this source opens a copy of that folder and must find all of it |
+| [`native-tool-keep.yml`](.github/workflows/native-tool-keep.yml) | Keeps the tool that applies the older-format mods (horizon-mixins) as an artifact, so a build does not need Horizon's own repository to be reachable |
 | `shared-worlds.yml`, `shared-worlds-e2e.yml`, `voice.yml` | On the `shared-worlds` branches: the shared worlds and voice crates' tests, and two games sharing one world end to end |
 
 On a Mac with Xcode: `rustup target add aarch64-apple-ios`, `python3 tools/ios_prepare.py` (needs Java
