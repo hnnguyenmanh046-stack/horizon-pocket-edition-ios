@@ -19,10 +19,49 @@ use objc2_foundation::{MainThreadMarker, NSArray};
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        OnceLock,
+    },
+    time::Instant,
 };
 
 #[link(name = "GameController", kind = "framework")]
 extern "C" {}
+
+static START: OnceLock<Instant> = OnceLock::new();
+/// When (in ms since start, plus one: zero is never) the mouse last did anything, a scroll of
+/// its wheel came by GameController, and one came by UIKit's scroll gesture.
+static LAST_ACTIVE: AtomicU64 = AtomicU64::new(0);
+static LAST_WHEEL: AtomicU64 = AtomicU64::new(0);
+static LAST_SCROLL_GESTURE: AtomicU64 = AtomicU64::new(0);
+
+fn now_ms() -> u64 {
+    START.get_or_init(Instant::now).elapsed().as_millis() as u64 + 1
+}
+
+fn within(stamp: &AtomicU64, ms: u64) -> bool {
+    let at = stamp.load(Ordering::Relaxed);
+    at != 0 && now_ms().saturating_sub(at) < ms
+}
+
+/// A mouse moved, clicked or scrolled lately. With AssistiveTouch on, iOS turns its clicks into
+/// touches too, which would click a second time: the view leaves those out while this is true.
+pub(super) fn mouse_recently_used() -> bool {
+    within(&LAST_ACTIVE, 15_000)
+}
+
+/// A scroll from UIKit's gesture counts unless the wheel already came by GameController, so that
+/// whichever of the two the system delivers is heard once.
+pub(super) fn scroll_gesture_allowed() -> bool {
+    if within(&LAST_WHEEL, 150) {
+        return false;
+    }
+    let now = now_ms();
+    LAST_SCROLL_GESTURE.store(now, Ordering::Relaxed);
+    LAST_ACTIVE.store(now, Ordering::Relaxed);
+    true
+}
 
 #[derive(Default)]
 pub(super) struct Mouse {
@@ -115,6 +154,7 @@ impl Mouse {
                 let position = self.position.clone();
                 let size = self.size.clone();
                 let moved = RcBlock::new(move |_: &AnyObject, dx: f32, dy: f32| {
+                    LAST_ACTIVE.store(now_ms(), Ordering::Relaxed);
                     device(DeviceEvent::MouseMotion { delta: (dx as f64, -dy as f64) });
                     if captured.get() || !relative {
                         return;
@@ -146,6 +186,7 @@ impl Mouse {
                         let captured = self.captured.clone();
                         let changed = RcBlock::new(
                             move |_: &AnyObject, _: f32, down: objc2::runtime::Bool| {
+                                LAST_ACTIVE.store(now_ms(), Ordering::Relaxed);
                                 device(DeviceEvent::Button { button: match button { MouseButton::Left => 0, MouseButton::Right => 1, _ => 2 },
                                     state: if down.as_bool() { ElementState::Pressed } else { ElementState::Released } });
                                 // A UIKit indirect pointer (an iPad's trackpad) delivers the
@@ -172,6 +213,12 @@ impl Mouse {
                 }
                 let scroll: Retained<AnyObject> = objc2::msg_send_id![&*input, scroll];
                 let scrolled = RcBlock::new(move |_: &AnyObject, x: f32, y: f32| {
+                    if within(&LAST_SCROLL_GESTURE, 150) {
+                        return;
+                    }
+                    let now = now_ms();
+                    LAST_WHEEL.store(now, Ordering::Relaxed);
+                    LAST_ACTIVE.store(now, Ordering::Relaxed);
                     device(DeviceEvent::MouseWheel { delta: MouseScrollDelta::LineDelta(x, y) });
                     send(window, WindowEvent::MouseWheel { device_id: DEVICE_ID,
                         delta: MouseScrollDelta::LineDelta(x, y), phase: TouchPhase::Moved });
