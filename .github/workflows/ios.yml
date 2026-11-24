@@ -222,6 +222,8 @@ jobs:
           # and content there (horizon-native-mods/<id>/), and refuses the mod without it.
           if [ -d "$RUNNER_TEMP/catalog/horizon-native-mods" ]; then
             cp -R "$RUNNER_TEMP/catalog/horizon-native-mods" "$app/horizon-native-mods"
+            # And their list, for the Mods page and for the next build's request.
+            cp "$RUNNER_TEMP/catalog-mods.json" "$app/catalog-mods.json"
             echo "::notice::catalog mods: $(cat "$RUNNER_TEMP/catalog-mods.json")"
           fi
           rm -rf game && mkdir -p game/Payload

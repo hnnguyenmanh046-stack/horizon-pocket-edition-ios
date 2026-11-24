@@ -910,8 +910,8 @@ pub fn output_callbacks() -> u64 {
 }
 
 /// The game's sounds alone, as the output mixed them before there were stream sources: what
-/// the tests of the mixer listen to.
-#[cfg(test)]
+/// `Audio::mix_buffer` hands a caller that mixes a buffer itself, and what the tests of the
+/// mixer listen to.
 fn mix(mixer: &mut Mixer, data: &mut [f32], channels: usize, rate: u32) {
     mix_with(mixer, data, channels, rate, None);
 }

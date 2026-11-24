@@ -205,6 +205,9 @@ impl Loading {
         let attributes = winit::platform::wayland::WindowAttributesExtWayland::with_name(
             attributes, "horizon", "horizon",
         );
+        // iOS: the home bar fades and the screen's edges go to the game first (ios.rs).
+        #[cfg(target_os = "ios")]
+        let attributes = crate::ios::window_attributes(attributes);
         // `--offscreen` renders into a texture: its window would only show white.
         let window_step = startup::step("window.create");
         let window = match event_loop.create_window(
