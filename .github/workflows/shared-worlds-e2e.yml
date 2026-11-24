@@ -11,11 +11,11 @@ on:
       - tools/ci/s3_server.sh
       - crates/horizon-shared-worlds/**
       - crates/horizon-client/src/shared_worlds.rs
-      - crates/horizon-client/src/game/shared_worlds.rs
+      - crates/horizon-client/src/game/pocket/shared_worlds.rs
       - crates/horizon-voice/**
       - crates/horizon-client/src/voice_net.rs
       - crates/horizon-client/src/lan/voice.rs
-      - crates/horizon-client/src/game/voice.rs
+      - crates/horizon-client/src/game/pocket/voice.rs
   workflow_dispatch:
 permissions:
   contents: read
@@ -43,8 +43,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev             libfontconfig-dev libvulkan-dev libasound2-dev libudev-dev xvfb xauth mesa-vulkan-drivers libvulkan1
-          rustup toolchain install stable --profile minimal
-          rustup default stable
+          bash port/tools/ci/rustup_install.sh --profile minimal
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -77,9 +76,9 @@ jobs:
           (cd port && cargo run --release -p horizon-prepare -- --root "$PWD" --prepare --complete             --minecraft-dir "$GITHUB_WORKSPACE/minecraft" --server-jar "$(cat ../server-jar.txt)" --java-home "$JAVA_HOME"             --output "$GITHUB_WORKSPACE/resources-port")
       - name: Build the game for the desktop
         working-directory: port
-        run: cargo build --profile fast -p horizon-client --bin horizon-client
+        run: cargo build --profile fast -p horizon-official --bin horizon-official
       - name: An S3 server
         run: bash port/tools/ci/s3_server.sh
       - name: Shared worlds end to end (create, host, join, give, takeover, close)
         run: |
-          python3 port/tools/shared_worlds_e2e.py --xvfb --offscreen             --client port/target/fast/horizon-client --resources resources-port
+          python3 port/tools/shared_worlds_e2e.py --xvfb --offscreen             --client port/target/fast/horizon-official --resources resources-port

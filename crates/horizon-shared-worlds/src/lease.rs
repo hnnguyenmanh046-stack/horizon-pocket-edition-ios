@@ -21,8 +21,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-/// The record's format. A lease written by a newer format is never touched.
-pub const VERSION: u32 = 1;
+/// The record's format. A lease written by a newer format is never touched. 2: hosted by the
+/// 0.9.0 engine (Horizon PE 1.1.0), as the manifest's 2 (`manifest::VERSION`): 1.0.0 leaves the
+/// world alone and says to update, and never joins a host whose game it could not follow. The
+/// fields are 1's.
+pub const VERSION: u32 = 2;
 /// How often a host rewrites the lease.
 pub const HEARTBEAT: Duration = Duration::from_secs(6);
 /// A host that hasn't managed to write the lease for this long freezes its world.

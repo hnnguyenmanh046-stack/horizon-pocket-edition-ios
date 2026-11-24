@@ -11,8 +11,11 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 
-/// The manifest's format.
-pub const VERSION: u32 = 1;
+/// The manifest's format. 2: a copy saved by the 0.9.0 engine (Horizon PE 1.1.0), whose chunks
+/// and players the 0.8.0 engine (1.0.0) can't be trusted to read: 1.0.0 refuses it and says to
+/// update, where it would have opened it and written it back older. The fields are 1's, so a
+/// copy 1.0.0 saved reads as before.
+pub const VERSION: u32 = 2;
 /// A block: 16 region sectors.
 pub const BLOCK: u64 = 64 * 1024;
 /// A block's hash in a manifest: the first half of its SHA-256. It only says which blocks
