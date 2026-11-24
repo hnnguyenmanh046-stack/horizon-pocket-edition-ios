@@ -56,6 +56,30 @@ jobs:
       - name: Test
         if: ${{ !cancelled() }}
         run: cargo test -p horizon-shared-worlds
+      # The two releases against each other, each built from its own source: 1.1.0 hosts on the
+      # 0.9.0 engine, whose saves the 0.8.0 engine of 1.0.0 must not open and write back older.
+      - name: 1.0.0 refuses a world this version saved, and this version reads 1.0.0's
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          old=$RUNNER_TEMP/v1.0.0
+          git fetch --quiet --depth 1 origin tag v1.0.0-shared-worlds
+          git worktree add --quiet --detach "$old" v1.0.0-shared-worlds
+          cp crates/horizon-shared-worlds/examples/format_probe.rs "$old/crates/horizon-shared-worlds/examples/"
+          probe() { cargo run --quiet -p horizon-shared-worlds --example format_probe -- "$@"; }
+          old_probe() { (cd "$old" && CARGO_TARGET_DIR=$RUNNER_TEMP/v1.0.0-target probe "$@"); }
+          probe write "$RUNNER_TEMP/saved-now"
+          old_probe write "$RUNNER_TEMP/saved-1.0.0"
+          old_probe read "$RUNNER_TEMP/saved-now" | tee "$RUNNER_TEMP/old-reads-new.txt"
+          probe read "$RUNNER_TEMP/saved-1.0.0" | tee "$RUNNER_TEMP/new-reads-old.txt"
+          probe read "$RUNNER_TEMP/saved-now" | tee "$RUNNER_TEMP/new-reads-new.txt"
+          grep -qx "manifest: refused: unreadable record: this world was saved by a newer version of the game: update to play it" "$RUNNER_TEMP/old-reads-new.txt"
+          grep -qx "lease: refused: unreadable record: this world was last hosted by a newer version of the game: update to play it" "$RUNNER_TEMP/old-reads-new.txt"
+          for reads in new-reads-old new-reads-new; do
+            grep -qx "manifest: read" "$RUNNER_TEMP/$reads.txt"
+            grep -qx "lease: read" "$RUNNER_TEMP/$reads.txt"
+          done
+          git worktree remove --force "$old"
       - name: Start an S3 server
         if: ${{ !cancelled() }}
         run: bash tools/ci/s3_server.sh
