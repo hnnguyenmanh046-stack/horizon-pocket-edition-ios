@@ -948,22 +948,15 @@ impl PadSettings {
         // A file from before these defaults: its player's buttons stay where they were, and
         // nothing they saved shares a button with the radial menu's opener. They can bind one
         // in the binds list.
-        if !text.is_empty() && layout.is_none() {
-            s.bindings.entry(RADIAL).or_insert(None);
-            // This edition's 1.0.0 had the player list and the advancements on no button (View
-            // and the D-pad's down were the mods' already, as they are now): a file from then
-            // gets neither back from Starling 0.8.0's defaults.
-            for (action, button) in [
-                ("key.drop", Button::East),
-                ("key.togglePerspective", Button::DPadUp),
-                ("key.chat", Button::DPadRight),
-            ] {
-                // A button saved by hand stays, even one that's now this action's default.
-                if !saved(action) {
-                    s.bindings.entry(action).or_insert(Some(button));
-                }
-            }
-        }
+        //
+        // Horizon PE: Shared Worlds + Mods: nothing to put back here. This edition's defaults are
+        // its 1.0.0's (drop on B, the perspective on the D-pad's up, chat on its right, the mods on
+        // its left and down and on View, no opener for the radial menu), so a file from then reads
+        // as it did; Starling's own puts its 0.8.0 buttons back at this point.
+        // A binding that is its action's default is no entry (as `bind` keeps them): the file
+        // stores only changes, and settings read back from it are the settings that wrote it.
+        s.bindings
+            .retain(|action, button| *button != Self::default_of(action));
         s
     }
     pub fn serialize(&self) -> String {

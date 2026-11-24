@@ -147,10 +147,13 @@ mod tests {
     use super::super::Rumble;
     use super::*;
 
+    // Horizon PE: Shared Worlds + Mods: the radial menu has no opener until the player gives it
+    // one (the D-pad and View are the mods' and chat's here, as in this edition's 1.0.0). These
+    // are Starling's tests with that default in the place of its D-pad Right.
     #[test]
-    fn a_new_player_holds_d_pad_right_for_the_radial_menu() {
+    fn a_new_player_has_no_opener_for_the_radial_menu() {
         for s in [PadSettings::default(), PadSettings::parse("")] {
-            assert_eq!(s.binding(RADIAL), Some(Button::DPadRight));
+            assert_eq!(s.binding(RADIAL), None);
             assert!(!s.conflicts(RADIAL));
         }
         let s = PadSettings::parse(&PadSettings::default().serialize());
@@ -162,7 +165,7 @@ mod tests {
         let s = PadSettings::parse("bindLayout:1\nbind_key.playerlist:right\n");
         assert_eq!(s.binding("key.playerlist"), Some(Button::DPadRight));
         assert_eq!(s.binding(RADIAL), None);
-        assert!(!s.conflicts("key.playerlist"));
+        // (The D-pad's right is chat's too in this edition: that is the player's to settle.)
         assert_eq!(PadSettings::parse(&s.serialize()), s);
     }
 
@@ -177,6 +180,7 @@ mod tests {
     fn a_conflict_made_since_the_migration_stays_after_a_restart() {
         // Bound in the binds list onto the opener's button: both stay, and the list marks it.
         let mut s = PadSettings::default();
+        s.bind(RADIAL, Some(Button::DPadRight));
         s.bind("key.playerlist", Some(Button::DPadRight));
         let text = s.serialize();
         assert!(text.contains("bindLayout:2"));
@@ -185,7 +189,9 @@ mod tests {
         assert!(read.conflicts(RADIAL));
         assert_eq!(read, s);
         // The same, hand-written with spaces around the lines.
-        let read = PadSettings::parse("  bindLayout:2\n  bind_key.playerlist:right\n");
+        let read = PadSettings::parse(
+            "  bindLayout:2\n  bind_pad.radial:right\n  bind_key.playerlist:right\n",
+        );
         assert_eq!(read.binding(RADIAL), Some(Button::DPadRight));
     }
 
@@ -196,11 +202,11 @@ mod tests {
         assert_eq!(s.binding("key.playerlist"), Some(Button::DPadRight));
         assert_eq!(s.binding("key.chat"), Some(Button::DPadUp));
         let text = s.serialize();
-        assert!(text.contains("bindLayout:2\n") && text.contains("bind_pad.radial:none\n"));
+        assert!(text.contains("bindLayout:2\n"));
         assert_eq!(PadSettings::parse(&text), s);
-        // Without a conflict the opener keeps its default.
+        // Without a conflict the opener keeps its default: none.
         let s = PadSettings::parse("bindLayout:1\nvibration:false\n");
-        assert_eq!(s.binding(RADIAL), Some(Button::DPadRight));
+        assert_eq!(s.binding(RADIAL), None);
         // A line with leading spaces is still a saved opener.
         let s =
             PadSettings::parse("bindLayout:1\n bind_pad.radial:right\nbind_key.playerlist:right\n");
@@ -238,7 +244,7 @@ mod tests {
         for button in [B::South, B::East, B::West, B::North, B::RightStick] {
             let text = format!("bindLayout:2\nbind_pad.radial:{}\n", button.name());
             let read = PadSettings::parse(&text);
-            assert_eq!(read.binding(RADIAL), Some(B::DPadRight), "{button:?}");
+            assert_eq!(read.binding(RADIAL), None, "{button:?}");
             let taken = format!("{text}bind_key.playerlist:right\n");
             assert_eq!(
                 PadSettings::parse(&taken).binding(RADIAL),
@@ -254,6 +260,7 @@ mod tests {
     #[test]
     fn a_stick_that_takes_the_openers_thumb_unbinds_it_and_the_right_gives_it_back() {
         let mut s = PadSettings::default();
+        s.bind(RADIAL, Some(Button::DPadRight));
         s.set_radial_stick(RadialStick::Left);
         assert_eq!(
             s.binding(RADIAL),
@@ -271,12 +278,12 @@ mod tests {
 
     #[test]
     fn stepping_the_stick_and_back_gives_each_stick_its_own_opener() {
-        // Left with Y, back to the right stick: Y is under the right thumb, D-pad Right opens.
+        // Left with Y, back to the right stick: Y is under the right thumb, and nothing opens.
         let mut s = PadSettings::default();
         s.set_radial_stick(RadialStick::Left);
         s.bind(RADIAL, Some(Button::North));
         s.set_radial_stick(RadialStick::Right);
-        assert_eq!(s.binding(RADIAL), Some(Button::DPadRight));
+        assert_eq!(s.binding(RADIAL), None);
         // And Left again has its Y back, shared with Inventory as the player left it.
         s.set_radial_stick(RadialStick::Left);
         assert_eq!(s.binding(RADIAL), Some(Button::North));
