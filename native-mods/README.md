@@ -39,7 +39,7 @@ source it is in.
 | Enchantment Hints | The hints are added in the item tooltip's hook point (`native_tooltip`) instead of `stations::Game::stack_tooltip`, so every tooltip has them, the one under the pointer too |
 | TreeFall | Largest tree starts at 2048 logs (the mod's own: 256) |
 | Status Effect HUD | It starts bottom left (the mod's own: top right) |
-| Jade | The overlay starts at the left of the screen, in its upper part (Jade's own: the centre, the top). `/jade` is not hooked on a server's console, which the 0.9.0 engine and a phone don't have |
+| Jade | The overlay starts at the left of the screen, in its upper part (Jade's own: the centre, the top). On the 0.9.0 engine: it reads the block looked at, block entities and unopened loot through helpers of its own (the engine's were renamed or reshaped), `/jade` is not hooked on a server's console (the engine and a phone have none), its rule is read at `server_started`, and a mod machine's energy and fluid tank lines are left out (a cauldron's content is still shown) |
 
 Jade is licensed CC BY-NC-SA 4.0 (https://creativecommons.org/licenses/by-nc-sa/4.0/): it is
 shared here, changed as said above, under that same licence, and not for commercial use. The MIT
