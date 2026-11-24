@@ -711,7 +711,6 @@ pub enum What {
     Group { visible: bool },
 }
 
-
 /// A `NarratableEntry` as drawn this frame.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Narratable {
