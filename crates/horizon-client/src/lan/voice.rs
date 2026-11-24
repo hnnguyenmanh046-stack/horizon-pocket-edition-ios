@@ -277,7 +277,6 @@ mod tests {
 
     struct Player {
         conn: u32,
-        sender: PlayerSender,
         out: Receiver<Out>,
     }
 
@@ -285,8 +284,8 @@ mod tests {
         fn new(relay: &Relay, conn: u32, name: &str) -> Self {
             let (tx, out) = channel();
             let sender = PlayerSender::new(tx, Arc::default());
-            relay.enter(conn, u128::from(conn) << 64, name, sender.clone());
-            Self { conn, sender, out }
+            relay.enter(conn, u128::from(conn) << 64, name, sender);
+            Self { conn, out }
         }
 
         fn say(&self, relay: &Relay, up: &Up<'_>, now: Instant) {
@@ -463,7 +462,9 @@ mod tests {
             passed += steve.frames().len();
         }
         assert_eq!(passed, RATE as usize);
-        // A listener who doesn't read is sent on to all the same, and holds only so much.
+        // A listener who doesn't read is sent on to all the same. (How much its connection
+        // holds of that is the lane's own: `conn::EXPRESS_MOST`, kept by `io_pool`'s
+        // `push_first` and its test; a test's channel here has no lane.)
         let idle = Player::new(&relay, 6, "Idle");
         idle.join(&relay, true, false);
         idle.got();
@@ -471,8 +472,8 @@ mod tests {
         for seq in 0..60 {
             alex.say(&relay, &frame(seq, 0), much_later);
         }
-        let held: Vec<u16> = idle.frames().into_iter().map(|(_, seq)| seq).collect();
-        assert_eq!(held, (35..60).collect::<Vec<u16>>());
+        let sent: Vec<u16> = idle.frames().into_iter().map(|(_, seq)| seq).collect();
+        assert_eq!(sent, (0..60).collect::<Vec<u16>>());
         steve.got();
         // A game of another version of the messages isn't welcomed, and isn't on the list.
         let old = Player::new(&relay, 5, "Old");

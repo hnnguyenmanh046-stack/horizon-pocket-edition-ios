@@ -116,5 +116,11 @@ rm -f "$work/stage/crates/horizon-android/plan-stub.rs"
 rm -f "$work/stage/native-hooks.json"
 rm -rf "$work/stage/target" "$work/stage/.git"
 
+# The stage over the tree. What the stage no longer has goes from the tree too: Starling's
+# native_mixins_source.py moves modules next to their parents, and a module left at its old place
+# as well would be found twice (native_build.sh copies with rsync --delete).
+git -C "$source" ls-files -z | while IFS= read -r -d '' file; do
+  [ -e "$work/stage/$file" ] || rm -f "$source/$file"
+done
 cp -R "$work/stage/." "$source/"
 echo "native_stage: the mods are in $source"

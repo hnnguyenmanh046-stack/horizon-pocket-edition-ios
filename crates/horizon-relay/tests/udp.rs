@@ -150,8 +150,10 @@ fn carried_as(host: &Host) -> (bool, bool, bool) {
 }
 
 fn round_trip(tunnel: guest::Tunnel, payload: &[u8]) {
-    let (port, done) = tunnel.serve_loopback().unwrap();
+    let loopback = tunnel.serve_loopback().unwrap();
+    let (port, done) = (loopback.port, loopback.thread);
     let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    s.write_all(&loopback.token).unwrap();
     s.set_read_timeout(Some(Duration::from_secs(30))).unwrap();
     let mut w = s.try_clone().unwrap();
     let send = payload.to_vec();
