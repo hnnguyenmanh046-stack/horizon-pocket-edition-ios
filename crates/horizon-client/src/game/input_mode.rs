@@ -6,6 +6,8 @@ use super::Game;
 #[cfg(target_os = "android")]
 use super::{event_loop::EventLoopCtl, input_trace::InputOrigin};
 use horizon_client::input_mode::InputMode;
+#[cfg(target_os = "ios")]
+use horizon_client::hud::{HudAtlas, HudBatch};
 #[cfg(target_os = "android")]
 use winit::{
     dpi::PhysicalPosition,
@@ -106,5 +108,66 @@ impl Game<'_> {
             };
             self.handle_window_event(event_loop, id, event, InputOrigin::User);
         }
+    }
+}
+
+#[cfg(target_os = "ios")]
+impl Game<'_> {
+    /// A hardware mouse on an iPhone: the system draws no pointer there, so a menu would have no
+    /// visible spot to click. The game draws the arrow itself.
+    pub(super) fn draw_hardware_cursor(&self, batch: &mut HudBatch) {
+        use winit::platform::ios::WindowExtIOS;
+
+        if self.captured
+            || self.input_mode != InputMode::KeyboardMouse
+            || !horizon_gamecontroller::mouse_connected()
+        {
+            return;
+        }
+        let Some(window) = &self.window else { return };
+        if window.has_system_pointer() {
+            return;
+        }
+        draw_mouse_arrow(batch, &self.gui.atlas, self.cursor);
+    }
+}
+
+/// A classic mouse arrow whose tip is `at`: a black arrow needs a light edge to stay visible.
+#[cfg(target_os = "ios")]
+fn draw_mouse_arrow(batch: &mut HudBatch, atlas: &HudAtlas, at: (f32, f32)) {
+    let head = [[0.0, 0.0], [0.0, 15.2], [11.6, 11.1]];
+    let tail = [[4.5, 12.2], [7.0, 18.0], [9.3, 16.9], [6.8, 11.2]];
+    for grow in [1.6, 0.0] {
+        let color = if grow > 0.0 { u32::MAX } else { 0xFF000000 };
+        fill_poly(batch, atlas, at, &head, grow, color);
+        fill_poly(batch, atlas, at, &tail, grow, color);
+    }
+}
+
+/// One convex shape filled, its corners `grow` pixels further from their centre.
+#[cfg(target_os = "ios")]
+fn fill_poly(
+    batch: &mut HudBatch,
+    atlas: &HudAtlas,
+    at: (f32, f32),
+    shape: &[[f32; 2]],
+    grow: f32,
+    color: u32,
+) {
+    let n = shape.len() as f32;
+    let c = shape
+        .iter()
+        .fold([0.0, 0.0], |c, p| [c[0] + p[0] / n, c[1] + p[1] / n]);
+    let grown: Vec<[f32; 2]> = shape
+        .iter()
+        .map(|p| {
+            let (dx, dy) = (p[0] - c[0], p[1] - c[1]);
+            let length = (dx * dx + dy * dy).sqrt();
+            let k = if length > 0.0 { 1.0 + grow / length } else { 1.0 };
+            [at.0 + c[0] + dx * k, at.1 + c[1] + dy * k]
+        })
+        .collect();
+    for i in 1..grown.len() - 1 {
+        batch.fill_quad(atlas, [grown[0], grown[i], grown[i + 1], grown[i + 1]], color);
     }
 }
