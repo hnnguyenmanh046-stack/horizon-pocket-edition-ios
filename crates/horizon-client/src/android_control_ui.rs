@@ -1268,6 +1268,11 @@ const HUB_LINE_END: f32 = 292.0;
 /// On a hub too narrow for it beside the line under the title, the line goes; on one too narrow
 /// for it beside the title, there is none (the pause menu still has Launcher).
 fn hub_launcher_button(dx: f32, dy: f32, dw: f32) -> Option<[f32; 4]> {
+    // Horizon PE: iOS has no launcher (the app starts in the game), so the hub has no button for
+    // one: there it would save the world and end the game.
+    if cfg!(target_os = "ios") {
+        return None;
+    }
     let r = [dx + dw - 272.0, dy + 10.0, 76.0, 28.0];
     (r[0] >= dx + HUB_TITLE_END).then_some(r)
 }
@@ -3086,7 +3091,12 @@ impl TouchUi {
             dx + 52.0,
             dy + 8.0,
             text_c,
-            "Starling Control Hub",
+            // Horizon PE: as its 1.0.0 named it on iOS.
+            if cfg!(target_os = "ios") {
+                "Horizon Control Hub"
+            } else {
+                "Starling Control Hub"
+            },
         );
         // The line under the title gives way to the Launcher button on a narrow hub.
         if hub_launcher_button(dx, dy, dw).is_none_or(|r| r[0] >= dx + HUB_LINE_END) {
@@ -3447,7 +3457,11 @@ impl TouchUi {
                     &mut ui,
                     body_y + 448.0,
                     "Pause in the Background",
-                    "Pause the game and its sound when Starling leaves the screen",
+                    if cfg!(target_os = "ios") {
+                        "Pause the game and its sound when Horizon PE leaves the screen"
+                    } else {
+                        "Pause the game and its sound when Starling leaves the screen"
+                    },
                     Some(self.pause_in_background),
                     None,
                 );
