@@ -104,6 +104,9 @@ for manifest in pathlib.Path(sys.argv[1]).glob("*/horizon-mixin.toml"):
 EOF
 # Mods made before Horizon split its client into crates, pointed at where things went (Starling's).
 python3 "$source/packaging/android/native_mod_adapt.py" "$work/source" "$work/mods"
+# Android-only statements in the functions the mods hook, which horizon-mixins refuses and no
+# build from here compiles (native_stage_cfg.py).
+python3 "$here/native_stage_cfg.py" "$work/source" "$work/mods"
 
 echo "native_stage: $commit with $(ls "$work/mods" | tr '\n' ' ')"
 "$tools/bin/horizon-mixins" apply --workspace "$work/source" --mods "$work/mods" --out "$work/stage"

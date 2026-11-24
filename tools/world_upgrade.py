@@ -164,13 +164,17 @@ def change_options(home):
     path = home / 'options.txt'
     wanted = {'fov': '0.25', 'gamma': '0.75', 'guiScale': '3', 'renderDistance': '7',
               'maxFps': '90', 'bobView': 'false', 'key_key.jump': 'key.keyboard.j'}
-    lines = path.read_text(encoding='utf-8').splitlines()
+    # A game that changed nothing yet has written no options.txt: the choices are then the file.
+    lines = path.read_text(encoding='utf-8').splitlines() if path.is_file() else []
     seen = set()
     for i, line in enumerate(lines):
         key = line.partition(':')[0]
         if key in wanted:
             lines[i] = f'{key}:{wanted[key]}'
             seen.add(key)
+    if not lines:
+        lines = [f'{key}:{value}' for key, value in wanted.items()]
+        seen = set(wanted)
     assert seen, f'{path} has none of {sorted(wanted)}'
     path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
     return {key: wanted[key] for key in seen}
