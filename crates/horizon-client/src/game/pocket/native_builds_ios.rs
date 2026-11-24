@@ -409,7 +409,8 @@ fn download(
     let mut found = None;
     for i in 0..archive.len() {
         let entry = archive.by_index(i).map_err(|e| e.to_string())?;
-        let name = entry.name();
+        // A name that is not text is no .ipa of ours.
+        let Ok(name) = entry.name() else { continue };
         if name.ends_with(".ipa") && !name.contains('/') {
             found = Some(i);
             break;
@@ -831,7 +832,7 @@ impl Game<'_> {
         let announce = shared(&self.native_builds).announce.take();
         if let Some((title, line)) = announce {
             self.server_packs.notice =
-                Some(SystemToast::new(title, Some(line)).with_display_time(10_000.0));
+                Some(SystemToast::new(title.into(), Some(line.into())).with_display_time(10_000.0));
         }
         let changes = shared(&self.native_builds).changes;
         if changes != self.native_builds.shown {

@@ -8,9 +8,11 @@ use key_codes::{
 pub(crate) use launch_options::Options;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 use loading_screen::missing_resources;
-use loading_screen::{
-    App, Loading, event_loop, leave_fullscreen_after, run_event_loop, unclean_start_recovery,
-};
+use loading_screen::{App, Loading, run_event_loop, unclean_start_recovery};
+// Horizon PE: on iOS the app owns the event loop and takes the game from the loader
+// (`resource_loader::take_game`), which so makes none of its own.
+#[cfg(not(target_os = "ios"))]
+use loading_screen::{event_loop, leave_fullscreen_after};
 use motion_ids::{motion_at, motion_block_entity};
 use resource_load::{Progress, launch_world, load_resources, named_scope, synchronous_startup};
 use resource_loader::{
