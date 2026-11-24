@@ -51,9 +51,17 @@ pub(super) const NO_ANSWER: &str =
 
 /// The server thread holds its `Game` by value and runs every tick on it.
 /// It reserves the same guest limit and host headroom as the main thread.
-#[cfg(not(all(target_os = "android", target_pointer_width = "32")))]
+#[cfg(not(any(
+    all(target_os = "android", target_pointer_width = "32"),
+    target_os = "ios"
+)))]
 const SERVER_THREAD_STACK: usize =
     horizon_guest_stack::GUEST_STACK_BYTES + horizon_guest_stack::HOST_HEADROOM;
+
+/// Horizon PE: iOS runs no wasm mod and has little address space (`horizon_guest_stack::builder`).
+/// The one server thread gets what the game's own thread has there (horizon-ios-game `GAME_STACK`).
+#[cfg(target_os = "ios")]
+const SERVER_THREAD_STACK: usize = 64 * 1024 * 1024;
 
 /// 32-bit Android keeps the original server stack: its wasm runs on Pulley, whose frames are on the
 /// heap, and its address space is short (`horizon_guest_stack::builder`).

@@ -11,10 +11,23 @@ pub use constants::{GUEST_STACK_BYTES, HOST_HEADROOM};
 /// space, not memory.
 pub fn builder() -> std::thread::Builder {
     let worker = std::thread::Builder::new();
-    #[cfg(not(all(target_os = "android", target_pointer_width = "32")))]
+    #[cfg(not(any(
+        all(target_os = "android", target_pointer_width = "32"),
+        target_os = "ios"
+    )))]
     let worker = worker.stack_size(GUEST_STACK_BYTES + HOST_HEADROOM);
+    #[cfg(target_os = "ios")]
+    let worker = worker.stack_size(IOS_WORKER_STACK);
     worker
 }
+
+/// Horizon PE: a worker's stack on iOS. An iPhone's app has a few GB of address space, not a
+/// desktop's or 64-bit Android's (without an entitlement a sideloaded app can't have), and the
+/// worker pools are dozens of threads: 136 MiB each would be most of it. iOS runs no wasm mod (no
+/// code but the app's own), which is what the reservation is for; the game's own code ran on
+/// std's 2 MiB before the reservation was there, and still does on 32-bit Android.
+#[cfg(target_os = "ios")]
+pub const IOS_WORKER_STACK: usize = 16 * 1024 * 1024;
 
 /// Starts a named worker. On Wasm hosts debug builds verify its guest stack reservation.
 pub fn spawn<T: Send + 'static>(
@@ -22,7 +35,10 @@ pub fn spawn<T: Send + 'static>(
     body: impl FnOnce() -> T + Send + 'static,
 ) -> std::io::Result<std::thread::JoinHandle<T>> {
     builder().name(name).spawn(move || {
-        #[cfg(not(all(target_os = "android", target_pointer_width = "32")))]
+        #[cfg(not(any(
+            all(target_os = "android", target_pointer_width = "32"),
+            target_os = "ios"
+        )))]
         debug_assert_eq!(
             check_current(),
             Ok(()),
