@@ -696,13 +696,11 @@ impl Game<'_> {
         };
         let Some(tag) = self.build_tag() else {
             return Some((
-                "The app can't tell its own version, so it can't ask for a build of it."
-                    .to_owned(),
+                "The app can't tell its own version, so it can't ask for a build of it.".to_owned(),
                 true,
             ));
         };
-        let device =
-            mod_builds::device(&horizon_client::logging::private_home().join(DEVICE_FILE));
+        let device = mod_builds::device(&horizon_client::logging::private_home().join(DEVICE_FILE));
         let shared_state = self.native_builds.shared.clone();
         {
             let mut state = shared(&self.native_builds);
@@ -811,8 +809,7 @@ impl Game<'_> {
                 p.ipa = None;
             }
             let service = mod_builds::service();
-            let follow_it =
-                service.is_some() && pending.as_ref().is_some_and(Pending::under_way);
+            let follow_it = service.is_some() && pending.as_ref().is_some_and(Pending::under_way);
             // A build that waits to be installed says so again at each start.
             let waiting = pending.as_ref().is_some_and(|p| p.ipa.is_some());
             {
@@ -824,9 +821,8 @@ impl Game<'_> {
             }
             if let (true, Some(service)) = (follow_it, service) {
                 let shared_state = self.native_builds.shared.clone();
-                let device = mod_builds::device(
-                    &horizon_client::logging::private_home().join(DEVICE_FILE),
-                );
+                let device =
+                    mod_builds::device(&horizon_client::logging::private_home().join(DEVICE_FILE));
                 let _ = std::thread::Builder::new()
                     .name("mod build".into())
                     .spawn(move || follow(shared_state, service, device));

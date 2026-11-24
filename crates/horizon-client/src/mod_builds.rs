@@ -150,7 +150,11 @@ pub fn read_state(text: &str) -> Result<(String, State), String> {
                 .to_owned(),
         },
         "none" => State::None,
-        other => return Err(format!("The build service said {other:?}, which this app does not know.")),
+        other => {
+            return Err(format!(
+                "The build service said {other:?}, which this app does not know."
+            ));
+        }
     };
     Ok((key.to_owned(), state))
 }
@@ -270,7 +274,9 @@ mod tests {
         );
         assert_eq!(read(r#""state":"queued""#).unwrap().1, State::Queued);
         assert_eq!(
-            read(r#""state":"building","since":"2026-11-24T11:50:00Z""#).unwrap().1,
+            read(r#""state":"building","since":"2026-11-24T11:50:00Z""#)
+                .unwrap()
+                .1,
             State::Building {
                 since: "2026-11-24T11:50:00Z".into()
             }
@@ -357,6 +363,9 @@ mod tests {
         // 1.0.0's file (a build followed on GitHub with a token) is not one of these.
         assert!(serde_json::from_str::<Pending>(r#"{"mods":["zoom"],"asked":1,"run":5}"#).is_err());
         assert_eq!(mods_label(&[]), "no mods");
-        assert_eq!(mods_label(&["a".into(), "b".into(), "c".into()]), "a, b and c");
+        assert_eq!(
+            mods_label(&["a".into(), "b".into(), "c".into()]),
+            "a, b and c"
+        );
     }
 }

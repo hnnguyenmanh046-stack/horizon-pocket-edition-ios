@@ -111,7 +111,6 @@ pub mod hunger;
 pub mod import;
 pub mod inv_sort;
 pub mod ios_releases;
-pub mod mod_builds;
 pub mod item_activation;
 pub mod item_attributes;
 pub mod item_render;
@@ -119,6 +118,7 @@ pub mod item_sync;
 pub mod item_tooltip;
 pub mod join_seq;
 pub mod kinetics;
+pub mod mod_builds;
 pub mod move_gate;
 /// Game-owned JSON metadata conversion, shared by recipe and API adapters.
 pub use horizon_core::json_nbt;
