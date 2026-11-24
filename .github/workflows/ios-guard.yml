@@ -100,6 +100,9 @@ jobs:
         run: |
           cargo test -p horizon-ios-prepare
           cargo test -p horizon-gamecontroller
+          # A phone's shader packs: terrain's depth pass and its two parts in one program
+          # (Starling's fix after 0.9.0, which drew terrain without the pack).
+          cargo test -p horizon-shaders --lib -- the_prepass_output_goes_past_the_varyings
           cargo test -p horizon-client-render --lib -- auth:: android_controls keypad::
       # Shared worlds: the crate itself (shared-worlds.yml also runs it against an S3 server), the
       # title's screens, the in-game screen, the list, the host's login identity, the save's write
