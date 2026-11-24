@@ -111,6 +111,7 @@ pub mod hunger;
 pub mod import;
 pub mod inv_sort;
 pub mod ios_releases;
+pub mod mod_builds;
 pub mod item_activation;
 pub mod item_attributes;
 pub mod item_render;

@@ -238,6 +238,20 @@ fn density(w: f32, h: f32) -> f32 {
 }
 
 impl Game<'_> {
+    /// iOS: the version of the newer release of this app's edition the check found, if any: an
+    /// app with mods compiled in is updated by a build of that release with them
+    /// (game/pocket/native_builds_ios.rs).
+    #[cfg(target_os = "ios")]
+    pub(super) fn newer_release_version(&self) -> Option<String> {
+        self.update_offer
+            .shared
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .release
+            .as_ref()
+            .map(|release| release.version.clone())
+    }
+
     /// Once at start (the check, in the background), then the download while it runs.
     pub(super) fn poll_update_offer(&mut self) {
         let offer = &mut self.update_offer;
