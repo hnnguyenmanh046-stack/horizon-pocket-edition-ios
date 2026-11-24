@@ -11574,6 +11574,10 @@ pub(crate) fn run_with(
     horizon_world::datafix::set_resources(
         &std::path::absolute(&vanilla_root).unwrap_or_else(|_| vanilla_root.clone()),
     );
+    // iOS: game files laid out by another version of the app are laid out again by the setup
+    // (preparer.rs), before anything below reads them.
+    #[cfg(target_os = "ios")]
+    horizon_client::preparer::retire_other_tables(&vanilla_root);
     // Android has no launcher to start from: the setup screen asks for the game files instead
     // (iOS's too).
     #[cfg(not(any(target_os = "android", target_os = "ios")))]

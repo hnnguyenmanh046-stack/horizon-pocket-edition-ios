@@ -263,7 +263,7 @@ static TABLE: LazyLock<Vec<Def>> = LazyLock::new(|| {
     for part in MODEL_PARTS {
         t.push(pb(&format!("modelPart_{part}"), true));
     }
-    if cfg!(target_os = "android") {
+    if crate::PHONE {
         t.extend(
             crate::android_display::DisplayOption::ALL.map(|item| i(item.key(), 0, item.max(), 0)),
         );

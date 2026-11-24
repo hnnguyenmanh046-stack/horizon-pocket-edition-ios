@@ -210,11 +210,7 @@ fn run(resources: &Path, started: Instant) -> Result<(), String> {
 /// with the player's own official files just fetched, as horizon-prepare made them file for file
 /// (horizon-ios-prepare, checked by CI on every build).
 fn assemble(resources: &Path) -> Result<(), String> {
-    let engine = std::env::current_exe()
-        .map_err(|e| e.to_string())?
-        .parent()
-        .ok_or("The app cannot find its own files.")?
-        .join("assets/engine-data.zip");
+    let engine = engine_tables().ok_or("The app cannot find its own files.")?;
     if !engine.is_file() {
         return Err("The game tables are missing from the app: install it again.".into());
     }
@@ -231,6 +227,59 @@ fn assemble(resources: &Path) -> Result<(), String> {
     // Bedrock's touch buttons, from Mojang too, so the first game already has them.
     crate::bedrock_touch::fetch_logged(resources);
     Ok(())
+}
+
+/// The tables the iOS app carries (`assets/engine-data.zip`, beside its program).
+fn engine_tables() -> Option<PathBuf> {
+    Some(
+        std::env::current_exe()
+            .ok()?
+            .parent()?
+            .join("assets/engine-data.zip"),
+    )
+}
+
+/// iOS: an app installed over an older one carries other tables than the ones `resources` was
+/// laid out from, which this engine may not read. Their manifest goes, so the start finds no
+/// prepared files and the setup lays them out again from the official files still on the
+/// phone ([`assemble`], which replaces the folder whole), fetching them again only if they
+/// went. Before anything reads the folder. Whether it did.
+pub fn retire_other_tables(resources: &Path) -> bool {
+    if !cfg!(target_os = "ios") {
+        return false;
+    }
+    let manifest = resources.join("horizon-resources.json");
+    if !manifest.is_file() {
+        return false;
+    }
+    let Some(carried) = engine_tables().and_then(|engine| horizon_ios_prepare::engine_id(&engine))
+    else {
+        // An app without its tables can lay nothing out: what is there stays.
+        return false;
+    };
+    let laid_out = horizon_ios_prepare::assembled_id(resources);
+    if tables_match(laid_out.as_deref(), &carried) {
+        return false;
+    }
+    log::info!(
+        "Horizon: the game files were laid out from other tables ({}) than this app's ({}): \
+         laying them out again",
+        laid_out.as_deref().map_or("none", str::trim),
+        carried.trim()
+    );
+    match std::fs::remove_file(&manifest) {
+        Ok(()) => true,
+        Err(e) => {
+            log::warn!("Horizon: {}: {e}", manifest.display());
+            false
+        }
+    }
+}
+
+/// Whether the folder laid out from the tables `laid_out` (None: by an app that kept no note)
+/// holds this app's, `carried`.
+fn tables_match(laid_out: Option<&str>, carried: &str) -> bool {
+    laid_out.is_some_and(|id| id.trim() == carried.trim())
 }
 
 /// The fetched files' sounds into `kit`'s prepared folder (horizon-prepare's `sounds`).
@@ -412,4 +461,20 @@ fn unpack(bytes: &[u8], dir: &Path) -> Result<(), String> {
         std::io::copy(&mut entry, &mut file).map_err(|e| format!("{}: {e}", path.display()))?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::tables_match;
+
+    #[test]
+    fn only_the_apps_own_tables_are_kept() {
+        assert!(tables_match(Some("abc123"), "abc123"));
+        // A line end either side is none of the id.
+        assert!(tables_match(Some("abc123\n"), "abc123"));
+        assert!(tables_match(Some("abc123"), "abc123\n"));
+        // Another version's tables, and a folder laid out before the note was kept.
+        assert!(!tables_match(Some("abc124"), "abc123"));
+        assert!(!tables_match(None, "abc123"));
+    }
 }

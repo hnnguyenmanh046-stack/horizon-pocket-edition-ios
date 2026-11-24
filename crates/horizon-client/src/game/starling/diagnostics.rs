@@ -173,7 +173,7 @@ pub(super) fn status() -> Vec<String> {
                     Some("starling.diagnostics.exported");
                 // The share sheet opens with it: the report lands in the app's own files,
                 // which a player can't reach (#401).
-                #[cfg(target_os = "android")]
+                #[cfg(any(target_os = "android", target_os = "ios"))]
                 if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
                     let _ = crate::android::share_diagnostic(name);
                 }

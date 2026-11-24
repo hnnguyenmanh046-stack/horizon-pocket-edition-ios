@@ -914,7 +914,7 @@ impl Game<'_> {
         true
     }
 
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     pub(super) fn touch_menu_owns(&self, id: u64) -> bool {
         self.touch.pointer.owns(id)
     }
@@ -1333,7 +1333,7 @@ impl Game<'_> {
         false
     }
 
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     pub(super) fn on_wardrobe_preview(&self, p: [f32; 2]) -> bool {
         if self.screen != Screen::Options {
             return false;

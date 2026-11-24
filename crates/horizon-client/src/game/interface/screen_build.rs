@@ -463,7 +463,7 @@ impl Game<'_> {
         );
         let inputs = self.settings.gui_scale_inputs();
         let gui = GuiSize::new(framebuffer, inputs.requested, inputs.unicode);
-        #[cfg(target_os = "android")]
+        #[cfg(any(target_os = "android", target_os = "ios"))]
         let gui = {
             let batch = self.interface_batch(framebuffer);
             GuiSize {

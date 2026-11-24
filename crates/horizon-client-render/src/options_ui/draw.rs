@@ -20,13 +20,13 @@ pub(super) enum FrameDraw {
     Complete,
 }
 impl OptionsUi {
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     pub fn display_open(&self) -> bool {
         Self::graphics_page(self.page()).is_some()
             && self.graphics.selected_page() == Some(crate::graphics_ui::Page::Display)
     }
 
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     pub fn safe_zone_preview(
         &mut self,
         s: &Settings,

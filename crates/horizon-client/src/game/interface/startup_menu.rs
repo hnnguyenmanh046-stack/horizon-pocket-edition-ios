@@ -841,7 +841,7 @@ impl Loading {
                     self.save_menu_settings();
                     // Starling: the touch options (vibration, ...) live in horizon-touch.json,
                     // which options.txt's save leaves alone; the game loads them from there.
-                    #[cfg(target_os = "android")]
+                    #[cfg(any(target_os = "android", target_os = "ios"))]
                     if let Err(e) = self.settings.touch.save() {
                         log::warn!("Controls settings: {e}");
                     }

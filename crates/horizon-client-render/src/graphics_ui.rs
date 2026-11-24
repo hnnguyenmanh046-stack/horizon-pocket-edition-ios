@@ -37,9 +37,9 @@ pub enum Page {
     Hdr,
 }
 impl Page {
-    pub const ALL: [Page; 6 + cfg!(target_os = "android") as usize] = [
+    pub const ALL: [Page; 6 + crate::PHONE as usize] = [
         Page::General,
-        #[cfg(target_os = "android")]
+        #[cfg(any(target_os = "android", target_os = "ios"))]
         Page::Display,
         Page::Quality,
         Page::Performance,
@@ -62,6 +62,10 @@ impl Page {
     pub fn about(self) -> &'static str {
         match self {
             Page::General => "How far you see, the window and the HUD.",
+            // iOS: the safe zones only (the window is iOS's to place).
+            Page::Display if cfg!(target_os = "ios") => {
+                "Safe zones: room at the edges for the HUD, the buttons and the menus."
+            }
             Page::Display => "Screen orientation, aspect ratio, camera cutout and safe zones.",
             Page::Quality => "The sky and weather, lighting, textures and the image.",
             Page::Performance => "Chunk loading, culling and power use.",
@@ -669,7 +673,7 @@ pub fn rows() -> Vec<(Page, Vec<(&'static str, Vec<Setting>)>)> {
             ],
         ),
     ];
-    if cfg!(target_os = "android") {
+    if crate::PHONE {
         pages.insert(1, (Page::Display, vec![
             ("Display", [
                 (DisplayOption::Cutout, "Choose whether the game window includes the area around the camera cutout."),
@@ -690,6 +694,13 @@ pub fn rows() -> Vec<(Page, Vec<(&'static str, Vec<Setting>)>)> {
                 (DisplayOption::InterfaceVertical, "Move menus inward from the top and bottom edges. The applied margin leaves room for menu buttons at the current GUI scale."),
             ].into_iter().map(display_setting).collect()),
         ]));
+    }
+    // iOS: the cutout, the orientation, the rotation and the aspect ratio are Android's activity's
+    // to set (android.rs `apply_display_settings`); the safe zones are the game's own.
+    if cfg!(target_os = "ios")
+        && let Some((_, groups)) = pages.iter_mut().find(|(p, _)| *p == Page::Display)
+    {
+        groups.retain(|(name, _)| *name != "Display");
     }
     // The fork forces ticking serial, so Parallel Tick would be a no-op setting.
     for (_, groups) in &mut pages {

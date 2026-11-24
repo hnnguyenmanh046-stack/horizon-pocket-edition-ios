@@ -8,7 +8,7 @@ use super::*;
 /// until the game's own frame limit took over, heating the phone while it prepared. Adapted from
 /// Vasysik/horizon-android (its commit f5cf0231bc), MIT, copyright (c) 2026 Ludovic Marie and
 /// the Horizon contributors.
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 fn loading_frame_due(last: Option<Instant>) -> Option<Instant> {
     let next = last? + Duration::from_nanos(1_000_000_000 / 60);
     (Instant::now() < next).then_some(next)
@@ -16,7 +16,7 @@ fn loading_frame_due(last: Option<Instant>) -> Option<Instant> {
 
 /// When the next frame of the title menu drawn while the resources load is due: at once here
 /// (see the Android one).
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn loading_frame_due(_last: Option<Instant>) -> Option<Instant> {
     None
 }
@@ -1266,7 +1266,7 @@ pub(super) fn missing_resources(
 /// Which top-level prepared file a killed preparation or an interrupted copy
 /// left unusable. The loader parses these before it can start; naming one
 /// beats serde's bare "expected value at line 1 column 1".
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(super) fn damaged_prepared(root: &std::path::Path) -> Option<String> {
     let manifest = root.join("horizon-resources.json");
     let bytes = std::fs::read(&manifest).ok()?;

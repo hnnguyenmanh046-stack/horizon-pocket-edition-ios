@@ -62,7 +62,7 @@ jobs:
           cargo test -p horizon-ios-prepare
           cargo test -p horizon-gamecontroller
           cargo test -p horizon-client-render --lib -- auth:: android_controls keypad::
-          cargo test -p horizon-client-lib --lib -- ios_releases:: starling_releases::
+          cargo test -p horizon-client-lib --lib -- ios_releases:: starling_releases:: preparer::
 
   android:
     runs-on: ubuntu-latest

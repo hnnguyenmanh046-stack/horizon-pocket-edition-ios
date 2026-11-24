@@ -334,9 +334,10 @@ pub fn rows() -> Vec<(Page, Vec<(&'static str, Vec<Setting>)>)> {
             ],
         ),
     ];
-    // A phone reads its controllers through Android (game/pad/android.rs): the DualSense's own
-    // output, Steam's keyboard and a window out of focus are the computer's only.
-    if cfg!(target_os = "android") {
+    // A phone reads its controllers through Android (game/pad/android.rs; iOS through
+    // GameController, pad/ios.rs): the DualSense's own output, Steam's keyboard and a window out
+    // of focus are the computer's only.
+    if crate::PHONE {
         for (_, groups) in &mut pages {
             for (_, settings) in groups.iter_mut() {
                 settings.retain(|s| {

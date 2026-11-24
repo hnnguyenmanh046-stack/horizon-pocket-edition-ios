@@ -38,7 +38,7 @@ fn catalog_shelf(shelf: horizon_client::options_ui::CatalogShelf) -> starling_ca
 /// second. A paused game's menu draws its kept backdrop (`menu_blur_cache`) so cheaply that it
 /// ran at 300+ FPS, warming the phone for nothing. A computer keeps its limit.
 fn menu_frame_cap(limit: i32, has_screen: bool) -> i32 {
-    if cfg!(target_os = "android") && has_screen {
+    if horizon_client::PHONE && has_screen {
         limit.min(60)
     } else {
         limit
@@ -532,7 +532,7 @@ impl Game<'_> {
                 Event::Close => {
                     // A drag that ended without a release (`Changed`) still has its touch settings
                     // written.
-                    #[cfg(target_os = "android")]
+                    #[cfg(any(target_os = "android", target_os = "ios"))]
                     self.mobile_options_apply(true);
                     self.settings.save(&Self::options_path());
                     // The mods switched on the Mods page, in one reload (`switch_mods`).
@@ -1297,7 +1297,7 @@ mod menu_frame_cap_tests {
     /// menu, keep the limit.
     #[test]
     fn a_menu_caps_the_frame_rate_on_a_phone_only() {
-        let capped = if cfg!(target_os = "android") { 60 } else { 300 };
+        let capped = if horizon_client::PHONE { 60 } else { 300 };
         assert_eq!(menu_frame_cap(300, true), capped);
         assert_eq!(menu_frame_cap(300, false), 300);
         assert_eq!(menu_frame_cap(30, true), 30);

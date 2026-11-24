@@ -738,9 +738,11 @@ fn wordmark(atlas: &HudAtlas, batch: &mut HudBatch) {
     let small = (size * 0.25).clamp(micro(), 18.0);
     let block = size * 1.45 + small * 0.6 + small * 1.5;
     let top = (ui.h - block) / 2.0;
-    // Starling's name on its own app (Android), Horizon's everywhere else.
+    // Starling's name on its own app (Android), this port's on iOS, Horizon's everywhere else.
     let (name, tagline) = if cfg!(target_os = "android") {
         ("Starling", "Minecraft on Android, in Rust")
+    } else if cfg!(target_os = "ios") {
+        (horizon_client::APP_NAME, "Minecraft on iPhone and iPad, in Rust")
     } else {
         ("Horizon", "Rust based minecraft client")
     };

@@ -457,7 +457,7 @@ fn row(item: Item, s: &Settings, screens: &[PackScreen]) -> Row<Item> {
 fn pack_sheet(s: &Settings) -> Sheet<Tab, Item> {
     let packs = (0..s.shader_packs.len()).map(|i| Item::Pack(i as u16));
     // Starling: a phone gets its packs from the catalog too.
-    let catalog = cfg!(target_os = "android").then_some(Item::Catalog);
+    let catalog = crate::PHONE.then_some(Item::Catalog);
     let installed = packs.chain([Item::Folder]).chain(catalog);
     let about = lang::get(if s.shader_packs.is_empty() {
         NO_PACKS
@@ -483,7 +483,7 @@ fn pack_sheet(s: &Settings) -> Sheet<Tab, Item> {
         },
     ];
     // On a phone what a pack costs goes above however many packs there are.
-    if cfg!(target_os = "android") {
+    if crate::PHONE {
         groups.reverse();
     }
     Sheet::new(Tab::Packs, lang::get(PACKS), about, groups)
@@ -519,7 +519,7 @@ impl ShaderScreen {
             .unwrap_or_default()
             .join(crate::shader_pack_list::DIR);
         self.profiles = vec![String::new()];
-        if cfg!(target_os = "android") {
+        if crate::PHONE {
             self.profiles
                 .insert(0, crate::graphics::AUTO_PROFILE.to_owned());
         }

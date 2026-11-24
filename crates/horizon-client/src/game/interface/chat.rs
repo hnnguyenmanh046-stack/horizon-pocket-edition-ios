@@ -280,7 +280,7 @@ impl Default for SessionDispatcher {
 /// UI and command state that lives beside the game.
 #[derive(Default)]
 pub struct UiState {
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     pub(super) interface_origin: [f32; 2],
     pub chat: Chat,
     pub chat_screen: Option<ChatScreen>,

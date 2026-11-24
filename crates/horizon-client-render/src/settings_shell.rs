@@ -2047,7 +2047,7 @@ impl<S: Screen> Shell<S> {
         })
     }
 
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     pub(crate) fn preview_row(
         &mut self,
         s: &Settings,
@@ -2063,7 +2063,7 @@ impl<S: Screen> Shell<S> {
             .or_else(|| self.row_at(&view, at).map(|(row, _)| row.id).or(focused))
     }
 
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     pub(crate) fn selected_page(&self) -> Option<S::Page> {
         self.page
     }

@@ -50,7 +50,7 @@ impl HudArea {
         }
     }
 
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     pub(super) fn local_point(&self, point: [f32; 2], scale: f32) -> [f32; 2] {
         std::array::from_fn(|axis| point[axis] / scale - self.origin[axis])
     }
@@ -93,7 +93,7 @@ impl Game<'_> {
     }
 
     fn interface_insets(&self, batch: &HudBatch) -> [f32; 4] {
-        #[cfg(target_os = "android")]
+        #[cfg(any(target_os = "android", target_os = "ios"))]
         if self.screen != Screen::Playing
             || self.title.is_some()
             || self.screen_over_playing()
@@ -107,7 +107,7 @@ impl Game<'_> {
         [0.0; 4]
     }
 
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     fn menu_margins(&self, batch: &HudBatch, editing: bool) -> [f32; 4] {
         use horizon_client::android_display::{DisplayOption as D, interface_safe_zone};
         let margins = if editing {
@@ -121,7 +121,7 @@ impl Game<'_> {
         interface_safe_zone([batch.width, batch.height], margins)
     }
 
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     pub(super) fn button_safe_insets(&self, batch: &HudBatch) -> [f32; 4] {
         use horizon_client::android_display::{DisplayOption as D, interface_safe_zone};
         interface_safe_zone(
@@ -135,7 +135,7 @@ impl Game<'_> {
 
     /// Rebase the pointer when the menu opens, closes, or changes size.
     pub(super) fn sync_interface_cursor(&mut self, size: [u32; 2]) {
-        #[cfg(target_os = "android")]
+        #[cfg(any(target_os = "android", target_os = "ios"))]
         {
             let full = HudBatch::new(size, self.settings.gui_scale_inputs());
             let [x, y, _, _] = self.interface_insets(&full);
@@ -143,7 +143,7 @@ impl Game<'_> {
             self.cursor.0 += old_x - x;
             self.cursor.1 += old_y - y;
         }
-        #[cfg(not(target_os = "android"))]
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
         let _ = size;
     }
 
@@ -165,11 +165,11 @@ impl Game<'_> {
     }
 
     pub(in crate::game) fn interface_origin(&self) -> [f32; 2] {
-        #[cfg(target_os = "android")]
+        #[cfg(any(target_os = "android", target_os = "ios"))]
         {
             self.ui.interface_origin
         }
-        #[cfg(not(target_os = "android"))]
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
         {
             [0.0; 2]
         }
@@ -177,7 +177,7 @@ impl Game<'_> {
 
     pub(super) fn draw_performance_overlays(&mut self, batch: &mut HudBatch) {
         let hud = self.hud_safe_insets(batch);
-        #[cfg(target_os = "android")]
+        #[cfg(any(target_os = "android", target_os = "ios"))]
         if self.title.is_some() || self.screen != Screen::Playing {
             // The compact counter sits below Back in the utility buttons' layout.
             let area = HudArea::begin(batch, self.button_safe_insets(batch));
@@ -243,7 +243,7 @@ impl Game<'_> {
     }
 
     pub(super) fn hud_safe_insets(&self, batch: &HudBatch) -> [f32; 4] {
-        #[cfg(target_os = "android")]
+        #[cfg(any(target_os = "android", target_os = "ios"))]
         {
             use horizon_client::android_display::{DisplayOption as D, safe_zone};
             safe_zone(
@@ -254,14 +254,14 @@ impl Game<'_> {
                 ],
             )
         }
-        #[cfg(not(target_os = "android"))]
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
         {
             let _ = batch;
             [0.0; 4]
         }
     }
 
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     fn draw_safe_zone(
         &self,
         batch: &mut HudBatch,
@@ -297,7 +297,7 @@ impl Game<'_> {
         }
     }
     pub(super) fn preview_display_safe_zone(&mut self, batch: &mut HudBatch) {
-        #[cfg(target_os = "android")]
+        #[cfg(any(target_os = "android", target_os = "ios"))]
         if self.screen == Screen::Options {
             let [l, t, r, b] = self.interface_insets(batch);
             if let Some(zone) = self.ui.options.safe_zone_preview(

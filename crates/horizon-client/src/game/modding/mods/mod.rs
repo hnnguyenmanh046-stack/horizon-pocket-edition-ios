@@ -268,10 +268,11 @@ pub(super) fn install_registration_data(root: &Path) -> horizon_client::Result<(
         mod_api::InstanceDirectory::Windows(directory.as_os_str().encode_wide().collect())
     };
     // Android starts before the game files exist (its setup screen prepares them, no launcher did):
-    // with none yet there is nothing to read, and no native mod runs in the APK's own game.
+    // with none yet there is nothing to read, and no native mod runs in the APK's own game. iOS
+    // likewise.
     let names = match builtin_registry_names(root) {
         Ok(names) => names,
-        Err(_) if cfg!(target_os = "android") && !root.join("horizon-resources.json").is_file() => {
+        Err(_) if horizon_client::PHONE && !root.join("horizon-resources.json").is_file() => {
             BTreeMap::new()
         }
         Err(e) => return Err(e),
@@ -1804,7 +1805,7 @@ impl Game<'_> {
         let unbuilt = not_built(&native_dir, built, &self.settings.mods.installed);
         self.settings.mods.installed.extend(unbuilt);
         self.mods.report_refusals(&mut self.settings.mods.installed);
-        #[cfg(target_os = "android")]
+        #[cfg(any(target_os = "android", target_os = "ios"))]
         self.offer_compile();
         self.settings
             .mods

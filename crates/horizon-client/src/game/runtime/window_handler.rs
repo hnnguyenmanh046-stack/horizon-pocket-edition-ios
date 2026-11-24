@@ -20,12 +20,13 @@ impl Game<'_> {
 /// none, and the logical key is the nearest; a function apart so `window_event`, which mods target, has no
 /// cfg in its body (horizon-mixins refuses one).
 fn key_without_modifiers(event: &winit::event::KeyEvent) -> winit::keyboard::Key {
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         use winit::platform::modifier_supplement::KeyEventExtModifierSupplement;
         event.key_without_modifiers()
     }
-    #[cfg(target_os = "android")]
+    // Nor has winit's UIKit backend.
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     {
         event.logical_key.clone()
     }
@@ -111,7 +112,7 @@ impl Game<'_> {
             return;
         }
         self.save_when_focus_leaves(&event);
-        #[cfg(target_os = "android")]
+        #[cfg(any(target_os = "android", target_os = "ios"))]
         self.sync_interface_cursor(self.touch_size());
         if self.touch_event(event_loop, id, &event) {
             return;
