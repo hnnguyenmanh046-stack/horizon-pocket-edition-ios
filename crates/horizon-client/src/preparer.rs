@@ -226,6 +226,16 @@ fn assemble(resources: &Path) -> Result<(), String> {
     )?;
     // Bedrock's touch buttons, from Mojang too, so the first game already has them.
     crate::bedrock_touch::fetch_logged(resources);
+    // And the original control textures, as Android's preparing fetches them once its folder is
+    // in place: laying the files out replaces the folder, and the start's own fetch is only for
+    // a folder that was already there. Without them the first game after a setup (or after an
+    // update of the app, which lays the files out again) drew the controls without their art
+    // until the app was opened again. No network: the start fetches them next time, as before.
+    if let Err(e) = crate::android_control_assets::fetch(resources, |done, total| {
+        *shared() = Stage::Preparing(format!("Control textures: {done}/{total}"));
+    }) {
+        log::warn!("Horizon: control textures: {e}");
+    }
     Ok(())
 }
 
