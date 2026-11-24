@@ -889,17 +889,70 @@ pub fn rich(s: &str) -> horizon_client::text::Text {
     for part in parts {
         let (hex, rest) = part.split_at(part.len().min(6));
         let color = u32::from_str_radix(hex, 16).unwrap_or(0xFFFFFF);
-        let mut t = horizon_client::text::Text::legacy(rest);
+        // Horizon PE (0.9.0 engine): a text's spans are read-only once it is made, so the coloured ones are made first.
+        let mut spans = horizon_client::text::Text::legacy(rest).spans.clone();
         // Spans before any colour code of their own take the hex colour (`§l` etc. keep it).
-        for span in &mut t.spans {
+        for span in &mut spans {
             if span.style.color.is_some() {
                 break;
             }
             span.style.color = Some(color);
         }
-        out.spans.extend(t.spans);
+        out.push(horizon_client::text::Text::from_spans(spans));
     }
     out
+}
+
+/// Horizon PE: what Jade read through helpers the 0.9.0 engine no longer has under those names
+/// (`native_view_hit`, `native_block`, `native_block_property`, `native_energy`, `native_fluid_tanks`).
+/// The block on the crosshair, with its name as text (the engine's `Hit` holds a resolved key now).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ViewHit {
+    pub block_x: i32,
+    pub block_y: i32,
+    pub block_z: i32,
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
+    pub block: String,
+}
+
+/// The first block along the view and its distance (the engine's `view_hit`).
+fn view_hit(game: &Game<'_>) -> Option<(f32, ViewHit)> {
+    let (distance, hit) = game.view_hit()?;
+    let block = block_at(game, [hit.block_x, hit.block_y, hit.block_z]);
+    Some((distance, ViewHit { block_x: hit.block_x, block_y: hit.block_y, block_z: hit.block_z, x: hit.x, y: hit.y, z: hit.z, block }))
+}
+
+/// The name of the block at `pos`.
+fn block_at(game: &Game<'_>, pos: [i32; 3]) -> String {
+    game.res.facts().get(game.world.block(pos[0], pos[1], pos[2])).name.to_string()
+}
+
+/// A state property of the block at `pos`, as its text.
+fn block_property(game: &Game<'_>, pos: [i32; 3], key: &str) -> Option<String> {
+    let state = game.world.block(pos[0], pos[1], pos[2]);
+    game.pack.assets.registry.state(state)?.properties.get(key).map(|value| value.to_string())
+}
+
+/// What a mod machine's energy buffer holds and can hold. The 0.9.0 engine gives it through its
+/// capabilities, by level and side, which this port of Jade does not ask: none, so no energy line.
+fn mod_energy(_game: &Game<'_>, _pos: [i32; 3]) -> Option<(u32, u32)> {
+    None
+}
+
+/// A mod machine's tank as Jade shows it: its index, its fluid, millibuckets and capacity.
+struct ModTank {
+    tank: usize,
+    fluid: Option<String>,
+    amount: i32,
+    capacity: i32,
+}
+
+/// The tanks of a mod machine (as `mod_energy`: none on the 0.9.0 engine, so no tank lines). A
+/// cauldron's content is CauldronProvider's own, read from the block.
+fn mod_fluid_tanks(_game: &Game<'_>, _pos: [i32; 3]) -> Vec<ModTank> {
+    Vec::new()
 }
 
 /// Text without its `§` codes, for measuring.
@@ -958,7 +1011,7 @@ fn target(game: &Game<'_>) -> Option<Target> {
     let extra = num(game, "reach_distance");
     let block_reach = game.block_reach + extra; // RayTracing.fire: the player's own range, Extended Reach on top.
     let camera_ray = opt(game, "perspective_mode") == "camera" && !game.camera_type.first_person();
-    let mut block = game.native_view_hit().filter(|(d, _)| f64::from(*d) <= block_reach);
+    let mut block = view_hit(game).filter(|(d, _)| f64::from(*d) <= block_reach);
     if camera_ray
         && let Some((eye, dir)) = game.aim()
     {
@@ -966,7 +1019,7 @@ fn target(game: &Game<'_>) -> Option<Target> {
             crate::game::perspective::CameraType::ThirdPersonFront => ([eye[0] + dir[0] * 4.0, eye[1] + dir[1] * 4.0, eye[2] + dir[2] * 4.0], [-dir[0], -dir[1], -dir[2]]),
             _ => ([eye[0] - dir[0] * 4.0, eye[1] - dir[1] * 4.0, eye[2] - dir[2] * 4.0], dir),
         };
-        if let (Some(hit), Some((d, mut base))) = (game.clip_ray(origin, look, block_reach + 4.0), game.native_view_hit()) {
+        if let (Some(hit), Some((d, mut base))) = (game.clip_ray(origin, look, block_reach + 4.0), view_hit(game)) {
             base.block_x = hit.pos[0];
             base.block_y = hit.pos[1];
             base.block_z = hit.pos[2];
@@ -1586,7 +1639,9 @@ fn vanilla(game: &Game<'_>, t: &Target, details: bool, lines: &mut Vec<Line>) {
             }
             // StatusEffectsProvider: each effect and its time, by category (good green, bad red).
             let limit = num(game, "effects_limit") as usize;
-            for (id, ticks, amp) in m.extra.effects.iter().filter(|_| config(game).effects).take(limit) {
+            for effect in m.extra.effects.iter().filter(|_| config(game).effects).take(limit) {
+                // Horizon PE (0.9.0 engine): an effect is a record now, not a tuple.
+                let (id, ticks, amp) = (effect.id, &effect.duration, &effect.amplifier);
                 let short = id.trim_start_matches("minecraft:");
                 let mut name = game.translate(&format!("effect.minecraft.{short}"), short);
                 if (1..=9).contains(amp) {
@@ -1951,7 +2006,7 @@ fn info_lines(game: &Game<'_>, t: &Target, cfg: &Config, lines: &mut Vec<Line>) 
             if on(game, "registry_special") {
                 let key = (pos[0], pos[1], pos[2]);
                 if let Some(be) = game.world.block_entities.get(&key).filter(|_| &*game.res.facts().get(game.world.block(pos[0], pos[1], pos[2])).name == name) {
-                    let tag = horizon_client::save::encode_block_entity(key, be, name);
+                    let tag = horizon_client::save::block_entity_encode::encode(key, be, name);
                     if let Some(horizon_world::nbt::Tag::String(j)) = tag.get("id")
                         && let Ok(type_id) = j.to_string()
                     {
@@ -1974,7 +2029,7 @@ fn info_lines(game: &Game<'_>, t: &Target, cfg: &Config, lines: &mut Vec<Line>) 
                     lines.push(Line::text(format!("§8{}", trf("config.jade.plugin_jade.registry_name.special.fluid", "Fluid: %s", &[fluid]))));
                 }
                 // PoiTypes.forState.
-                if let Some((poi, _)) = game.pack.assets.registry.state(id).and_then(horizon_client::save::poi_type) {
+                if let Some((poi, _)) = game.pack.assets.registry.state(id).and_then(horizon_world::poi::poi_type) {
                     lines.push(Line::text(format!("§8{}", trf("config.jade.plugin_jade.registry_name.special.poi", "POI: %s", &[&poi.to_string()]))));
                 }
             }
@@ -2055,8 +2110,11 @@ fn human(number: i64, unit: &str) -> String {
 
 /// EnergyStorageProvider's line in Energy Storage's Display Style (`CommonProxy.wrapEnergyStorage` through any side).
 fn energy_lines(game: &Game<'_>, pos: [i32; 3], lines: &mut Vec<String>) {
-    let dim = game.dim.id();
-    let found = horizon_core::geometry::Direction::ALL.into_iter().find_map(|face| game.native_energy(dim, pos, face));
+    struct Energy {
+        amount: u32,
+        capacity: u32,
+    }
+    let found = mod_energy(game, pos).map(|(amount, capacity)| Energy { amount, capacity });
     let Some(energy) = found.filter(|e| e.capacity > 0) else { return };
     let (current, max) = (human(i64::from(energy.amount), "FE"), human(i64::from(energy.capacity), "FE"));
     lines.push(match opt(game, "energy_style").as_str() {
@@ -2106,9 +2164,17 @@ fn spawner_title(game: &Game<'_>, s: &horizon_client::mobs::spawner::Spawner) ->
 /// ItemStorageProvider's check on a container whose loot isn't rolled out to a player yet (RandomizableContainer's loot
 /// table: Horizon rolls it as the chunk loads and keeps the roll, so "still rolled" stands for it), with its table.
 fn unopened_loot(game: &Game<'_>, key: (i32, i32, i32), be: &horizon_client::containers::BlockEntity, block: &str) -> Option<(String, Option<i64>)> {
-    let rolled = game.world.chunks.get(&(key.0 >> 4, key.2 >> 4))?.saved.as_ref()?.rolled_loot.iter().find(|r| r.pos == key)?;
-    let tag = horizon_client::save::encode_block_entity(key, be, block);
-    (tag.get("Items") == Some(&rolled.items)).then(|| (rolled.table.clone(), rolled.seed))
+    // Horizon PE (0.9.0 engine): a container keeps its table until a player opens it, as vanilla's does (Horizon
+    // rolled it as the chunk loaded before, and kept the roll beside the chunk), so its saved form names it.
+    use horizon_world::nbt::Tag;
+    let _ = game;
+    let tag = horizon_client::save::block_entity_encode::encode(key, be, block);
+    let Some(Tag::String(table)) = tag.get("LootTable") else { return None };
+    let seed = match tag.get("LootTableSeed") {
+        Some(Tag::Long(seed)) => Some(*seed),
+        _ => None,
+    };
+    Some((table.to_string().ok()?, seed))
 }
 
 /// The server's lines Jade itself gives (VanillaPlugin's server data, the universal storage providers):
@@ -2195,7 +2261,7 @@ fn vanilla_server(game: &mut Game<'_>, player: u128, pos: [i32; 3], block: &str,
         // ItemStorageProvider: what a container holds, in rows of nine.
         Be::Chest(items) => {
             // HopperLockProvider: a locked hopper's title.
-            if block == "minecraft:hopper" && game.native_block_property(pos, "enabled").as_deref() == Some("false") && on(game, "redstone") {
+            if block == "minecraft:hopper" && block_property(game, pos, "enabled").as_deref() == Some("false") && on(game, "redstone") {
                 lines.push(encode(&Line::new().with(El::Title(tr("jade.access.block.locked", "Locked {0}")))));
             }
             storage(game, details, lines, items.iter().flatten());
@@ -2262,15 +2328,12 @@ fn vanilla_server(game: &mut Game<'_>, player: u128, pos: [i32; 3], block: &str,
             storage(game, details, lines, m.items.iter().flatten());
             // FluidStorageProvider: a mod block's tanks, each a bar.
             if !ae2 && fluids {
-                let dim = game.dim.id().to_owned();
                 let mut seen = Vec::new();
-                for face in horizon_core::geometry::Direction::ALL {
-                    for t in game.native_fluid_tanks(&dim, pos, face).unwrap_or_default() {
-                        if !seen.contains(&t.tank) && (details || !on(game, "fluid_detailed")) {
-                            seen.push(t.tank);
-                            let name = t.fluid.as_deref().map(|f| fluid_name(game, f));
-                            lines.push(fluid_line_styled(game, name.as_deref(), t.fluid.as_deref(), t.amount, t.capacity, details));
-                        }
+                for t in mod_fluid_tanks(game, pos) {
+                    if !seen.contains(&t.tank) && (details || !on(game, "fluid_detailed")) {
+                        seen.push(t.tank);
+                        let name = t.fluid.as_deref().map(|f| fluid_name(game, f));
+                        lines.push(fluid_line_styled(game, name.as_deref(), t.fluid.as_deref(), t.amount, t.capacity, details));
                     }
                 }
             }
@@ -2348,7 +2411,7 @@ fn storage<'a>(game: &Game<'_>, details: bool, lines: &mut Vec<String>, stacks: 
 
 /// FluidStorageProvider for cauldrons: water, lava or powder snow by level.
 fn cauldron(block: &str, game: &mut Game<'_>, pos: [i32; 3], details: bool, lines: &mut Vec<String>) {
-    let level = |game: &mut Game<'_>| -> i32 { game.native_block_property(pos, "level").and_then(|l| l.parse().ok()).unwrap_or(0) };
+    let level = |game: &mut Game<'_>| -> i32 { block_property(game, pos, "level").and_then(|l| l.parse().ok()).unwrap_or(0) };
     let (fluid, mb) = match block {
         "minecraft:water_cauldron" => ("minecraft:water", level(game) * 1000 / 3),
         "minecraft:lava_cauldron" => ("minecraft:lava", 1000),
@@ -2981,9 +3044,13 @@ pub fn settings_changed() {
 pub fn client_command(game: &mut Game<'_>, command: &str, ran: &mut bool) {
     // A guest's `/jade` that reached the server's dispatcher is theirs, not this client's. `/jadec` is always the client's own.
     if matches!(command.split_whitespace().next(), Some("jade" | "gamerule"))
-        && let Some(player) = game.native_acting_player()
+        && let Some(acting) = game.native_acting_player()
     {
-        perform_command(game, &player, command, ran);
+        // Horizon PE (0.9.0 engine): the acting player is a reference; the command reads the player's record.
+        let uuid = acting.uuid();
+        if let Some(player) = game.native_server_players().into_iter().find(|p| p.uuid == uuid) {
+            perform_command(game, &player, command, ran);
+        }
         return;
     }
     let mut words = command.split_whitespace();
@@ -3148,7 +3215,7 @@ pub fn open_ignore_lists(game: &mut Game<'_>) {
         && let Some(dir) = files[0].parent()
     {
         // JadeClient.pleaseWait.
-        game.narrator_toast = Some(horizon_client::toasts::SystemToast::new("Please wait...".to_owned(), Some("This may take a few seconds.".to_owned())));
+        game.narrator_toast = Some(horizon_client::toasts::SystemToast::new("Please wait...".into(), Some("This may take a few seconds.".into())));
         crate::game::packs::open_folder(dir);
     }
 }
@@ -3251,10 +3318,9 @@ pub fn hud(game: &mut Game<'_>, batch: &mut HudBatch) {
     if !matches!(game.screen, crate::game::Screen::Playing)
         && let Some((item, uses)) = CLIENT.with_borrow_mut(|c| c.lookup_item.take())
     {
-        let name = if uses { "uses" } else { "recipe" };
-        let key = game.native_mod_key("jei", name, if uses { "key.keyboard.u" } else { "key.keyboard.r" });
-        let stack = crate::game::native_hooks::NativeStack { item, count: 1, components: String::new() };
-        game.native_panel_event("jei", &crate::game::native_hooks::NativePanelEvent::Key { key, stack });
+        // Horizon PE: not passed on. This edition has no JEI, and the 0.9.0 engine's panel event takes an item
+        // resolved when the game loads, not one named here.
+        let _ = (item, uses);
     }
     CLIENT.with_borrow_mut(|c| c.showing = false);
     if on(game, "narrate_keys")
@@ -3899,7 +3965,7 @@ fn block_request(game: &mut Game<'_>, player: u128, text: &str) {
     if out_of_reach(game, player, pos.map(f64::from), 4.5) {
         return;
     }
-    let block = game.native_block(pos);
+    let block = block_at(game, pos);
     let mut lines = Vec::new();
     vanilla_server(game, player, pos, &block, details, slot, &mut lines);
     if let Ok(providers) = SERVER_PROVIDERS.lock().map(|v| v.clone()) {

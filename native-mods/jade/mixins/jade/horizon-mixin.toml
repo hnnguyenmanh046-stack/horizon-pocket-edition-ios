@@ -282,11 +282,11 @@ bindings = [
 [[injection]]
 id = "rule-world-open"
 kind = "HEAD"
-hook = "world_lifecycle"
+# Horizon PE (0.9.0 engine): `server_started` is where `world_lifecycle`'s WorldOpenReady was.
+hook = "server_started"
 hook_version = 1
 helper = "rule_world_open.rs"
 bindings = [
   { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
-  { name = "phase", ty = "horizon_client::mod_api::WorldPhase", value = "phase" },
 ]
 
