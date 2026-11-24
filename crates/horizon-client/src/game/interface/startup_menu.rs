@@ -1000,7 +1000,9 @@ impl Loading {
                     horizon_client::platform::pick_file();
                 }
                 Event::RestartGame => {
-                    #[cfg(target_os = "android")]
+                    // On iOS too, as from the game's own Options (options.rs): the app says to
+                    // open it again and closes (horizon-ios-game).
+                    #[cfg(any(target_os = "android", target_os = "ios"))]
                     crate::android::restart_app();
                 }
                 Event::Credits => {
