@@ -6139,14 +6139,34 @@ impl OptionsUi {
                 && !(wd.list && (cursor.1 < top || cursor.1 >= bottom))
         })
     }
-    /// Whether `cursor` is on a slider of the settings shell's pages, which a finger takes only
-    /// moving clearly sideways (touch.rs, `prefer_slider`).
+    /// Whether `cursor` is on a slider of the settings pages, which a finger takes only moving
+    /// clearly sideways (touch.rs, `prefer_slider`).
+    ///
+    /// Horizon PE: the vanilla pages' sliders too (Video Settings, Music & Sounds, Controls, Mouse
+    /// Settings, Accessibility, Chat), not only the settings shell's. On those a thumb that landed
+    /// on a slider and went down the page a little askew took the slider by the plain rule
+    /// (sideways as soon as it is no less sideways than down), so scrolling a page changed the
+    /// settings it went over.
     pub fn list_slider_at(&mut self, s: &Settings, size: (f32, f32), cursor: (f32, f32)) -> bool {
         if self.resource_error.is_some() || self.painting() {
             return false;
         }
-        self.shell_mut()
-            .is_some_and(|shell| shell.slider_at(s, size, cursor))
+        if let Some(shell) = self.shell_mut() {
+            return shell.slider_at(s, size, cursor);
+        }
+        // The pages with drags of their own, as `list_button_at` leaves them.
+        if matches!(
+            self.page(),
+            Page::Packs | Page::SplitSetup | Page::SplitProfiles | Page::HdrCalibration
+        ) {
+            return false;
+        }
+        let (widgets, top, bottom, _) = self.layout(s, size.0, size.1);
+        widgets.iter().any(|wd| {
+            matches!(wd.kind, WKind::Slider { .. })
+                && ui::hovered(cursor, wd.x, wd.y, wd.w, wd.h)
+                && !(wd.list && (cursor.1 < top || cursor.1 >= bottom))
+        })
     }
     /// `VideoSettingsScreen.mouseScrolled`: with Ctrl held the wheel steps the GUI scale
     /// (auto counts as one past the maximum) and the list goes back to the top.
@@ -11272,6 +11292,10 @@ mod tests {
             .unwrap();
         let on_master = (master.x + 10.0, master.y + 10.0);
         assert!(!ui.list_button_at(&s, size, on_master));
+        // Horizon PE: a vanilla page's slider is one a finger takes only moving clearly sideways,
+        // as the shell's are (a thumb going down Music & Sounds changed the volumes it passed).
+        assert!(ui.list_slider_at(&s, size, on_master));
+        assert!(!ui.list_slider_at(&s, size, (master.x - 4.0, master.y + 10.0)));
     }
 
     #[test]

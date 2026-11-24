@@ -154,6 +154,8 @@ module into area folders (`game/starling/`, `game/interface/`, `game/runtime/`, 
 | `horizon-guest-stack/src/lib.rs`, `horizon-client/src/game/world/integrated.rs` | On iOS a worker's stack is 16 MiB (`IOS_WORKER_STACK`) and the server thread's 64 MiB, not 0.9.0's 136 MiB each; the game's own stack (`horizon-ios-game` `GAME_STACK`) is 64 MiB | 136 MiB is reserved for wasm mods, which iOS does not run; an iPhone app's address space is a few GB and the worker pools are dozens of threads |
 | `horizon-client/src/game.rs` (imports), `horizon-mod-package/src/runtime_leases/cleanup.rs` | `event_loop` and `leave_fullscreen_after` are imported off iOS only; `Cleanup.data` may go unread on iOS as on Android | Unused on iOS (the app owns the event loop; no mod process holder), and the iOS lint has no warnings |
 | `horizon-client/src/game/runtime/loading_screen.rs` (`show_startup_console`) | The boot console while the game loads (0.9.0's, Android's) is iOS's too | A phone's start is the same on both |
+| `horizon-client-render/src/options_ui.rs` (`list_slider_at`) | The vanilla settings pages' sliders are ones a finger takes only moving clearly sideways, as the settings shell's | Scrolling Video Settings or Music & Sounds with a thumb changed the sliders it went over |
+| `horizon-client/src/preparer.rs` (`assemble`) | iOS's laying out fetches the original control textures too, as Android's preparing does | The first game after a setup or an update of the app drew the controls without their art |
 
 ## Gate ledger
 
