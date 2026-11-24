@@ -246,7 +246,10 @@ def run(old, new, work):
         # 1. The older game: a start writes its settings, the player changes some, then plays.
         old_home = work / 'old'
         first = game(old, old_home)
+        # (The older game takes key presses only with a world open.)
+        open_world(first)
         write_options(first)
+        close_world(first)
         first.stop()
         chosen = change_options(old_home)
         play = game(old, old_home)
