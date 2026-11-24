@@ -164,20 +164,34 @@ def change_options(home):
     path = home / 'options.txt'
     wanted = {'fov': '0.25', 'gamma': '0.75', 'guiScale': '3', 'renderDistance': '7',
               'maxFps': '90', 'bobView': 'false', 'key_key.jump': 'key.keyboard.j'}
-    # A game that changed nothing yet has written no options.txt: the choices are then the file.
-    lines = path.read_text(encoding='utf-8').splitlines() if path.is_file() else []
+    # The file is the game's own (`write_options`): one made up here would lack what the game
+    # writes with it (its `version`), and a file without that is read as an ancient one.
+    assert path.is_file(), f'the older game wrote no {path.name}: {sorted(p.name for p in home.iterdir())}'
+    lines = path.read_text(encoding='utf-8').splitlines()
     seen = set()
     for i, line in enumerate(lines):
         key = line.partition(':')[0]
         if key in wanted:
             lines[i] = f'{key}:{wanted[key]}'
             seen.add(key)
-    if not lines:
-        lines = [f'{key}:{value}' for key, value in wanted.items()]
-        seen = set(wanted)
     assert seen, f'{path} has none of {sorted(wanted)}'
     path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
     return {key: wanted[key] for key in seen}
+
+
+def write_options(game):
+    """The game writes its options.txt, as a player's does the first time they leave the options
+    screen: opened and closed here."""
+    path = game.home / 'options.txt'
+    game('options video')
+    for _ in range(3):
+        game('key esc tap')
+    for _ in range(100):
+        if path.is_file() and path.stat().st_size:
+            return
+        tf.time.sleep(0.2)
+    raise AssertionError(f'the game wrote no options.txt after its options screen: '
+                         f'{sorted(p.name for p in game.home.iterdir())}')
 
 
 def open_world(game):
@@ -231,7 +245,9 @@ def run(old, new, work):
     try:
         # 1. The older game: a start writes its settings, the player changes some, then plays.
         old_home = work / 'old'
-        game(old, old_home).stop()
+        first = game(old, old_home)
+        write_options(first)
+        first.stop()
         chosen = change_options(old_home)
         play = game(old, old_home)
         open_world(play)

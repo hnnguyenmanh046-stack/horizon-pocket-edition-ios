@@ -55,9 +55,14 @@ on:
 permissions:
   contents: read
 concurrency:
-  # A build with mods doesn't stop the plain one, nor one with other mods.
-  group: ios-${{ github.ref }}-${{ inputs.mods }}-${{ inputs.catalog_mods }}
-  cancel-in-progress: true
+  # Run on its own: a newer run of the same build replaces the older one; a build with mods
+  # doesn't stop the plain one, nor one with other mods. Called by another workflow (mod-build.yml,
+  # where `github.workflow` is the caller's name): never stopped and stopping nothing, each call a
+  # group of its own. A player waits on that build, and the caller already makes the same request
+  # wait for the first. (A called workflow's `inputs` are not all there when this is read: two
+  # builds once stopped each other.)
+  group: ${{ github.workflow == 'ios' && format('ios-{0}-{1}-{2}', github.ref, inputs.mods, inputs.catalog_mods) || format('ios-called-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.workflow == 'ios' }}
 env:
   HORIZON_TELEMETRY_URL: "off"
   # Release with fewer codegen passes: the release profile's single unit and LTO cost minutes.
