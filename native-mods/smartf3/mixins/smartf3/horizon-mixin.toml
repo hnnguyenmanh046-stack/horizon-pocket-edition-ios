@@ -28,18 +28,20 @@ source = "native.rs"
 # Pinned: SmartF3's screen replaces the vanilla debug screen. There is no
 # hook point for it: native_hud is drawn under menus, chat and toasts, not under
 # F1 with a menu open, and cannot keep the vanilla text from being drawn too.
-# `debug_keys::Game::draw_debug_overlay` itself can't be hooked (its body has
-# macros, which horizon-mixins refuses: E_UNSUPPORTED_MACRO), so the hook is on
-# its macro-free caller `Game::hud`, which, while F3 is open, is run with
-# SmartF3's screen in its place (native.rs `smartf3_hud`).
+# Horizon PE: the hook is on `debug_keys::Game::draw_debug_overlay` itself, the
+# step of `Game::hud` that draws the vanilla screen (native.rs
+# `smartf3_overlay`). The mod's own hooked its caller `Game::hud` and ran a copy
+# of it, since the overlay's body had macros then (horizon-mixins refuses them:
+# E_UNSUPPORTED_MACRO); on the 0.9.0 engine it has none.
 [[injection]]
 id = "hud"
 kind = "HEAD"
 cancellable = true
-target = "horizon_client::game::Game<'_>::hud"
+target = "horizon_client::game::debug_keys::Game<'_>::draw_debug_overlay"
 helper = "hud.rs"
 bindings = [
-  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+  { name = "game", ty = "&crate::game::Game<'_>", value = "&*self" },
+  { name = "batch", ty = "&mut HudBatch", value = "&mut *batch" },
   { name = "size", ty = "[u32;2]", value = "size" },
 ]
 

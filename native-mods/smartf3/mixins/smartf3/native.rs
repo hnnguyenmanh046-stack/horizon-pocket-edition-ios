@@ -126,50 +126,28 @@ fn resident_bytes() -> Option<u64> {
 }
 
 impl Game<'_> {
-    /// `Game::hud`'s HEAD, while F3 is open and SmartF3 draws it: the
-    /// game's own `hud` with SmartF3's screen where `draw_debug_overlay`
-    /// draws the vanilla one (after the screen and the toasts, before
-    /// Horizon's frame graph and the controller cursor). None runs the
-    /// game's `hud` (F3 closed, SmartF3 off in Options > Mods, set to
-    /// vanilla F3, or its file broken).
-    pub(super) fn smartf3_hud(&mut self, size: [u32; 2]) -> Option<HudBatch> {
-        if !self.debug || !on(self) || !config(self).enabled {
-            return None;
-        }
-        // Horizon PE: every step of the game's `hud`, in its order, with only the debug
-        // screen replaced. (The mod's own left out what the commit it was made for didn't
-        // have yet: the touch controls among them, so F3 took every button off the screen.)
-        let mut batch = if (self.server_packs.prompt.is_some()
-            || self.code_of_conduct.is_some()
-            || self.dialog_open())
-            && self.player.is_none()
+    /// `Game::draw_debug_overlay`'s HEAD, while F3 is open and SmartF3 draws it: SmartF3's
+    /// screen in the vanilla one's place, at its step of the game's `hud` (after the screen
+    /// and the toasts, before Horizon's frame graph and the controller cursor). False lets
+    /// the game draw its own (F3 closed, SmartF3 off in Options > Mods, set to vanilla F3,
+    /// its file broken, or the debug options screen open, which draws the vanilla one under
+    /// itself).
+    ///
+    /// Horizon PE: the mod's own replaced the whole of `Game::hud` with a copy of it, which
+    /// has to follow every step the game adds there (the touch controls were missing from
+    /// it: F3 took every button off a phone's screen). On the 0.9.0 engine the overlay's own
+    /// function can be hooked (it has no macro in it any more), so nothing of the game's is
+    /// copied.
+    pub(super) fn smartf3_overlay(&self, batch: &mut HudBatch, size: [u32; 2]) -> bool {
+        if !self.debug
+            || self.screen == Screen::DebugOptions
+            || !on(self)
+            || !config(self).enabled
         {
-            HudBatch::new(size)
-        } else {
-            self.hud_layers(size)
-        };
-        self.draw_slot_touch(&mut batch);
-        if self.command_prompt.is_none() {
-            self.draw_dialog(&mut batch);
+            return false;
         }
-        self.draw_pack_prompt(&mut batch);
-        self.draw_code_of_conduct(&mut batch);
-        self.draw_link_prompt(&mut batch);
-        self.draw_touch(&mut batch);
-        self.draw_chat_bar(&mut batch);
-        self.draw_kinetic_info(&mut batch);
-        self.draw_command_prompt(&mut batch);
-        self.draw_narrator_toast(&mut batch);
-        self.smartf3_draw(&mut batch, size);
-        self.frame_graph
-            .draw(self.settings.horizon.overlay, &mut batch, &self.gui.atlas);
-        self.draw_stats_overlay(&mut batch);
-        self.draw_pad_cursor(&mut batch);
-        self.lift_over_keyboard(&mut batch);
-        self.draw_phone_offers(&mut batch);
-        self.draw_imports(&mut batch);
-        self.resolve_inline_profiles(&batch.inline_profiles);
-        Some(batch)
+        self.smartf3_draw(batch, size);
+        true
     }
 
     /// SmartF3's screen in place of `draw_debug_overlay`'s: on the same

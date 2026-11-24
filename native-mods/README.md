@@ -35,11 +35,11 @@ source it is in.
 | Armor Status | A Size setting (50% to 150%), starting at 80%; it starts left of the hotbar without its box (the mod's own: bottom right, with it) |
 | Zoom | The starting zoom is 6x (the mod's own: 4x) |
 | Waymap | The list panel on the HUD starts off (the mod's own: on). A tap on a text field of the waypoint editor brings a phone's keyboard up (`native_mod_screen_typing`, this edition's), and the first letter typed is no longer dropped when it is the key that opened the screen. Each world has its own waypoints (`native_world_key`: a world of this device by its folder, a shared world by its id): the mod's own kept one list for every world of the device |
-| SmartF3 | Its copy of the game's HUD (`smartf3_hud`) has every step the game's has: the mod's own left out the touch controls, so F3 took every button off a phone's screen |
+| SmartF3 | It hooks the debug screen's own step of the HUD (`draw_debug_overlay`) and draws its screen there. The mod's own replaced the whole HUD with a copy of the game's, which left out the touch controls, so F3 took every button off a phone's screen |
 | Enchantment Hints | The hints are added in the item tooltip's hook point (`native_tooltip`) instead of `stations::Game::stack_tooltip`, so every tooltip has them, the one under the pointer too |
 | TreeFall | Largest tree starts at 2048 logs (the mod's own: 256) |
 | Status Effect HUD | It starts bottom left (the mod's own: top right) |
-| Jade | The overlay starts at the left of the screen, in its upper part (Jade's own: the centre, the top) |
+| Jade | The overlay starts at the left of the screen, in its upper part (Jade's own: the centre, the top). `/jade` is not hooked on a server's console, which the 0.9.0 engine and a phone don't have |
 
 Jade is licensed CC BY-NC-SA 4.0 (https://creativecommons.org/licenses/by-nc-sa/4.0/): it is
 shared here, changed as said above, under that same licence, and not for commercial use. The MIT
