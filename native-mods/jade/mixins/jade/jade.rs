@@ -3091,6 +3091,8 @@ pub fn perform_command(game: &mut Game<'_>, player: &crate::game::native_server:
 }
 
 /// `native_perform_console_command`: `/jade` on a server's console.
+/// Horizon PE: not hooked on the 0.9.0 engine, which has no console hook (horizon-mixin.toml).
+#[allow(dead_code)]
 pub fn perform_console_command(game: &mut Game<'_>, command: &str, ran: &mut bool) {
     let all: Vec<&str> = command.split_whitespace().collect();
     if rule_command(game, 0, &all, 4) {

@@ -273,17 +273,9 @@ bindings = [
   { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
 ]
 
-[[injection]]
-id = "jade-perform-console"
-kind = "HEAD"
-hook = "perform_console_command"
-hook_version = 1
-helper = "jade_perform_console.rs"
-bindings = [
-  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
-  { name = "command", ty = "&str", value = "command" },
-  { name = "ran", ty = "&mut bool", value = "&mut *ran" },
-]
+# Horizon PE: `/jade` on a server's console (the hook `perform_console_command`) is not hooked.
+# The 0.9.0 engine has no such hook, and a phone has no server console: the command in chat
+# (`perform_command`, above) is the one there is.
 
 # Jade.registerGameRules: jade:max_position_deviation, read when a world opens. The command is `/gamerule`, through the
 # command hooks above.
