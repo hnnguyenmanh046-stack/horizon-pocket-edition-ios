@@ -1,0 +1,55 @@
+name: native-tool-keep
+# horizon-mixins, the tool that applies the older-format native mods to the source
+# (packaging/ios/native_stage.sh), is built from Horizon's own repository at a pinned commit. This
+# keeps what a build here already has of it (the built tool, and its source where cargo still
+# holds it) as an artifact, for the day that repository cannot be reached.
+on:
+  workflow_dispatch:
+  push:
+    branches: ["**"]
+    paths:
+      - .github/workflows/native-tool-keep.yml
+permissions:
+  contents: read
+jobs:
+  keep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: native-mods-check
+          save-if: false
+      - uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/starling-native
+          key: native-mixins-${{ runner.os }}-${{ hashFiles('packaging/android/native_build.sh') }}
+      - name: What there is
+        run: |
+          set -uo pipefail
+          mkdir -p keep
+          ls -la ~/.cache/starling-native 2>/dev/null || echo "no tool in the cache"
+          find ~/.cache/starling-native -maxdepth 3 -type f 2>/dev/null | head -50
+          if [ -d ~/.cache/starling-native ]; then
+            tar -C ~/.cache -czf keep/starling-native-linux-x64.tar.gz starling-native
+            for tool in ~/.cache/starling-native/mixins-*/bin/horizon-mixins; do
+              [ -x "$tool" ] && "$tool" --version || true
+              sha256sum "$tool" || true
+            done
+          fi
+          ls ~/.cargo/git/db ~/.cargo/git/checkouts 2>/dev/null || echo "cargo holds no git sources"
+          found=$(find ~/.cargo/git -maxdepth 2 -iname '*mixins*' 2>/dev/null | tr '\n' ' ')
+          if [ -n "$found" ]; then
+            tar -C ~/.cargo -czf keep/horizon-mixins-cargo-git.tar.gz $(for f in $found; do echo "${f#$HOME/.cargo/}"; done)
+          fi
+          find ~/.cargo/registry -maxdepth 3 -iname '*mixins*' 2>/dev/null | head
+          ls -la keep
+      - uses: actions/upload-artifact@v4
+        with:
+          name: horizon-mixins-kept
+          path: keep/
+          retention-days: 90
+          if-no-files-found: error
