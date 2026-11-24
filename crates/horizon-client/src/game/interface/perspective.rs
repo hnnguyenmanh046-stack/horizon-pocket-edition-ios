@@ -1040,7 +1040,14 @@ impl Game<'_> {
                 .filter(|_| in_world)
                 .map(|s| &*s.item);
             if !self.own_invisible() {
-                self.player_cape_geometry(&m, chest, camera, 1.0, (data, 240 | 240 << 8), &mut verts);
+                self.player_cape_geometry(
+                    &m,
+                    chest,
+                    camera,
+                    1.0,
+                    (data, 240 | 240 << 8),
+                    &mut verts,
+                );
             }
             self.player_ears_geometry(
                 &m,

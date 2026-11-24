@@ -1,0 +1,115 @@
+name: mod-build
+run-name: mod-build ${{ inputs.key }}
+# The app with catalog mods compiled in, for a player who asked the game for it. An iPhone runs no
+# code its app did not ship with, so a mod is part of the app itself: the game asks the mod builds
+# service (packaging/mod-builds-worker), which starts this workflow at the release's own tag with
+# the mods and the build's key, then finds the .ipa by that key (the artifact `mod-build-<key>`,
+# kept seven days) and hands it to the player.
+#
+# Started at a release tag only: the workflow that builds a release with mods is the one that
+# release has. The request is checked before anything is fetched (tools/mod_build_key.py): a mod is
+# a catalog mod's `id@version`, and the key must be the request's own, so no request can take
+# another build's name. The build has no secret and may only read the repository.
+on:
+  workflow_dispatch:
+    inputs:
+      mods:
+        description: "Catalog mods, id@version separated by commas (zoom@1.0.0,gamma@1.2.0)"
+        type: string
+        required: true
+      key:
+        description: The build's key, as the mod builds service computes it; empty to compute it here
+        type: string
+        default: ""
+permissions:
+  contents: read
+concurrency:
+  # The same request asked twice is built once: the second waits and finds the first's file.
+  group: mod-build-${{ github.ref }}-${{ inputs.mods }}
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Check the request
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      key: ${{ steps.request.outputs.key }}
+      mods: ${{ steps.request.outputs.mods }}
+      built_in: ${{ steps.request.outputs.built_in }}
+      done: ${{ steps.request.outputs.done }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check the request
+        id: request
+        env:
+          TAG: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          MODS: ${{ inputs.mods }}
+          KEY: ${{ inputs.key }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [ "$REF_TYPE" = tag ] || { echo "::error::a mod build is made at a release's tag, not at $TAG"; exit 1; }
+          if [ -n "$KEY" ]; then
+            python3 tools/mod_build_key.py "$TAG" "$MODS" "$KEY" > request.txt
+          else
+            python3 tools/mod_build_key.py "$TAG" "$MODS" > request.txt
+          fi
+          key=$(head -n 1 request.txt)
+          # The mods as the key has them: sorted, one version an id.
+          mods=$(tail -n +2 request.txt | sed 's/ /@/' | paste -sd, -)
+          # The catalog has each of them, as native mods a build can take (their files are fetched
+          # and read by the build itself; here only the catalog's list).
+          curl -fsSL --retry 3 https://horizon-rust.github.io/horizon-mods/index.json -o index.json
+          python3 tools/ios_native_sdk.py list index.json > catalog.txt
+          while read -r id version; do
+            python3 - "$id" "$version" index.json <<'PY'
+          import json, sys
+          mod, version, index = sys.argv[1:]
+          projects = {p["id"]: p for p in json.load(open(index, encoding="utf-8"))["projects"] if p.get("kind") == "native-mod"}
+          if mod not in projects:
+              sys.exit(f"::error::{mod} is not a native mod of the catalog")
+          if version not in [v.get("version") for v in projects[mod].get("versions", [])]:
+              sys.exit(f"::error::the catalog has no {mod} {version}")
+          PY
+          done < <(tail -n +2 request.txt)
+          # The mods this edition is always built with (the Mods edition's), in the old format.
+          built_in=""
+          if [ -f native-mods/built-in.txt ]; then
+            built_in=$(grep -v '^#' native-mods/built-in.txt | tr -s ' \n' ' ' | sed 's/^ *//; s/ *$//')
+          fi
+          # Built already and still kept: nothing to do (the same request, asked again).
+          done=false
+          if gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=mod-build-$key&per_page=10" \
+               --jq '[.artifacts[] | select(.expired | not)] | length' | grep -qv '^0$'; then
+            done=true
+            echo "::notice::mod-build-$key is built already"
+          fi
+          {
+            echo "key=$key"
+            echo "mods=$mods"
+            echo "built_in=$built_in"
+            echo "done=$done"
+          } >> "$GITHUB_OUTPUT"
+          echo "::notice::build $key of $TAG with $mods${built_in:+ (and $built_in)}"
+
+  build:
+    name: Build the app
+    needs: check
+    if: ${{ needs.check.outputs.done != 'true' }}
+    uses: ./.github/workflows/ios.yml
+    permissions:
+      contents: read
+    with:
+      deliver: true
+      mods: ${{ needs.check.outputs.built_in }}
+      catalog_mods: ${{ needs.check.outputs.mods }}
+      artifact: mod-build-${{ needs.check.outputs.key }}
+      retention: 7
+      simulator: false

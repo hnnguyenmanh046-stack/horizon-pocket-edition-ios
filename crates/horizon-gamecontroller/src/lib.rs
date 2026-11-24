@@ -408,12 +408,7 @@ mod uikit {
     unsafe impl Encode for EdgeInsets {
         const ENCODING: Encoding = Encoding::Struct(
             "UIEdgeInsets",
-            &[
-                f64::ENCODING,
-                f64::ENCODING,
-                f64::ENCODING,
-                f64::ENCODING,
-            ],
+            &[f64::ENCODING, f64::ENCODING, f64::ENCODING, f64::ENCODING],
         );
     }
 
