@@ -140,6 +140,8 @@ pub(super) struct Touch {
     controls: TouchControls,
     /// The finger acting as the mouse off the playing screen.
     pointer: touch::TouchPointer,
+    /// Horizon PE: the part of a chat line a finger's drag has scrolled so far (`chat_scroll`).
+    pub(in crate::game) chat_lines: f32,
     /// The finger on a slot and the stack it picked (slots.rs).
     slots: slots::SlotTouch,
     /// A touch was seen (`has_touch`). The controls show while the input mode is the touch
