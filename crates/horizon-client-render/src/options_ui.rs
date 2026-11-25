@@ -274,6 +274,7 @@ impl Opt {
             Opt::TouchGameVibration => "Gameplay vibration",
             Opt::TouchAttackButtonLook => "Look while interacting",
             Opt::TouchHoldAttack => "Hold Attack to keep hitting",
+            Opt::TouchBigHotbar => "Bigger hotbar",
             Opt::TouchMouseSensitivity => "Virtual mouse sensitivity",
             Opt::TouchAnalog => "360-degree movement",
             Opt::TouchCircleSize => "Touch circle size",
@@ -696,6 +697,7 @@ impl Opt {
                 Some(format!("{:.0}%", s.touch.virtual_mouse_sensitivity * 100.0))
             }
             Opt::TouchHoldAttack => Some(if s.touch.hold_attack { "ON" } else { "OFF" }.into()),
+            Opt::TouchBigHotbar => Some(if s.touch.big_hotbar { "ON" } else { "OFF" }.into()),
             Opt::TouchAttackButtonLook => Some(
                 if s.touch.attack_button_look {
                     "ON"
@@ -1332,6 +1334,7 @@ impl Opt {
             Opt::TouchGameVibration => s.touch.vibrate ^= true,
             Opt::TouchAttackButtonLook => s.touch.attack_button_look ^= true,
             Opt::TouchHoldAttack => s.touch.hold_attack ^= true,
+            Opt::TouchBigHotbar => s.touch.big_hotbar ^= true,
             Opt::TouchAttackSide => s.touch.attack_indicator_left ^= true,
             Opt::TouchSwapJumpSneak => s.touch.swap_jump_sneak ^= true,
             Opt::TouchAutoSprint => s.touch.sprint_with_joystick ^= true,
@@ -4843,6 +4846,7 @@ impl OptionsUi {
                     Opt::TouchCrosshairGestures,
                     Opt::TouchAttackButtonLook,
                     Opt::TouchHoldAttack,
+                    Opt::TouchBigHotbar,
                     Opt::TouchSensitivity,
                     Opt::TouchSensitivityHorizontal,
                     Opt::TouchSensitivityVertical,

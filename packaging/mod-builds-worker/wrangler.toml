@@ -13,11 +13,10 @@ PER_DEVICE_PER_DAY = "6"
 PER_DAY = "300"
 MAX_MODS = "24"
 
-# The counters (they expire by themselves). Create the namespace and put its id here:
-#   npx wrangler kv namespace create LIMITS
+# The counters (they expire by themselves). No id: Cloudflare creates the store on the first
+# deploy, from the Deploy button and from `npx wrangler deploy` alike.
 [[kv_namespaces]]
 binding = "LIMITS"
-id = "PUT-THE-NAMESPACE-ID-HERE"
 
-# The token is a secret, never in this file:
-#   npx wrangler secret put GITHUB_TOKEN
+# The token is a secret, never in this file: the Deploy button asks for it (.dev.vars.example),
+# and from a computer it is `npx wrangler secret put GITHUB_TOKEN`.

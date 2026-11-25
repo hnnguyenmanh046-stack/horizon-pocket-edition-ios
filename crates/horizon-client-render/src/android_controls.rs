@@ -36,6 +36,8 @@ pub mod editor;
 pub use custom::CustomButton;
 pub use editor::{Editor, EditorDragKind, PickerStep};
 pub mod layout;
+/// Horizon PE: this port's own rules for the controls (pocket.rs).
+pub mod pocket;
 pub use layout::{
     Control, ControlStyle, JoystickMoveArea, JoystickStyle, Mode, Placement, PresetMeta, Settings,
 };
@@ -170,15 +172,6 @@ pub fn hotbar_slot(width: f32, height: f32, point: [f32; 2]) -> Option<usize> {
     (point[1] >= height - 22.0 && point[1] < height && (0.0..180.0).contains(&x))
         .then(|| (x / 20.0) as usize)
 }
-/// Horizon PE: the hotbar slot a finger at `point` means. A finger landing: the hotbar's own
-/// strip and a band above it (a thumb covers more than the strip's 22), the two ends a little
-/// wider. `sliding`: the finger landed on the hotbar and slides; wherever it is now, the slot is
-/// the one in its column, so the thumb need not stay on the strip.
-pub fn hotbar_slot_touch(w: f32, h: f32, point: [f32; 2], sliding: bool) -> Option<usize> {
-    let x = point[0] - (w / 2.0 - 90.0);
-    let landed = point[1] >= h - 34.0 && point[1] < h && (-6.0..186.0).contains(&x);
-    (sliding || landed).then(|| (x / 20.0).floor().clamp(0.0, 8.0) as usize)
-}
 #[derive(Clone, Copy)]
 enum Role {
     Move([f32; 2]),
@@ -241,6 +234,12 @@ pub struct TouchControls {
     pub mounted: bool,
     pub sneaking: bool,
     pub toggle_crouch: bool,
+    /// Horizon PE: the controller's own "toggle sneak" is on: a press of the sneak button flips
+    /// sneaking by itself, as `toggle_crouch` does.
+    pub pad_toggle_sneak: bool,
+    /// Horizon PE: the hotbar's size, and where the Inventory button goes for it
+    /// (`fit_big_hotbar`).
+    pub hotbar_fit: pocket::HotbarFit,
     /// Snapshotted by a world gesture; drift cannot turn eating into mining.
     pub hold_uses_item: bool,
     pub holding_use: bool,
@@ -292,6 +291,8 @@ impl Default for TouchControls {
             mounted: false,
             sneaking: false,
             toggle_crouch: false,
+            pad_toggle_sneak: false,
+            hotbar_fit: pocket::HotbarFit::default(),
             hold_uses_item: false,
             holding_use: false,
             holding: false,
@@ -627,6 +628,14 @@ impl TouchControls {
             }
         }
         let mut p = self.fit_placement(p);
+        // Horizon PE: the factory's Inventory button stands at the end of a hotbar that grew
+        // over its place (`fit_big_hotbar`). One the player moved stays where they put it.
+        if c == Control::Inventory
+            && let Some(x) = self.hotbar_fit.inventory_x
+            && self.inventory_is_factory()
+        {
+            p.center[0] = x;
+        }
         if factory_swap {
             // Keep the factory Swap beside Inventory in physical button units,
             // including portrait displays and the left-handed layout.
@@ -639,6 +648,65 @@ impl TouchControls {
             p = self.keep_clear(p);
         }
         p
+    }
+    /// Horizon PE: the Inventory button is where the factory put it, at the hotbar's right end
+    /// (the left one for a left hand).
+    fn inventory_is_factory(&self) -> bool {
+        let saved = self.settings.layouts[self.settings.mode.index()][Control::Inventory as usize];
+        saved.center == [0.73, 0.95] && saved.size == 0.075
+    }
+    /// Horizon PE: sizes the hotbar for a thumb (`pocket::fit_hotbar`) on a `surface` of pixels
+    /// whose HUD is in `area` (x, y, width, height in pixels) at `gui` pixels to a GUI pixel.
+    /// `px_per_mm` 0 (the size of a pixel is not known, or the bigger hotbar is off) leaves it.
+    pub fn fit_big_hotbar(&mut self, surface: [f32; 2], area: [f32; 4], gui: f32, px_per_mm: f32) {
+        // The buttons are asked where they are without a hotbar in their way.
+        self.hotbar_fit = pocket::HotbarFit::default();
+        if px_per_mm <= 0.0 || !self.settings.big_hotbar || self.editor.is_some() {
+            return;
+        }
+        let aspect = self.aspect();
+        let factory = self.inventory_is_factory() && self.visible(Control::Inventory);
+        let swap = factory && self.visible(Control::Offhand);
+        let mut obstacles = Vec::new();
+        for c in Control::ALL {
+            let beside = c == Control::Inventory || (c == Control::Offhand && swap);
+            // A joystick that appears under the thumb has no place of its own to keep clear.
+            let roaming = c == Control::Move && self.dynamic_joystick();
+            if self.visible(c) && !(factory && beside) && !roaming {
+                obstacles.push(self.placement(c).rect(aspect));
+            }
+        }
+        for index in 0..self.settings.custom_buttons.len() {
+            if self.custom_visible_for_state(index, false) {
+                obstacles.push(self.custom_placement(index).rect(aspect));
+            }
+        }
+        let own = self.placement(Control::Inventory).rect(aspect);
+        let mut block = own;
+        if swap {
+            let other = self.placement(Control::Offhand).rect(aspect);
+            let left = own[0].min(other[0]);
+            block[2] = (own[0] + own[2]).max(other[0] + other[2]) - left;
+            block[0] = left;
+        }
+        self.hotbar_fit = pocket::fit_hotbar(&pocket::HotbarRoom {
+            surface,
+            area,
+            gui,
+            px_per_mm,
+            obstacles: &obstacles,
+            inventory: factory.then_some(block),
+            inventory_own: own[2] / block[2].max(f32::EPSILON),
+            left_handed: self.settings.left_handed,
+        });
+    }
+    /// Horizon PE: a finger landing at `point` on the hotbar's strip is the hotbar's: no button
+    /// is there, or only the room a joystick may appear in (the hotbar is not that room).
+    pub fn hotbar_takes(&self, point: [f32; 2]) -> bool {
+        self.custom_at(point).is_none()
+            && self
+                .control_at(point)
+                .is_none_or(|c| c == Control::Move && self.dynamic_joystick())
     }
     fn button(c: Control) -> Option<Button> {
         Some(match c {
@@ -1140,7 +1208,8 @@ impl TouchControls {
                 // toggles there already, and a latch on top of it would take two taps.
                 Some(c)
                     if self.placement(c).toggleable
-                        && !(c == Control::Sneak && self.toggle_crouch) =>
+                        && !(c == Control::Sneak
+                            && (self.toggle_crouch || self.pad_toggle_sneak)) =>
                 {
                     self.latched_controls ^= 1 << (c as u16);
                     Role::Ignore
@@ -3211,21 +3280,75 @@ mod tests {
             assert!(!t.poll_state().held(Button::RightStick));
         }
     }
-    /// Horizon PE: from the factory a tap turns Sneak on and another turns it off.
+    /// Horizon PE: where the game flips sneaking on each press of its key (the controller's
+    /// "toggle sneak", on from the factory, or the Sneak option set to Toggle), a tap is one
+    /// press and nothing more. A latch of the button's own on top of that made every second
+    /// tap do nothing.
     #[test]
-    fn sneak_is_a_switch_from_the_factory() {
-        let mut t = TouchControls::default();
-        t.toggle_crouch = false;
-        let point = t.settings.placement(Control::Sneak).center;
-        t.update(1, point, true, false);
-        t.update(1, point, false, true);
-        assert!(t.poll_state().held(Button::RightStick), "on after a tap");
-        t.update(2, point, true, false);
-        t.update(2, point, false, true);
-        assert!(
-            !t.poll_state().held(Button::RightStick),
-            "off after another"
-        );
+    fn every_tap_on_sneak_is_one_press_where_the_game_toggles() {
+        for (crouch, pad) in [(false, true), (true, false), (true, true)] {
+            let mut t = TouchControls::default();
+            t.toggle_crouch = crouch;
+            t.pad_toggle_sneak = pad;
+            // Even on a layout that marks the button as a switch.
+            let slot = t.settings.slot(Control::Sneak);
+            t.settings.layouts[t.settings.mode.index()][slot].toggleable = true;
+            let point = t.settings.placement(Control::Sneak).center;
+            for tap in 1..=4 {
+                t.update(tap, point, true, false);
+                assert!(t.poll_state().held(Button::RightStick), "tap {tap}: down");
+                t.update(tap, point, false, true);
+                assert!(!t.poll_state().held(Button::RightStick), "tap {tap}: up");
+            }
+        }
+    }
+    /// Horizon PE: with the factory layout on a small iPhone the hotbar grows, the Inventory
+    /// button stands at its end, and nothing is under anything else.
+    #[test]
+    fn the_big_hotbar_fits_the_factory_layout_on_small_and_large_phones() {
+        // (pixels, pixels to a GUI pixel, pixels to a point): iPhone SE, 15, 15 Pro Max.
+        for (surface, gui, points) in [
+            ([1334.0_f32, 750.0], 3.0, 2.0),
+            ([2556.0, 1179.0], 4.0, 3.0),
+            ([2796.0, 1290.0], 5.0, 3.0),
+        ] {
+            let mut t = TouchControls::default();
+            t.viewport(surface[0] as u32, surface[1] as u32);
+            let per_mm = 163.0 / 25.4 * points;
+            t.fit_big_hotbar(surface, [0.0, 0.0, surface[0], surface[1]], gui, per_mm);
+            let size = gui * t.hotbar_fit.zoom;
+            assert!(t.hotbar_fit.zoom > 1.0, "{surface:?}: it grows");
+            let whole = (size - size.round()).abs() < 0.001;
+            assert!(whole, "{surface:?}: {size} is not whole pixels");
+            let slot = 20.0 * size / per_mm;
+            assert!(slot >= 6.0, "{surface:?}: a slot of {slot} mm");
+            // The hotbar as fractions of the surface.
+            let hot = [
+                0.5 - 91.0 * size / surface[0],
+                1.0 - 22.0 * size / surface[1],
+                182.0 * size / surface[0],
+                22.0 * size / surface[1],
+            ];
+            for c in Control::ALL {
+                if !t.visible(c) || c == Control::Move {
+                    continue;
+                }
+                let [x, y, w, h] = t.placement(c).rect(t.aspect());
+                let apart = x >= hot[0] + hot[2] || x + w <= hot[0] || y + h <= hot[1];
+                assert!(apart, "{surface:?}: {c:?} is under the hotbar");
+            }
+            assert!(t.hotbar_takes([0.5, 0.99]), "the strip is the hotbar's");
+            // A layout the player made is never moved: the hotbar keeps to what is free.
+            let saved = t.settings.mode.index();
+            t.settings.layouts[saved][Control::Inventory as usize].center = [0.70, 0.95];
+            t.fit_big_hotbar(surface, [0.0, 0.0, surface[0], surface[1]], gui, per_mm);
+            assert_eq!(t.hotbar_fit.inventory_x, None);
+            assert_eq!(t.placement(Control::Inventory).center[0], 0.70);
+            // And the option turns it off.
+            t.settings.big_hotbar = false;
+            t.fit_big_hotbar(surface, [0.0, 0.0, surface[0], surface[1]], gui, per_mm);
+            assert_eq!(t.hotbar_fit, pocket::HotbarFit::default());
+        }
     }
     #[test]
     fn flight_clears_ground_latch_and_descends_only_until_release() {
@@ -3346,23 +3469,6 @@ mod tests {
         let ray = screen_direction(forward, up, [0.75, 0.25], 2.0, 90.0);
         assert!(ray[0] < 0.0 && ray[1] > 0.0 && ray[2] > 0.0);
         assert!((ray.iter().map(|x| x * x).sum::<f64>() - 1.0).abs() < 1e-10);
-    }
-    /// Horizon PE: a thumb lands a little above the hotbar or past its ends and still picks, and
-    /// a slide picks by the column alone.
-    #[test]
-    fn hotbar_touch_is_generous_and_slides() {
-        let at = |x: f32, y: f32, sliding| hotbar_slot_touch(427.0, 240.0, [x, y], sliding);
-        for i in 0..9 {
-            assert_eq!(at(133.5 + i as f32 * 20.0, 230.0, false), Some(i));
-        }
-        assert_eq!(at(133.5, 210.0, false), Some(0), "a band above the strip");
-        assert_eq!(at(133.5, 200.0, false), None, "no higher");
-        assert_eq!(at(120.0, 230.0, false), Some(0), "left of the first");
-        assert_eq!(at(308.0, 230.0, false), Some(8), "right of the last");
-        assert_eq!(at(320.0, 230.0, false), None);
-        assert_eq!(at(213.5, 100.0, true), Some(4), "the column decides");
-        assert_eq!(at(0.0, 100.0, true), Some(0));
-        assert_eq!(at(427.0, 100.0, true), Some(8));
     }
     #[test]
     fn hotbar_all_nine_slots() {
