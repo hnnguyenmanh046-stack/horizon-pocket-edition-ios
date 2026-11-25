@@ -611,6 +611,7 @@ fn another_guests_live_merchant_session_is_visible_during_a_turn() {
             MerchantState {
                 session: Box::new(session),
                 scroll: 0,
+                finger_rows: 0.0,
                 dragging: false,
                 focused: None,
                 mob: Some(40),

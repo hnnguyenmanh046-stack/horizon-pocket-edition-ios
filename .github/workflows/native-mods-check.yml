@@ -20,6 +20,8 @@ on:
         required: false
 permissions:
   contents: read
+  # The kept horizon-mixins (native-tool-keep) is a build file of another run.
+  actions: read
 concurrency:
   group: native-mods-check-${{ github.ref }}
   cancel-in-progress: true
@@ -69,6 +71,29 @@ jobs:
         with:
           path: ~/.cache/starling-native
           key: native-mixins-${{ runner.os }}-${{ hashFiles('packaging/android/native_build.sh') }}
+      - name: The kept tool, when the cache has none
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rev=$(sed -n 's/^MIXINS_REV=\([0-9a-f]\{40\}\)$/\1/p' packaging/android/native_build.sh)
+          tool=$HOME/.cache/starling-native/mixins-${rev:0:12}/bin/horizon-mixins
+          if [ -x "$tool" ]; then
+            echo "horizon-mixins is in the cache"
+            exit 0
+          fi
+          run=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=horizon-mixins-kept&per_page=20" \
+            --jq '[.artifacts[] | select(.expired | not)][0].workflow_run.id // empty')
+          if [ -n "$run" ]; then
+            gh run download "$run" --repo "$GITHUB_REPOSITORY" --name horizon-mixins-kept --dir "$RUNNER_TEMP/kept"
+            mkdir -p "$HOME/.cache"
+            tar -C "$HOME/.cache" -xzf "$RUNNER_TEMP/kept/starling-native-linux-x64.tar.gz"
+          fi
+          if [ -x "$tool" ]; then
+            echo "::notice::horizon-mixins ${rev:0:12} taken from what native-tool-keep kept"
+          else
+            echo "::warning::no kept horizon-mixins ${rev:0:12}: it is built from Horizon's repository"
+          fi
       - name: horizon-mixins, and the source as it is
         run: |
           set -euo pipefail

@@ -9821,7 +9821,12 @@ impl Game<'_> {
                         && !bundle
                         && !self.tweak_scroll(d, self.inventory_target().0)
                     {
-                        self.station_scroll(d);
+                        // Horizon PE: a finger's steps are parts of a row (the merchant's offers).
+                        if finger {
+                            self.station_finger_scroll(d);
+                        } else {
+                            self.station_scroll(d);
+                        }
                     }
                     if self.screen == Screen::Stats && d != 0.0 {
                         self.stats_scroll(d);

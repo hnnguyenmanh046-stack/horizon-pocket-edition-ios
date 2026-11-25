@@ -5980,6 +5980,7 @@ mod merchant_packet_tests {
                 MerchantState {
                     session: Box::new(session),
                     scroll: 0,
+                    finger_rows: 0.0,
                     dragging: false,
                     focused: None,
                     mob: Some(77),
@@ -6122,6 +6123,7 @@ mod merchant_packet_tests {
                 MerchantState {
                     session: Box::new(session),
                     scroll: 0,
+                    finger_rows: 0.0,
                     dragging: false,
                     focused: None,
                     mob: Some(77),

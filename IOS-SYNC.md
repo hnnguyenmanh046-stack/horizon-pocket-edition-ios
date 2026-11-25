@@ -160,6 +160,8 @@ module into area folders (`game/starling/`, `game/interface/`, `game/runtime/`, 
 | `horizon-client/src/game/interface/startup_menu.rs` (`Event::RestartGame`) | The title's options ask iOS for a restart too, as the game's own do | A setting that needs a restart did nothing from the title |
 | `horizon-client/src/game/network/lan_screen.rs` (`world_options_scroll`), `game.rs` | A finger's scroll only scrolls the in-game world options; the wheel still steps the button under the pointer | A thumb going down the page changed the game mode, difficulty, cheats and LAN buttons it passed |
 | `packaging/android/native_mod_adapt.py` (`OLD_SHAPES`), `game/starling/native_compat.rs` (`native_text_old`) | An old-format mod's `native_text` is the opaque-RGB one it was written for | Horizon's takes ARGB now and draws nothing without alpha: Coordinates HUD, Armor Status, Status Effect HUD, Waymap, Jade's settings and BiomeCompass drew no text |
+| `horizon-client/src/game/items/trading.rs` (`merchant_finger_scroll`, `finger_rows`), `game/blocks/stations.rs` (`station_finger_scroll`), `game.rs` | A finger's drag over a villager's offers adds its steps up to whole rows | `MerchantScreen.mouseScrolled` truncates: a finger's part-row steps never moved the list down and moved it a row per event up (Starling issue 910) |
+| `.github/workflows/native-mods-check.yml` | Takes the kept `horizon-mixins` when the cache has none, as `ios.yml` does | Horizon's repositories cannot be reached; the cache of another branch is not this one's |
 
 ## Gate ledger
 
