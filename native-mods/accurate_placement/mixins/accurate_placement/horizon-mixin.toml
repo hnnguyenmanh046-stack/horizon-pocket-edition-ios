@@ -1,0 +1,23 @@
+[mod]
+id = "accurate_placement"
+version = "1.0.1"
+priority = 100
+
+# The commit it was tested on (see horizon-native.json).
+[compatibility]
+horizon_revision = "8f83e5c85ae3b9a117f742e8d91170c5c9080a06"
+
+[[module]]
+id = "runtime"
+file = "crates/horizon-client/src/game.rs"
+name = "accurate_placement"
+source = "runtime.rs"
+
+[[injection]]
+id = "frame"
+kind = "HEAD"
+target = "horizon_client::game::native_hooks::render_frame_pre::Game<'_>::native_render_frame_pre"
+helper = "frame.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+]
