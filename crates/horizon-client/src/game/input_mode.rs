@@ -132,15 +132,23 @@ impl Game<'_> {
     }
 }
 
-/// A classic mouse arrow whose tip is `at`: a black arrow needs a light edge to stay visible.
+/// Hynis's cursor: a rounded triangle, black with a white edge, its top corner at `at`.
 #[cfg(target_os = "ios")]
 fn draw_mouse_arrow(batch: &mut HudBatch, atlas: &HudAtlas, at: (f32, f32)) {
-    let head = [[0.0, 0.0], [0.0, 15.2], [11.6, 11.1]];
-    let tail = [[4.5, 12.2], [7.0, 18.0], [9.3, 16.9], [6.8, 11.2]];
-    for grow in [1.6, 0.0] {
-        let color = if grow > 0.0 { u32::MAX } else { 0xFF000000 };
-        fill_poly(batch, atlas, at, &head, grow, color);
-        fill_poly(batch, atlas, at, &tail, grow, color);
+    let tri = [[0.0f32, 0.0], [0.0, 15.5], [12.0, 9.0]];
+    // Each corner cut in two points rounds the shape.
+    let mut round: Vec<[f32; 2]> = Vec::new();
+    for i in 0..3 {
+        let (prev, p, next) = (tri[(i + 2) % 3], tri[i], tri[(i + 1) % 3]);
+        for q in [prev, next] {
+            let (dx, dy) = (q[0] - p[0], q[1] - p[1]);
+            let length = (dx * dx + dy * dy).sqrt();
+            let cut = 2.6 / length;
+            round.push([p[0] + dx * cut, p[1] + dy * cut]);
+        }
+    }
+    for (grow, color) in [(1.5, u32::MAX), (0.0, 0xFF000000)] {
+        fill_poly(batch, atlas, at, &round, grow, color);
     }
 }
 
