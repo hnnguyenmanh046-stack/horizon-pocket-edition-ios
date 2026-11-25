@@ -527,6 +527,10 @@ pub struct Settings {
     pub virtual_mouse_pointer_scale: f32,
     pub crosshair_gestures: bool,
     pub attack_button_look: bool,
+    /// Horizon PE: a held Attack button keeps hitting what the crosshair is on, each time the
+    /// weapon has recharged (game/starling/mobile_controls: `attack_hold_step`). Off: one hit a
+    /// press, as a mouse click.
+    pub hold_attack: bool,
     pub gyroscope: bool,
     pub gyro_sensitivity: f32,
     pub attack_indicator_left: bool,
@@ -582,7 +586,8 @@ pub struct Settings {
     pub layouts: [[Placement; 14]; 3],
 }
 /// The factory defaults' revision. 1: toggle sprint and inventory walk controls on.
-pub const DEFAULTS_REV: u32 = 2;
+/// 3 (Horizon PE): Sneak is a switch (a tap turns it on, another off).
+pub const DEFAULTS_REV: u32 = 3;
 fn default_profile_name() -> String {
     "default".into()
 }
@@ -665,6 +670,9 @@ impl Default for Settings {
                 row[c as usize].visible_in_menu = false;
             }
             row[Control::Attack as usize].passthrough = true;
+            // Horizon PE: Sneak stays on until tapped again. Building at an edge takes one thumb
+            // to move and the other to place, and leaves none to hold it.
+            row[Control::Sneak as usize].toggleable = true;
         }
         Self {
             input_selection: InputSelection::Auto,
@@ -699,6 +707,7 @@ impl Default for Settings {
             virtual_mouse_pointer_scale: default_pointer_scale(),
             crosshair_gestures: false,
             attack_button_look: true,
+            hold_attack: true,
             gyroscope: false,
             gyro_sensitivity: 1.0,
             attack_indicator_left: true,
@@ -801,6 +810,12 @@ impl Settings {
         // iOS: settings saved before the virtual mouse was on by default there get it on once.
         if s.defaults_rev < 2 && cfg!(target_os = "ios") {
             s.virtual_mouse_enabled = true;
+        }
+        // Horizon PE: layouts saved before Sneak was a switch get it as one, once.
+        if s.defaults_rev < 3 {
+            for row in &mut s.layouts {
+                row[Control::Sneak as usize].toggleable = true;
+            }
         }
         s.defaults_rev = s.defaults_rev.max(DEFAULTS_REV);
         s.sanitize();

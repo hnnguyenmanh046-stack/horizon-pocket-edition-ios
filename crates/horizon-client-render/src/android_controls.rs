@@ -170,6 +170,15 @@ pub fn hotbar_slot(width: f32, height: f32, point: [f32; 2]) -> Option<usize> {
     (point[1] >= height - 22.0 && point[1] < height && (0.0..180.0).contains(&x))
         .then(|| (x / 20.0) as usize)
 }
+/// Horizon PE: the hotbar slot a finger at `point` means. A finger landing: the hotbar's own
+/// strip and a band above it (a thumb covers more than the strip's 22), the two ends a little
+/// wider. `sliding`: the finger landed on the hotbar and slides; wherever it is now, the slot is
+/// the one in its column, so the thumb need not stay on the strip.
+pub fn hotbar_slot_touch(w: f32, h: f32, point: [f32; 2], sliding: bool) -> Option<usize> {
+    let x = point[0] - (w / 2.0 - 90.0);
+    let landed = point[1] >= h - 34.0 && point[1] < h && (-6.0..186.0).contains(&x);
+    (sliding || landed).then(|| (x / 20.0).floor().clamp(0.0, 8.0) as usize)
+}
 #[derive(Clone, Copy)]
 enum Role {
     Move([f32; 2]),
@@ -923,6 +932,13 @@ impl TouchControls {
             }
         }
     }
+    /// Horizon PE: whether a finger holds the Attack button itself (not a hold on the world, nor
+    /// a custom button): the game decides what such a hold does (`attack_hold_step`).
+    pub fn attack_button_held(&self) -> bool {
+        self.fingers
+            .values()
+            .any(|(role, _)| matches!(role, Role::Button(Button::RightTrigger)))
+    }
     pub fn shield_held(&self) -> bool {
         self.settings.shield_button
             && self.shield_available
@@ -1086,7 +1102,12 @@ impl TouchControls {
                     Role::Ignore
                 }
                 Some(Control::Sneak) if self.vertical_movement => Role::Button(Button::RightStick),
-                Some(c) if self.placement(c).toggleable => {
+                // Horizon PE: not Sneak where the game's own Sneak option is Toggle: the key
+                // toggles there already, and a latch on top of it would take two taps.
+                Some(c)
+                    if self.placement(c).toggleable
+                        && !(c == Control::Sneak && self.toggle_crouch) =>
+                {
                     self.latched_controls ^= 1 << (c as u16);
                     Role::Ignore
                 }
@@ -3061,6 +3082,23 @@ mod tests {
         let ray = screen_direction(forward, up, [0.75, 0.25], 2.0, 90.0);
         assert!(ray[0] < 0.0 && ray[1] > 0.0 && ray[2] > 0.0);
         assert!((ray.iter().map(|x| x * x).sum::<f64>() - 1.0).abs() < 1e-10);
+    }
+    /// Horizon PE: a thumb lands a little above the hotbar or past its ends and still picks, and
+    /// a slide picks by the column alone.
+    #[test]
+    fn hotbar_touch_is_generous_and_slides() {
+        let at = |x: f32, y: f32, sliding| hotbar_slot_touch(427.0, 240.0, [x, y], sliding);
+        for i in 0..9 {
+            assert_eq!(at(133.5 + i as f32 * 20.0, 230.0, false), Some(i));
+        }
+        assert_eq!(at(133.5, 210.0, false), Some(0), "a band above the strip");
+        assert_eq!(at(133.5, 200.0, false), None, "no higher");
+        assert_eq!(at(120.0, 230.0, false), Some(0), "left of the first");
+        assert_eq!(at(308.0, 230.0, false), Some(8), "right of the last");
+        assert_eq!(at(320.0, 230.0, false), None);
+        assert_eq!(at(213.5, 100.0, true), Some(4), "the column decides");
+        assert_eq!(at(0.0, 100.0, true), Some(0));
+        assert_eq!(at(427.0, 100.0, true), Some(8));
     }
     #[test]
     fn hotbar_all_nine_slots() {
