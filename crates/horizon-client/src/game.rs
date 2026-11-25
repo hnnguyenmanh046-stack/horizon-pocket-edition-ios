@@ -9859,7 +9859,7 @@ impl Game<'_> {
                         self.stats_scroll(d);
                     }
                     if self.screen == Screen::WorldOptions && d != 0.0 {
-                        self.world_options_scroll(d);
+                        self.world_options_scroll(d, finger);
                     }
                     if self.screen == Screen::ServerLinks && d != 0.0 {
                         self.server_links_scroll(d);
