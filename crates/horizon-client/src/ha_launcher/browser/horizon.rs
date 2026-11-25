@@ -106,7 +106,8 @@ pub fn index() -> Result<Arc<Index>, String> {
 /// repository where that is byte for byte the file the registry listed (the same SHA-256, which
 /// every download is still checked against). On the branch this app was built from.
 fn fallback_location() -> String {
-    let repo = option_env!("HORIZON_IOS_REPO").unwrap_or("shopifygav222/horizon-pocket-edition-ios");
+    let repo =
+        option_env!("HORIZON_IOS_REPO").unwrap_or("shopifygav222/horizon-pocket-edition-ios");
     let branch = option_env!("HORIZON_IOS_BRANCH").unwrap_or("main");
     format!("https://raw.githubusercontent.com/{repo}/{branch}/packaging/ios/registry/index.json")
 }

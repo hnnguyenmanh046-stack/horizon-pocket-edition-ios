@@ -15433,11 +15433,7 @@ fn ios_reported(info: &wgpu::DisplayHdrInfo) -> crate::graphics::Reported {
     let over_white = |n: &f32| n.is_finite() && *n > 1.05;
     let headroom = info
         .headroom
-        .and_then(|h| {
-            h.current
-                .filter(over_white)
-                .or(h.potential.filter(over_white))
-        })
+        .and_then(|h| h.current.filter(over_white).or(h.potential.filter(over_white)))
         .unwrap_or(2.5);
     crate::graphics::Reported {
         paper_white: 80,
