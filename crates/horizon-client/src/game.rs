@@ -9797,7 +9797,7 @@ impl Game<'_> {
                         self.hotbar_wheel_step(wheel, vertical_steps);
                     }
                     if self.screen == Screen::Chat && d != 0.0 {
-                        self.chat_scroll(d);
+                        self.chat_scroll(d, finger);
                     }
                     if self.screen == Screen::Social && d != 0.0 {
                         self.social_scroll(d);

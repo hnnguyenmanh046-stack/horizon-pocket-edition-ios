@@ -1426,7 +1426,8 @@ impl Game<'_> {
         });
         (self.cursor.0, self.cursor.1 + self.chat_lift(scale))
     }
-    pub(super) fn chat_scroll(&mut self, amount: f32) {
+    /// `finger`: the scroll is a finger's drag, whose steps are parts of a wheel notch.
+    pub(super) fn chat_scroll(&mut self, amount: f32, finger: bool) {
         let cursor = self.chat_pointer();
         let mouse = (cursor.0.floor() as i32, cursor.1.floor() as i32);
         if let Some(screen) = self.ui.chat_screen.as_mut()
@@ -1437,6 +1438,15 @@ impl Game<'_> {
         // ChatScreen.mouseScrolled: `hasShiftDown`, either Shift key.
         let shift = self.has_shift_down();
         let amount = amount.clamp(-1.0, 1.0) * if shift { 1.0 } else { 7.0 };
+        // Horizon PE: a finger's steps add up to whole lines. Each alone is under a line, which
+        // the truncation below made nothing: the chat only moved under a fast drag.
+        let amount = if finger {
+            let sum = self.touch.chat_lines + amount;
+            self.touch.chat_lines = sum.fract();
+            sum.trunc()
+        } else {
+            amount
+        };
         self.ui.chat.scroll_by(amount as i32, true);
     }
     pub(super) fn chat_click(&mut self) {
