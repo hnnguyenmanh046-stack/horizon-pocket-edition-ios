@@ -383,10 +383,14 @@ declare_class!(
             _region: &objc2::runtime::AnyObject,
         ) -> Option<Retained<objc2::runtime::AnyObject>> {
             let mtm = MainThreadMarker::from(self);
-            if UIDevice::currentDevice(mtm).userInterfaceIdiom() != UIUserInterfaceIdiom::Phone {
-                return None;
+            let phone =
+                UIDevice::currentDevice(mtm).userInterfaceIdiom() == UIUserInterfaceIdiom::Phone;
+            // No early `return`: this macro wraps the value the body ends with.
+            if phone {
+                unsafe { msg_send_id![objc2::class!(UIPointerStyle), hiddenPointerStyle] }
+            } else {
+                None
             }
-            unsafe { msg_send_id![objc2::class!(UIPointerStyle), hiddenPointerStyle] }
         }
 
         #[method(scrollGesture:)]
