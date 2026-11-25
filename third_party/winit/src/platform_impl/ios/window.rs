@@ -285,6 +285,13 @@ impl Inner {
                 msg_send_id![&*scene, pointerLockState]
             });
             if state.is_none() {
+                // Horizon PE: an iPhone locks no pointer, having none, but a mouse attached to
+                // it still tells its motion and buttons (GameController). That is the capture
+                // there: the motion turns the view and the buttons are the window's.
+                if super::hardware_mouse::attached() {
+                    self.view.set_mouse_captured(true);
+                    return Ok(());
+                }
                 return Err(ExternalError::NotSupported(NotSupportedError::new()));
             }
         }

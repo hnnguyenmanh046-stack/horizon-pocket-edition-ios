@@ -21,6 +21,7 @@ pub(crate) use self::event_loop::{
 };
 pub(crate) use self::monitor::{MonitorHandle, VideoModeHandle};
 pub(crate) use self::event_loop::take_exit_request;
+pub(crate) use self::hardware_mouse::drawn_pointer;
 pub(crate) use self::scene::take_opened_files;
 pub(crate) use self::window::{PlatformSpecificWindowAttributes, Window, WindowId};
 pub(crate) use crate::cursor::{

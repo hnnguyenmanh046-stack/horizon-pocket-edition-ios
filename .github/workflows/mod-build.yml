@@ -94,7 +94,9 @@ jobs:
           mods=$(tail -n +2 request.txt | sed 's/ /@/' | paste -sd, -)
           # The catalog has each of them, as native mods a build can take (their files are fetched
           # and read by the build itself; here only the catalog's list).
-          curl -fsSL --retry 3 https://horizon-rust.github.io/horizon-mods/index.json -o index.json
+          # Horizon's registry, else this port's copy of its index (packaging/ios/registry).
+          curl -fsSL --retry 3 https://horizon-rust.github.io/horizon-mods/index.json -o index.json \
+            || cp packaging/ios/registry/index.json index.json
           python3 tools/ios_native_sdk.py list index.json > catalog.txt
           while read -r id version; do
             python3 - "$id" "$version" index.json <<'PY'

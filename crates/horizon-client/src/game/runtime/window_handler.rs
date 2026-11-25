@@ -479,6 +479,8 @@ impl ApplicationHandler for Game<'_> {
         }
     }
     fn device_event(&mut self, event_loop: &ActiveEventLoop, _: DeviceId, event: DeviceEvent) {
+        #[cfg(target_os = "ios")]
+        self.ios_mouse_used(&event);
         // A composited view renders offscreen but its keyboard/mouse owner still
         // controls a visible native window. A headless offscreen run never does.
         if self.pending_save.is_none()

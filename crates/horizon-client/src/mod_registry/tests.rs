@@ -359,3 +359,24 @@ fn code_packages_never_reach_the_content_browser_install_path() {
     );
     fs::remove_dir_all(home).unwrap();
 }
+
+/// Horizon PE: the copy of the index this port reads when the registry is away
+/// (`fallback_location`) is an index the game takes, and every file it names is a release file
+/// of a repository on GitHub, which the downloads allow.
+#[test]
+fn the_fallback_index_parses() {
+    let text = include_str!("../../../../packaging/ios/registry/index.json");
+    let index = Index::parse(text).unwrap();
+    assert!(index.projects.len() > 200, "{}", index.projects.len());
+    for p in &index.projects {
+        for v in &p.versions {
+            assert!(
+                v.file.url.starts_with("https://github.com/")
+                    && v.file.url.contains("/releases/download/"),
+                "{}: {}",
+                p.id,
+                v.file.url
+            );
+        }
+    }
+}
