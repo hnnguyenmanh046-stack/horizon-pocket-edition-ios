@@ -704,7 +704,11 @@ impl Game<'_> {
             None
         };
         let column = slot_at(true).unwrap_or(self.selected);
-        if let Some(slot) = self.mobile.hotbar.touch(t.id, started, ended, landed, column) {
+        if let Some(slot) = self
+            .mobile
+            .hotbar
+            .touch(t.id, started, ended, landed, column)
+        {
             self.selected = slot;
             return;
         }
