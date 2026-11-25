@@ -11,14 +11,14 @@
 use super::Game;
 #[cfg(target_os = "android")]
 use super::native_builds::{density, wrapped};
+use horizon_client::catalog_page::Line;
 use horizon_client::{
     hud::HudBatch,
     ui_theme::{Face, Ui, color},
 };
-use horizon_client::catalog_page::Line;
 use starling_catalog::{
     Done, Shelf,
-    browser::{Kind, Project, Source as _, installed::Entry},
+    browser::{Kind, Project, installed::Entry},
     list::{self, Ask, Feed, Scroller, Tail},
 };
 use std::cell::{Cell, RefCell};

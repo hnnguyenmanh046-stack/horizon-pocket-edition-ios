@@ -223,7 +223,9 @@ pub fn lines(markdown: &str) -> Vec<Line> {
             if !block.text.is_empty() {
                 block.text.push(' ');
             }
-            block.text.push_str(line.trim_start_matches('>').trim_start());
+            block
+                .text
+                .push_str(line.trim_start_matches('>').trim_start());
         }
     }
     flush(&mut block, &mut out);
