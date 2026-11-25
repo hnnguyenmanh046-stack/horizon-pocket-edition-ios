@@ -62,7 +62,7 @@ jobs:
           MODS: ${{ inputs.mods }}
         run: |
           set -euo pipefail -f
-          curl -fsSL --retry 3 https://horizon-rust.github.io/horizon-mods/index.json -o "$RUNNER_TEMP/index.json"
+          curl -fsSL --retry 3 https://horizon-rust.github.io/horizon-mods/index.json -o "$RUNNER_TEMP/index.json" || echo '{"projects":[]}' > "$RUNNER_TEMP/index.json"
           python3 tools/ios_native_mods.py fetch "$RUNNER_TEMP/index.json" "$RUNNER_TEMP/native" ${MODS//,/ }
           python3 tools/ios_native_mods.py info "$RUNNER_TEMP/native" "$GITHUB_SHA" > "$RUNNER_TEMP/native-mods.json"
       - name: Check the Apple toolchain
@@ -231,7 +231,7 @@ jobs:
           MODS: ${{ inputs.mods }}
         run: |
           set -euo pipefail -f
-          curl -fsSL --retry 3 https://horizon-rust.github.io/horizon-mods/index.json -o "$RUNNER_TEMP/index.json"
+          curl -fsSL --retry 3 https://horizon-rust.github.io/horizon-mods/index.json -o "$RUNNER_TEMP/index.json" || echo '{"projects":[]}' > "$RUNNER_TEMP/index.json"
           python3 tools/ios_native_mods.py fetch "$RUNNER_TEMP/index.json" "$RUNNER_TEMP/native" ${MODS//,/ }
           python3 tools/ios_native_mods.py info "$RUNNER_TEMP/native" "$GITHUB_SHA" > "$RUNNER_TEMP/native-mods.json"
       - name: Install Rust and its iOS Simulator standard library
