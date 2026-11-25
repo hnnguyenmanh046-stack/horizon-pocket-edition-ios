@@ -525,6 +525,19 @@ impl Game<'_> {
     pub(in crate::game) fn native_text_width_old(&self, text: &str) -> f32 {
         HudBatch::text_width(&self.gui.atlas, text)
     }
+    /// Horizon PE: a line of text in opaque `rgb`, as `native_text` drew it before its colour
+    /// became ARGB (Starling 0.8.0's: the top byte was not read). Horizon's now draws nothing for
+    /// a colour without alpha, which is every colour a mod made for the old hooks passes.
+    pub(in crate::game) fn native_text_old(
+        &self,
+        batch: &mut HudBatch,
+        text: &str,
+        at: [f32; 2],
+        rgb: u32,
+        shadow: bool,
+    ) {
+        self.native_text(batch, text, at, rgb | 0xFF00_0000, shadow);
+    }
     /// The most recently extracted world frame's camera (Horizon's `native_camera`, the split's
     /// `camera`): during the GUI the current frame's, bob, spin and FOV included.
     pub(in crate::game) fn native_camera(&self) -> Option<::mod_api::Camera> {

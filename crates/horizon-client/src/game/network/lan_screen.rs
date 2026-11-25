@@ -1106,13 +1106,16 @@ impl Game<'_> {
     }
 
     /// The mouse wheel over the screen (ScrollableLayout, 10 pixels a step).
-    pub(super) fn world_options_scroll(&mut self, delta: f32) {
+    /// `finger`: the scroll is a finger's drag (a phone), which only scrolls. Horizon PE: the
+    /// wheel steps the button under the pointer here (game mode, difficulty, cheats, LAN), and a
+    /// thumb going down the page changed each one it passed.
+    pub(super) fn world_options_scroll(&mut self, delta: f32, finger: bool) {
         let (w, h) = self.gui_size();
         let stick_scroll = self.pad_stick_scroll();
         match self.world_options.as_mut() {
             Some(o) if o.view == View::Options => {
                 let hit_btn = o.hit(self.cursor, (w, h)).or(o.focused_button);
-                if let Some(btn) = hit_btn.filter(|_| !stick_scroll) {
+                if let Some(btn) = hit_btn.filter(|_| !stick_scroll && !finger) {
                     let step = if delta > 0.0 { -1 } else { 1 };
                     match btn {
                         Button::DefaultMode => {
