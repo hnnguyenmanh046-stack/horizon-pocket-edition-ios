@@ -1,9 +1,11 @@
 #![allow(clippy::unnecessary_cast)]
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::mem;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use objc2::rc::Retained;
-use objc2::runtime::{NSObjectProtocol, ProtocolObject};
+use objc2::runtime::{Imp, NSObjectProtocol, ProtocolObject, Sel};
 use objc2::{declare_class, msg_send, msg_send_id, mutability, sel, ClassType, DeclaredClass};
 use objc2_foundation::{CGFloat, CGPoint, CGRect, MainThreadMarker, NSObject, NSSet, NSString};
 use objc2_ui_kit::{
@@ -32,6 +34,37 @@ extern "C" {
     fn UIAccessibilityIsAssistiveTouchRunning() -> objc2::runtime::Bool;
 }
 
+static IN_ENABLE_HOOK: AtomicBool = AtomicBool::new(false);
+static ENABLE_HOOK_SET: AtomicBool = AtomicBool::new(false);
+
+type UpdateEnabled = extern "C" fn(&objc2::runtime::AnyObject, Sel);
+
+/// Stands in for UIPointerInteraction's own check of whether it may run, which keeps it off on a
+/// phone. An interaction that runs can hide the pointer there (see `pointer_style_for_region`).
+extern "C" fn pointer_interaction_enabled(this: &objc2::runtime::AnyObject, _sel: Sel) {
+    if IN_ENABLE_HOOK.swap(true, Ordering::Relaxed) {
+        return;
+    }
+    // SAFETY: `enabled` is a plain property of UIPointerInteraction.
+    let _: () = unsafe { msg_send![this, setEnabled: true] };
+    IN_ENABLE_HOOK.store(false, Ordering::Relaxed);
+}
+
+/// Once. Left alone if iOS has no such method.
+fn keep_pointer_interaction_enabled() {
+    if ENABLE_HOOK_SET.swap(true, Ordering::Relaxed) {
+        return;
+    }
+    let class = objc2::class!(UIPointerInteraction);
+    let Some(method) = class.instance_method(sel!(_updateInteractionIsEnabled)) else {
+        return;
+    };
+    // SAFETY: the same signature as the method it takes the place of.
+    let hook = unsafe { mem::transmute::<UpdateEnabled, Imp>(pointer_interaction_enabled) };
+    // SAFETY: as above; nothing else relies on the old implementation.
+    unsafe { method.set_implementation(hook) };
+}
+
 fn assistive_touch_running() -> bool {
     // SAFETY: a plain UIKit query with no arguments.
     unsafe { UIAccessibilityIsAssistiveTouchRunning() }.as_bool()
@@ -46,6 +79,8 @@ pub struct WinitViewState {
     /// its pointer is on screen.
     scroll_gesture_recognizer: RefCell<Option<Retained<UIPanGestureRecognizer>>>,
     scroll_last: Cell<CGPoint>,
+    /// The pointer interaction that hides iOS's pointer over this view was added.
+    pointer_hidden: Cell<bool>,
     /// Touches iOS made from a mouse's click, left out as they came.
     dropped_touches: RefCell<std::collections::HashSet<u64>>,
 
@@ -339,6 +374,21 @@ declare_class!(
             app_state::handle_nonuser_event(mtm, gesture_event);
         }
 
+        // UIPointerInteractionDelegate: on a phone, AssistiveTouch's circle is hidden over the
+        // game, which draws its own cursor. A pad's pointer stays as it is.
+        #[method_id(pointerInteraction:styleForRegion:)]
+        fn pointer_style_for_region(
+            &self,
+            _interaction: &objc2::runtime::AnyObject,
+            _region: &objc2::runtime::AnyObject,
+        ) -> Option<Retained<objc2::runtime::AnyObject>> {
+            let mtm = MainThreadMarker::from(self);
+            if UIDevice::currentDevice(mtm).userInterfaceIdiom() != UIUserInterfaceIdiom::Phone {
+                return None;
+            }
+            unsafe { msg_send_id![objc2::class!(UIPointerStyle), hiddenPointerStyle] }
+        }
+
         #[method(scrollGesture:)]
         fn scroll_gesture(&self, recognizer: &UIPanGestureRecognizer) {
             let Some(window) = self.window() else { return };
@@ -477,6 +527,7 @@ impl WinitView {
             pan_gesture_recognizer: RefCell::new(None),
             scroll_gesture_recognizer: RefCell::new(None),
             scroll_last: Cell::new(CGPoint { x: 0.0, y: 0.0 }),
+            pointer_hidden: Cell::new(false),
             dropped_touches: RefCell::new(std::collections::HashSet::new()),
 
             rotation_last_delta: Cell::new(0.0),
@@ -751,8 +802,29 @@ impl WinitView {
         }
     }
 
+    /// Once, on a phone: an interaction whose delegate hides the pointer (Hynis does the same).
+    fn ensure_hidden_pointer(&self) {
+        if self.ivars().pointer_hidden.get() {
+            return;
+        }
+        let mtm = MainThreadMarker::from(self);
+        if UIDevice::currentDevice(mtm).userInterfaceIdiom() != UIUserInterfaceIdiom::Phone {
+            return;
+        }
+        self.ivars().pointer_hidden.set(true);
+        keep_pointer_interaction_enabled();
+        unsafe {
+            let alloc: objc2::rc::Allocated<objc2::runtime::AnyObject> =
+                msg_send_id![objc2::class!(UIPointerInteraction), alloc];
+            let interaction: Retained<objc2::runtime::AnyObject> =
+                msg_send_id![alloc, initWithDelegate: self];
+            let _: () = msg_send![self, addInteraction: &*interaction];
+        }
+    }
+
     pub(crate) fn update_mice(&self) {
         self.ensure_scroll_recognizer();
+        self.ensure_hidden_pointer();
         if let Some(window) = self.window() {
             let size = self.bounds().size;
             let scale = self.contentScaleFactor() as f64;
