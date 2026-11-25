@@ -3222,7 +3222,10 @@ mod tests {
         assert!(t.poll_state().held(Button::RightStick), "on after a tap");
         t.update(2, point, true, false);
         t.update(2, point, false, true);
-        assert!(!t.poll_state().held(Button::RightStick), "off after another");
+        assert!(
+            !t.poll_state().held(Button::RightStick),
+            "off after another"
+        );
     }
     #[test]
     fn flight_clears_ground_latch_and_descends_only_until_release() {
