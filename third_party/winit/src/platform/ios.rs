@@ -457,6 +457,13 @@ pub fn take_opened_files() -> Vec<OpenedFile> {
     crate::platform_impl::take_opened_files()
 }
 
+/// Horizon PE: whether the app draws the mouse's pointer itself: a mouse is attached to a device
+/// that shows no pointer (an iPhone) and the pointer is not captured. `CursorMoved` says where.
+#[cfg(ios_platform)]
+pub fn drawn_pointer() -> bool {
+    crate::platform_impl::drawn_pointer()
+}
+
 /// Whether something asked the event loop to exit since the last call ([`ActiveEventLoop::exit`],
 /// which iOS can't do: an app ends when the player closes it). Horizon's addition: its app ends
 /// the game that asked, and goes back to its launcher.

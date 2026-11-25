@@ -175,9 +175,41 @@ impl super::Surface {
             };
             Some(info)
         }
-        #[cfg(not(target_os = "macos"))]
+        // Horizon PE: an iPhone's or iPad's screen, from UIScreen (iOS 16).
+        #[cfg(target_os = "ios")]
         {
-            // TODO: iOS/tvOS/visionOS could report EDR headroom via
+            use objc2::rc::Retained;
+            use objc2::runtime::NSObject;
+
+            // UIScreen is main-thread only, as NSScreen above.
+            if objc2::MainThreadMarker::new().is_none() || !available!(ios = 16.0) {
+                return None;
+            }
+            let screen: Option<Retained<NSObject>> =
+                unsafe { objc2::msg_send![objc2::class!(UIScreen), mainScreen] };
+            let screen = screen?;
+            let finite = |v: f64| v.is_finite().then_some(v as f32);
+            // Both are `CGFloat` multipliers of the screen's white (`1.0`), iOS 16.0+.
+            let current: f64 = unsafe { objc2::msg_send![&*screen, currentEDRHeadroom] };
+            let potential: f64 = unsafe { objc2::msg_send![&*screen, potentialEDRHeadroom] };
+            Some(wgt::DisplayHdrInfo {
+                luminance: None,
+                headroom: Some(wgt::DisplayHeadroom {
+                    current: finite(current),
+                    potential: finite(potential),
+                    reference: None,
+                }),
+                chromaticity: None,
+                coarse: Some(wgt::DisplayCoarseRange {
+                    high_dynamic_range: current.is_finite().then_some(current > 1.0),
+                    gamut: None,
+                }),
+                bits_per_color: None,
+            })
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "ios")))]
+        {
+            // TODO: tvOS/visionOS could report EDR headroom via
             // `UIScreen.currentEDRHeadroom`.
             None
         }

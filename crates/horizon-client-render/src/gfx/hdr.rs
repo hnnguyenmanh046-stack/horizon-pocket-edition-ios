@@ -52,10 +52,11 @@ const NAMES: [(Output, &str); 2] = [(Output::Pq, "pq"), (Output::ScRgb, "scrgb")
 /// The HDR output `caps` can present: HDR10 where offered, else scRGB.
 /// `HORIZON_HDR_OUTPUT=pq` or `scrgb` allows only that one.
 pub fn output(caps: &wgpu::SurfaceCapabilities) -> Option<Output> {
-    // iOS (Horizon PE): not offered. Its extended-range swapchain was never checked on a phone
-    // (the colour-space fix in third_party/wgpu-hal is macOS's).
+    // iOS (Horizon PE): scRGB only, which is Metal's extended range there (a half-float layer,
+    // 1.0 the screen's own white: `gfx::ios_reported`). A CAMetalLayer on iOS takes no 10-bit
+    // PQ pixel format, so HDR10 is never asked for.
     if cfg!(target_os = "ios") {
-        return None;
+        return pick(caps, Some("scrgb"));
     }
     pick(caps, std::env::var("HORIZON_HDR_OUTPUT").ok().as_deref())
 }

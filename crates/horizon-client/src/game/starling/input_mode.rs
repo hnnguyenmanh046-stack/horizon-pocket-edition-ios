@@ -84,6 +84,52 @@ impl Game<'_> {
         }
     }
 
+    /// Horizon PE, iOS: a mouse moved or clicked that the window does not hold (its raw events,
+    /// which come whether it is held or not). On an iPhone that is all a mouse says until the
+    /// window holds it: there is no pointer to move over the window. The mouse becomes the input,
+    /// and while playing the window takes it, as it would have when the world opened had the
+    /// mouse been attached then.
+    #[cfg(target_os = "ios")]
+    pub(super) fn ios_mouse_used(&mut self, event: &winit::event::DeviceEvent) {
+        use winit::event::DeviceEvent;
+        let used = match event {
+            DeviceEvent::MouseMotion { delta: (x, y) } => *x != 0.0 || *y != 0.0,
+            DeviceEvent::Button { .. } => true,
+            _ => false,
+        };
+        if !used || !horizon_gamecontroller::mouse_connected() {
+            return;
+        }
+        self.input_used(InputMode::KeyboardMouse);
+        if !self.captured
+            && self.title.is_none()
+            && self.screen == super::Screen::Playing
+            && !self.screen_over_playing()
+            && self.player.is_some()
+        {
+            self.capture(true);
+        }
+    }
+
+    /// Horizon PE, iOS: the mouse's pointer on a device that shows none (an iPhone), where winit
+    /// keeps it (`drawn_pointer`): over every screen, where the game takes the cursor to be.
+    #[cfg(target_os = "ios")]
+    pub(super) fn draw_ios_pointer(&self, batch: &mut horizon_client::hud::HudBatch) {
+        if !winit::platform::ios::drawn_pointer()
+            || self.captured
+            || self.input_mode != InputMode::KeyboardMouse
+        {
+            return;
+        }
+        let [x, y] = self.interface_origin();
+        horizon_client::android_control_ui::draw_pointer(
+            batch,
+            &self.gui.atlas,
+            (self.cursor.0 + x, self.cursor.1 + y),
+            1.0,
+        );
+    }
+
     /// Once per loop iteration, before the touch frame: the pointer capture Android took back,
     /// a physical keyboard's keys, and the mouse's events since the last iteration, as window
     /// events (its captured motion turns the view as a computer's raw motion does).
