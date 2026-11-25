@@ -83,6 +83,7 @@ pub struct WinitViewState {
     scroll_last: Cell<CGPoint>,
     /// The pointer interaction that hides iOS's pointer over this view was added.
     pointer_hidden: Cell<bool>,
+    pointer_interaction: RefCell<Option<Retained<objc2::runtime::AnyObject>>>,
     /// Touches iOS made from a mouse's click, left out as they came.
     dropped_touches: RefCell<std::collections::HashSet<u64>>,
 
@@ -388,8 +389,9 @@ declare_class!(
             let phone =
                 UIDevice::currentDevice(mtm).userInterfaceIdiom() == UIUserInterfaceIdiom::Phone;
             super::hardware_mouse::trace(format_args!("iOS asked the pointer's style (phone={phone})"));
+            let playing = self.ivars().mouse.captured();
             // No early `return`: this macro wraps the value the body ends with.
-            if phone {
+            if phone && playing {
                 unsafe { msg_send_id![objc2::class!(UIPointerStyle), hiddenPointerStyle] }
             } else {
                 None
@@ -536,6 +538,7 @@ impl WinitView {
             scroll_gesture_recognizer: RefCell::new(None),
             scroll_last: Cell::new(CGPoint { x: 0.0, y: 0.0 }),
             pointer_hidden: Cell::new(false),
+            pointer_interaction: RefCell::new(None),
             dropped_touches: RefCell::new(std::collections::HashSet::new()),
 
             rotation_last_delta: Cell::new(0.0),
@@ -674,20 +677,10 @@ impl WinitView {
             if touch_type == UITouchType::IndirectPointer && self.ivars().mouse.captured() {
                 continue;
             }
-            // On a phone, AssistiveTouch's pointer reports its clicks as touches while the mouse
-            // reports them through GameController: each click came twice. The mouse's own are kept.
-            if touch_type == UITouchType::IndirectPointer
-                && super::hardware_mouse::gc_mouse_present()
-                && UIDevice::currentDevice(MainThreadMarker::from(self)).userInterfaceIdiom()
-                    == UIUserInterfaceIdiom::Phone
-            {
-                super::hardware_mouse::trace(format_args!("dropped an indirect pointer touch"));
-                continue;
-            }
             // With AssistiveTouch on, iOS makes a finger's touch of a mouse's click as well as
             // GameController's own click: the game would click twice. A touch that begins while
             // a mouse is in use is that, and is left out until it ends.
-            if touch_type == UITouchType::Direct {
+            if touch_type == UITouchType::Direct && self.ivars().mouse.captured() {
                 let id = touch as *const UITouch as u64;
                 let phase = touch.phase();
                 let mut dropped = self.ivars().dropped_touches.borrow_mut();
@@ -793,6 +786,11 @@ impl WinitView {
     pub(crate) fn set_mouse_captured(&self, captured: bool) {
         self.ivars().mouse.capture(captured);
         self.update_mice();
+        // Ask the pointer's style again: hidden while playing, shown on a screen.
+        if let Some(interaction) = self.ivars().pointer_interaction.borrow().as_ref() {
+            // SAFETY: UIPointerInteraction's own method.
+            let _: () = unsafe { msg_send![&**interaction, invalidate] };
+        }
     }
 
     /// Once: a pan that only a scroll can start (no finger is allowed to). iOS 13.4+.
@@ -844,6 +842,7 @@ impl WinitView {
             let interaction: Retained<objc2::runtime::AnyObject> =
                 msg_send_id![alloc, initWithDelegate: self];
             let _: () = msg_send![self, addInteraction: &*interaction];
+            self.ivars().pointer_interaction.replace(Some(interaction));
         }
     }
 
@@ -853,15 +852,13 @@ impl WinitView {
         if let Some(window) = self.window() {
             let size = self.bounds().size;
             let scale = self.contentScaleFactor() as f64;
-            // A phone has no system pointer to lock or to hover with: its mouse's relative
-            // motion is what the game's cursor follows.
-            let phone = UIDevice::currentDevice(MainThreadMarker::from(self)).userInterfaceIdiom()
-                == UIUserInterfaceIdiom::Phone;
+            // iOS's own pointer (AssistiveTouch's on a phone) works the game's screens: it is
+            // hidden while playing, and the mouse's relative motion turns the camera then.
             self.ivars().mouse.update(
                 RootWindowId(window.id()),
                 (size.width * scale, size.height * scale),
                 scale,
-                phone,
+                false,
             );
         }
     }
