@@ -3194,6 +3194,9 @@ mod tests {
             let mut t = TouchControls::default();
             t.settings.mode = mode;
             t.toggle_crouch = false;
+            // Horizon PE: Sneak is a switch from the factory; this is the hold a player sets.
+            let slot = t.settings.slot(Control::Sneak);
+            t.settings.layouts[mode.index()][slot].toggleable = false;
             let point = t.settings.placement(Control::Sneak).center;
             t.update(1, point, true, false);
             assert!(t.poll_state().held(Button::RightStick), "{mode:?}");
@@ -3207,6 +3210,19 @@ mod tests {
             t.clear();
             assert!(!t.poll_state().held(Button::RightStick));
         }
+    }
+    /// Horizon PE: from the factory a tap turns Sneak on and another turns it off.
+    #[test]
+    fn sneak_is_a_switch_from_the_factory() {
+        let mut t = TouchControls::default();
+        t.toggle_crouch = false;
+        let point = t.settings.placement(Control::Sneak).center;
+        t.update(1, point, true, false);
+        t.update(1, point, false, true);
+        assert!(t.poll_state().held(Button::RightStick), "on after a tap");
+        t.update(2, point, true, false);
+        t.update(2, point, false, true);
+        assert!(!t.poll_state().held(Button::RightStick), "off after another");
     }
     #[test]
     fn flight_clears_ground_latch_and_descends_only_until_release() {
