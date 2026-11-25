@@ -379,6 +379,7 @@ More detail: [docs/ios.md](docs/ios.md#catalog-mods).
 
 | Problem | What to do |
 | --- | --- |
+| **The `.ipa` is "corrupt" or "not an ipa file" when installing** | The download was cut short or changed on the way. Download it again in Safari from the release page (the file is about 40 to 60 MB and its name ends in `.ipa`; if it ends in `.zip`, rename it back, don't unzip it). The device must be on iOS 16 or newer |
 | **The app won't open after a week** | A free Apple ID signs apps for 7 days. Refresh it in SideStore or AltStore, or install the `.ipa` again. Nothing is lost |
 | **Low frame rate or a hot phone** | Lower the render distance (Options > Video Settings), use Starling Visuals or no shader pack, and close other apps |
 | **The touch layout is a mess** | Horizon menu > Controls > presets > **Default** |

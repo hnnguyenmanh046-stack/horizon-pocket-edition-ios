@@ -90,6 +90,9 @@ impl Game<'_> {
         self.draw_chat_bar(batch);
         self.draw_command_prompt(batch);
         area.finish(batch);
+        // Horizon PE: over everything a screen draws, as a pointer is.
+        #[cfg(target_os = "ios")]
+        self.draw_ios_pointer(batch);
     }
 
     fn interface_insets(&self, batch: &HudBatch) -> [f32; 4] {

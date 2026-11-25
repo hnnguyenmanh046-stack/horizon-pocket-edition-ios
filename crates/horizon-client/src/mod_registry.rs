@@ -46,6 +46,17 @@ pub fn location() -> String {
         .unwrap_or_else(|| INDEX_URL.to_owned())
 }
 
+/// Horizon PE: this port's own copy of the index (packaging/ios/registry/index.json), read when
+/// Horizon's registry can't be: each mod's newest version, its file at the author's own
+/// repository where that is byte for byte the file the registry listed (the same SHA-256, which
+/// every download is still checked against). On the branch this app was built from.
+fn fallback_location() -> String {
+    let repo =
+        option_env!("HORIZON_IOS_REPO").unwrap_or("shopifygav222/horizon-pocket-edition-ios");
+    let branch = option_env!("HORIZON_IOS_BRANCH").unwrap_or("main");
+    format!("https://raw.githubusercontent.com/{repo}/{branch}/packaging/ios/registry/index.json")
+}
+
 /// A local test registry: its files may be `file://` paths.
 fn is_local(at: &str) -> bool {
     !at.starts_with("https://")
@@ -59,7 +70,15 @@ pub fn load_index(home: &Path, at: &str) -> Result<Index, String> {
         true => Index::parse_local(text),
         false => Index::parse(text),
     };
-    let fetched = fetch_text(at).and_then(|text| parse(&text).map(|index| (index, text)));
+    let read =
+        |at: &str| fetch_text(at).and_then(|text| parse(&text).map(|index| (index, text)));
+    let fetched = read(at).or_else(|e| {
+        // Horizon PE: the registry's own place has a stand-in (`fallback_location`).
+        if at != INDEX_URL {
+            return Err(e);
+        }
+        read(&fallback_location()).map_err(|_| e)
+    });
     let cache = home.join(CACHE);
     match fetched {
         Ok((index, text)) => {

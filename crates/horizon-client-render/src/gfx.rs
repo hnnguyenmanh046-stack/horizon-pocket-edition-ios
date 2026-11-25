@@ -13804,6 +13804,29 @@ mod tests {
         assert_ne!(on, off);
         assert_ne!(off, unknown);
     }
+    /// Horizon PE: an iOS screen's white is 80 in HDR output's scale, its peak the headroom.
+    #[test]
+    fn an_ios_screen_reports_its_white_and_headroom() {
+        let info = |current, potential| wgpu::DisplayHdrInfo {
+            headroom: Some(wgpu::DisplayHeadroom {
+                current,
+                potential,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let peak = |current, potential| {
+            let r = super::ios_reported(&info(current, potential));
+            assert_eq!((r.paper_white, r.peak_guessed), (80, false));
+            r.peak
+        };
+        assert_eq!(peak(Some(4.0), Some(8.0)), 320, "the headroom in use");
+        assert_eq!(peak(Some(1.0), Some(8.0)), 640, "none in use yet: the most");
+        assert_eq!(peak(Some(1.5), Some(8.0)), 200, "never under the lowest peak");
+        assert_eq!(peak(None, None), 200, "nothing said");
+        assert_eq!(peak(Some(f32::NAN), Some(f32::INFINITY)), 200);
+        assert_eq!(super::ios_reported(&wgpu::DisplayHdrInfo::default()).peak, 200);
+    }
     #[test]
     fn macos_hdr_uses_potential_instead_of_brightness_dependent_current() {
         let info = |current, potential| wgpu::DisplayHdrInfo {
@@ -15379,19 +15402,48 @@ impl DisplayReading {
         surface.map_or_else(Self::default, |s| Self::os(&s.display_hdr_info(adapter)))
     }
     fn os(info: &wgpu::DisplayHdrInfo) -> Self {
-        #[cfg(target_os = "macos")]
-        let hdr = macos_hdr(info);
-        #[cfg(not(target_os = "macos"))]
-        let hdr = info.coarse.and_then(|coarse| coarse.high_dynamic_range);
-        Self {
-            luminance: os_reported(info),
-            hdr,
+        // Horizon PE: an iPhone's or iPad's screen says how far over its white it can go.
+        #[cfg(target_os = "ios")]
+        {
+            Self {
+                luminance: Some(ios_reported(info)),
+                hdr: macos_hdr(info),
+            }
         }
+        #[cfg(not(target_os = "ios"))]
+        {
+            #[cfg(target_os = "macos")]
+            let hdr = macos_hdr(info);
+            #[cfg(not(target_os = "macos"))]
+            let hdr = info.coarse.and_then(|coarse| coarse.high_dynamic_range);
+            Self {
+                luminance: os_reported(info),
+                hdr,
+            }
+        }
+    }
+}
+/// Horizon PE: what an iOS screen's headroom means in HDR output's scale. Metal's extended range
+/// shows 1.0 as the screen's own white, whatever the brightness slider makes that, and scRGB
+/// output writes paper white as its nits over 80: so paper white is 80, and the peak is 80 times
+/// the headroom. The headroom in use now where there is some (it falls as the screen is turned
+/// up), else the most the screen can have; 2.5 where the system says neither.
+#[cfg(any(target_os = "ios", test))]
+fn ios_reported(info: &wgpu::DisplayHdrInfo) -> crate::graphics::Reported {
+    let over_white = |n: &f32| n.is_finite() && *n > 1.05;
+    let headroom = info
+        .headroom
+        .and_then(|h| h.current.filter(over_white).or(h.potential.filter(over_white)))
+        .unwrap_or(2.5);
+    crate::graphics::Reported {
+        paper_white: 80,
+        peak: ((80.0 * headroom).round() as u32).clamp(200, 10_000),
+        peak_guessed: false,
     }
 }
 /// Potential EDR is fixed for a screen; current EDR follows brightness and must not
 /// repeatedly switch HDR output as the player adjusts the desktop's brightness.
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "macos", target_os = "ios", test))]
 fn macos_hdr(info: &wgpu::DisplayHdrInfo) -> Option<bool> {
     info.headroom?
         .potential
@@ -15509,6 +15561,7 @@ fn log_os_reported(reported: Option<crate::graphics::Reported>) {
 /// What the OS reports in absolute nits, HDR output's scale (Windows: DXGI's SDR white level,
 /// the brightness slider's, as Paper White, and its `MaxLuminance`, the display's or a calibration
 /// profile's, as Peak Brightness), kept within the settings' ranges. The player's values win.
+#[cfg_attr(target_os = "ios", allow(dead_code))]
 fn os_reported(info: &wgpu::DisplayHdrInfo) -> Option<crate::graphics::Reported> {
     let luminance = info.luminance?;
     let usable = |n: f32| n.is_finite() && n > 0.0;

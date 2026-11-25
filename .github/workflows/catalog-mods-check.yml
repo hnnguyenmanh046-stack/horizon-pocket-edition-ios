@@ -37,7 +37,9 @@ jobs:
       - name: Unpack the catalog's native mods
         run: |
           set -euo pipefail
-          curl -fsSL --retry 3 https://horizon-rust.github.io/horizon-mods/index.json -o "$RUNNER_TEMP/index.json"
+          # Horizon's registry, else this port's copy of its index (packaging/ios/registry).
+          curl -fsSL --retry 3 https://horizon-rust.github.io/horizon-mods/index.json -o "$RUNNER_TEMP/index.json" \
+            || cp packaging/ios/registry/index.json "$RUNNER_TEMP/index.json"
           python3 tools/ios_native_sdk.py survey "$RUNNER_TEMP/index.json" "$RUNNER_TEMP/survey.json"
       # The API the mods are compiled against, once, so each mod's own errors are only its own.
       - name: Build the mod API

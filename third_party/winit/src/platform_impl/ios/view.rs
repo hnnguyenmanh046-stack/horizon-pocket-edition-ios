@@ -7,11 +7,11 @@ use objc2::runtime::{NSObjectProtocol, ProtocolObject};
 use objc2::{declare_class, msg_send, msg_send_id, mutability, sel, ClassType, DeclaredClass};
 use objc2_foundation::{CGFloat, CGPoint, CGRect, MainThreadMarker, NSObject, NSSet, NSString};
 use objc2_ui_kit::{
-    UICoordinateSpace, UIEvent, UIForceTouchCapability, UIGestureRecognizer,
+    UICoordinateSpace, UIDevice, UIEvent, UIForceTouchCapability, UIGestureRecognizer,
     UIGestureRecognizerDelegate, UIGestureRecognizerState, UIHoverGestureRecognizer, UIKeyInput,
     UIPanGestureRecognizer, UIPinchGestureRecognizer, UIPress, UIPressesEvent, UIResponder,
     UIRotationGestureRecognizer, UITapGestureRecognizer, UITextInputTraits, UITouch, UITouchPhase,
-    UITouchType, UITraitEnvironment, UIView,
+    UITouchType, UITraitEnvironment, UIUserInterfaceIdiom, UIView,
 };
 
 use super::app_state::{self, EventWrapper};
@@ -649,7 +649,18 @@ impl WinitView {
 
     pub(crate) fn update_mice(&self) {
         if let Some(window) = self.window() {
-            self.ivars().mouse.update(RootWindowId(window.id()));
+            // Horizon PE: a phone has no pointer and no pointer lock; the mouse keeps its own
+            // pointer there (hardware_mouse.rs).
+            let phone = UIDevice::currentDevice(MainThreadMarker::from(self)).userInterfaceIdiom()
+                == UIUserInterfaceIdiom::Phone;
+            let bounds = self.bounds();
+            let scale = self.contentScaleFactor() as f64;
+            self.ivars().mouse.update(
+                RootWindowId(window.id()),
+                phone,
+                (bounds.size.width as f64 * scale, bounds.size.height as f64 * scale),
+                scale,
+            );
         }
     }
 

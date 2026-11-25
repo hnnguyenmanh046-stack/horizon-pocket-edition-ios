@@ -83,8 +83,10 @@ def find(index: Path, mod_id: str, version: str) -> dict:
 
 def fetch(file: dict) -> bytes:
     url = file["url"]
-    if not url.startswith("https://github.com/horizon-rust/horizon-mods/releases/download/"):
-        raise Refused(f"{url}: not the catalog's own storage")
+    # The registry's own storage, or (this port's copy of the index, while the registry is away) a
+    # release of the author's repository. Either way the file must be the one the index lists.
+    if not re.fullmatch(r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/releases/download/[^?#]+", url):
+        raise Refused(f"{url}: not a release file on GitHub")
     if int(file.get("size", 0)) > MOST_BYTES:
         raise Refused(f"{file.get('name')}: larger than a mod's package may be")
     with urllib.request.urlopen(url, timeout=120) as response:
