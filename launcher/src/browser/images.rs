@@ -10,7 +10,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 /// Hosts images may come from.
-const HOSTS: [&str; 7] = [
+const HOSTS: [&str; 8] = [
     "https://cdn.modrinth.com/",
     // Fabric's and Forge's own icons, for instances that play them (no published logo licence:
     // drawn from their sites, never shipped).
@@ -22,6 +22,9 @@ const HOSTS: [&str; 7] = [
     // before the repositories moved to the horizon-rust organization.
     "https://horizon-rust.github.io/horizon-mods/",
     "https://ludovic111.github.io/horizon-mods/",
+    // Horizon PE: the registry's icons in a public fork of it, which this port's copy of the index
+    // (packaging/ios/registry) names at a fixed commit while the registry itself is away.
+    "https://raw.githubusercontent.com/GoodDay360/horizon-mods/",
 ];
 /// The most an image may weigh before decoding.
 pub const MAX_DOWNLOAD: u64 = 8 << 20;

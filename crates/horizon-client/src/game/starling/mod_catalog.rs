@@ -557,10 +557,9 @@ fn button(
 fn done_notice(done: Done, title: &str) -> String {
     match done {
         // iOS compiles it into the app on GitHub (native_builds_ios.rs), from the Mods page's top.
-        Done::NativeMod if cfg!(target_os = "ios") => format!(
-            "{title} is in. Close this and press Build on GitHub at the top of the Mods page to \
-             play with it."
-        ),
+        Done::NativeMod if cfg!(target_os = "ios") => {
+            format!("{title} is in. Press Build at the top of the Mods page to play with it.")
+        }
         Done::NativeMod => {
             format!("{title} is in. Close this and press Compile on its row to play with it.")
         }
@@ -1117,8 +1116,8 @@ fn draw_foot(
     }
 }
 
-/// Horizon PE: the catalog's button on the title screen, so the catalog is one tap from the main
-/// menu and not three pages into the options. It stands left of the menu's buttons, where the
+/// Horizon PE: the catalog's button on the title screen, so the catalog (mods, resource packs and
+/// shader packs) is one tap from the main menu and not three pages into the options. It stands left of the menu's buttons, where the
 /// player's model stands on their right (own_skin.rs), at the height of that model's button.
 #[cfg(target_os = "ios")]
 impl Game<'_> {
@@ -1148,7 +1147,7 @@ impl Game<'_> {
             return;
         };
         let mut ui = Ui::new(&self.gui.atlas, batch, (-1.0, -1.0));
-        plate(&mut ui, rect, "Mods", true);
+        plate(&mut ui, rect, "Catalog", true);
         ui.finish();
     }
 
@@ -1630,6 +1629,10 @@ impl Game<'_> {
         let Some((title, result)) = finished else {
             return;
         };
+        // Horizon PE (iOS): a native mod plays only once it is built into the app, so the catalog
+        // gives way to the Mods page, whose top has the build.
+        #[cfg(target_os = "ios")]
+        let to_mods_page = matches!(result, Ok(Done::NativeMod));
         self.catalog.notice = Some(match result {
             Ok(done) => {
                 match done {
@@ -1653,6 +1656,12 @@ impl Game<'_> {
             }
             Err(e) => (install_failed(&title, &e), true),
         });
+        #[cfg(target_os = "ios")]
+        if to_mods_page {
+            self.catalog.shown = false;
+            self.catalog.typing = false;
+            self.open_options_at(self.title.is_some(), horizon_client::options_ui::Page::Mods);
+        }
     }
 
     fn catalog_install(&mut self, index: usize) {
