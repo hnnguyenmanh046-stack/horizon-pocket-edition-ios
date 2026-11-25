@@ -1213,18 +1213,13 @@ impl TouchControls {
                     Role::Ignore
                 }
                 Some(Control::Sneak) if self.vertical_movement => Role::Button(Button::RightStick),
-<<<<<<< HEAD
-                Some(c) if self.placement(c).toggleable => {
-                    self.latched_controls ^= 1 << (c as u32);
-=======
                 // Horizon PE: not Sneak where the game's own Sneak option is Toggle: the key
                 // toggles there already, and a latch on top of it would take two taps.
                 Some(c)
                     if self.placement(c).toggleable
                         && !(c == Control::Sneak && self.toggle_crouch) =>
                 {
-                    self.latched_controls ^= 1 << (c as u16);
->>>>>>> sync/0.9.0-shared-worlds
+                    self.latched_controls ^= 1 << (c as u32);
                     Role::Ignore
                 }
                 Some(c) => {
