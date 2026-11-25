@@ -125,6 +125,7 @@ jobs:
           cargo test -p horizon-client-lib --lib -- lan::voice:: voice_net:: voice_screen:: game::voice::
           cargo test -p horizon-client-lib --lib -- ios_releases:: starling_releases:: preparer:: mod_builds::
 
+          cargo test -p horizon-client-lib --lib -- ios_releases:: starling_releases:: preparer:: mod_builds:: a_finger_scrolls_the_offers_both_ways
   android:
     runs-on: ubuntu-latest
     timeout-minutes: 240

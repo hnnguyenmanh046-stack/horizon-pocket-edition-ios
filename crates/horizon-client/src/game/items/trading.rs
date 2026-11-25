@@ -24,6 +24,9 @@ pub(super) struct MerchantState {
     pub(super) session: Box<merchant::Session>,
     /// The offer list's scroll offset.
     pub(super) scroll: usize,
+    /// Horizon PE: the part of a row a finger's drag has moved the list so far
+    /// (`merchant_finger_scroll`).
+    pub(super) finger_rows: f32,
     /// The scroller is held by the mouse (`isDragging`).
     pub(super) dragging: bool,
     /// The offer button that keeps focus after a click (drawn highlighted).
@@ -334,6 +337,7 @@ impl Game<'_> {
         self.open_merchant_state(MerchantState {
             session: Box::new(session),
             scroll: 0,
+            finger_rows: 0.0,
             dragging: false,
             focused: None,
             mob: Some(id),
@@ -394,6 +398,7 @@ impl Game<'_> {
         self.open_merchant_state(MerchantState {
             session: Box::new(session),
             scroll: 0,
+            finger_rows: 0.0,
             dragging: false,
             focused: None,
             mob: None,
@@ -409,6 +414,7 @@ impl Game<'_> {
         self.open_merchant_state(MerchantState {
             session: Box::new(session),
             scroll: 0,
+            finger_rows: 0.0,
             dragging: false,
             focused: None,
             mob: None,
@@ -644,6 +650,20 @@ impl Game<'_> {
             && m.dragging
         {
             m.scroll = drag_scroll(y, m.session.offers.len());
+        }
+    }
+    /// Horizon PE: a finger's drag over the offers. Its steps are parts of a row, which
+    /// `MerchantScreen.mouseScrolled`'s truncation turned into nothing going down (the list could
+    /// not be scrolled to the later offers) and a whole row per event going up. They add up here,
+    /// and the list moves by the whole rows.
+    pub(super) fn merchant_finger_scroll(&mut self, d: f32) {
+        let Some(m) = self.station.as_mut().and_then(|s| s.merchant.as_mut()) else {
+            return;
+        };
+        let (rows, rest) = finger_rows(m.finger_rows, d);
+        m.finger_rows = rest;
+        if rows != 0.0 {
+            self.merchant_scroll(rows);
         }
     }
     pub(super) fn merchant_scroll(&mut self, d: f32) {
@@ -977,6 +997,13 @@ fn scrolled(scroll: usize, max: usize, d: f32) -> usize {
     ((scroll as f64 - f64::from(d)) as i32).clamp(0, max as i32) as usize
 }
 
+/// Horizon PE: `d` more of a finger's drag on top of `kept`: the whole rows to scroll by, and the
+/// part of a row kept for the next step.
+fn finger_rows(kept: f32, d: f32) -> (f32, f32) {
+    let sum = kept + d;
+    (sum.trunc(), sum.fract())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -985,6 +1012,25 @@ mod tests {
     /// clamped, so the list moves by as many rows as the event's delta and a
     /// fractional delta still moves one row (the truncation is after the
     /// subtraction). Horizon moved exactly one row per event.
+    /// Horizon PE: a finger scrolls the offers both ways, a row per row dragged.
+    #[test]
+    fn a_finger_scrolls_the_offers_both_ways() {
+        let drag = |mut scroll: usize, step: f32| {
+            let mut kept = 0.0;
+            for _ in 0..25 {
+                let (rows, rest) = finger_rows(kept, step);
+                kept = rest;
+                if rows != 0.0 {
+                    scroll = scrolled(scroll, 5, rows);
+                }
+            }
+            scroll
+        };
+        assert_eq!(drag(0, -0.125), 3, "25 steps of an eighth of a row down");
+        assert_eq!(drag(5, 0.125), 2, "and up, no faster");
+        assert_eq!(scrolled(3, 5, -0.125), 3, "which the wheel's rule alone never moved");
+    }
+
     #[test]
     fn the_offers_scroll_by_the_wheel_delta() {
         assert_eq!(scrolled(3, 5, 1.0), 2, "one notch down");

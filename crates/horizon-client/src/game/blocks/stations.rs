@@ -1265,6 +1265,15 @@ impl Game<'_> {
     /// `StonecutterScreen.mouseScrolled`.
     pub(super) fn station_scroll(&mut self, d: f32) {
         self.merchant_scroll(d);
+        self.station_scroll_rest(d);
+    }
+    /// Horizon PE: `station_scroll` for a finger's drag, whose steps are parts of a row: the
+    /// merchant's offers count them up (`merchant_finger_scroll`); the others take any step.
+    pub(super) fn station_finger_scroll(&mut self, d: f32) {
+        self.merchant_finger_scroll(d);
+        self.station_scroll_rest(d);
+    }
+    fn station_scroll_rest(&mut self, d: f32) {
         self.loom_scroll(d);
         let Some(s) = self.station.as_mut() else {
             return;
