@@ -158,6 +158,8 @@ module into area folders (`game/starling/`, `game/interface/`, `game/runtime/`, 
 | `horizon-client/src/preparer.rs` (`assemble`) | iOS's laying out fetches the original control textures too, as Android's preparing does | The first game after a setup or an update of the app drew the controls without their art |
 | `horizon-client/src/android_control_ui.rs` (`hub_launcher_button`, the hub's title, Pause in the Background's text) | No Launcher button in the Control Hub on iOS; the hub is "Horizon Control Hub" and the text names Horizon PE there | iOS has no launcher: the button saved the world and ended the game. The names are 1.0.0's |
 | `horizon-client/src/game/interface/startup_menu.rs` (`Event::RestartGame`) | The title's options ask iOS for a restart too, as the game's own do | A setting that needs a restart did nothing from the title |
+| `horizon-client/src/game/network/lan_screen.rs` (`world_options_scroll`), `game.rs` | A finger's scroll only scrolls the in-game world options; the wheel still steps the button under the pointer | A thumb going down the page changed the game mode, difficulty, cheats and LAN buttons it passed |
+| `packaging/android/native_mod_adapt.py` (`OLD_SHAPES`), `game/starling/native_compat.rs` (`native_text_old`) | An old-format mod's `native_text` is the opaque-RGB one it was written for | Horizon's takes ARGB now and draws nothing without alpha: Coordinates HUD, Armor Status, Status Effect HUD, Waymap, Jade's settings and BiomeCompass drew no text |
 
 ## Gate ledger
 
