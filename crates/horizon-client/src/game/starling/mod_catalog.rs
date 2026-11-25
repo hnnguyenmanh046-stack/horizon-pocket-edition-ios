@@ -15,12 +15,13 @@ use horizon_client::{
     hud::HudBatch,
     ui_theme::{Face, Ui, color},
 };
+use horizon_client::catalog_page::Line;
 use starling_catalog::{
     Done, Shelf,
-    browser::{Kind, Project, installed::Entry},
+    browser::{Kind, Project, Source as _, installed::Entry},
     list::{self, Ask, Feed, Scroller, Tail},
 };
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
@@ -122,6 +123,338 @@ enum Act {
     RemoveLocal(usize),
     /// Turns off the Installed view's row: a native mod compiled into the app.
     TurnOff(usize),
+    /// Horizon PE: lists the Mods shelf's mods of one kind, or all of them.
+    Kinds(Kinds),
+    /// Horizon PE: opens the row's own page, and leaves it.
+    Details(usize),
+    Back,
+}
+
+/// Horizon PE: which of the Mods shelf's mods the list shows.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum Kinds {
+    #[default]
+    All,
+    /// Mods that change the game's code: each is built into the app before it plays.
+    Native,
+    /// Mods that only add content: they load as they are.
+    Content,
+}
+
+const KINDS: [(Kinds, &str); 3] = [
+    (Kinds::All, "All"),
+    (Kinds::Native, "Native"),
+    (Kinds::Content, "Content"),
+];
+
+impl Kinds {
+    fn lists(self, project: &Project) -> bool {
+        match self {
+            Kinds::All => true,
+            Kinds::Native => starling_catalog::is_native_mod(project),
+            Kinds::Content => !starling_catalog::is_native_mod(project),
+        }
+    }
+}
+
+/// Horizon PE: the rows of the list that show: all of them, or the Mods shelf's of one kind.
+fn listed(card: &Catalog, rows: &[Project]) -> Vec<usize> {
+    let kinds = match card.shelf {
+        Shelf::Mods => card.kinds,
+        _ => Kinds::All,
+    };
+    (0..rows.len()).filter(|i| kinds.lists(&rows[*i])).collect()
+}
+
+const TAG_TEXT: f32 = 17.0;
+const TAG_H: f32 = 28.0;
+
+/// Horizon PE: what kind of mod `project` is, as its row and its page say it: the word, its
+/// plate's colour and its ink. None off the Mods shelf.
+fn kind_tag(card: &Catalog, project: &Project) -> Option<(&'static str, u32, u32)> {
+    if card.shelf != Shelf::Mods {
+        return None;
+    }
+    Some(if starling_catalog::is_native_mod(project) {
+        ("NATIVE", color::ACCENT, color::ON_ACCENT)
+    } else {
+        ("CONTENT", color::SUCCESS, color::WHITE)
+    })
+}
+
+/// A tag's plate at (x, y); how wide it is.
+fn tag(ui: &mut Ui<'_>, x: f32, y: f32, (text, fill, ink): (&str, u32, u32)) -> f32 {
+    let width = ui.measure(Face::Semibold, TAG_TEXT, text) + 20.0;
+    ui.rounded(x, y, width, TAG_H, 8.0, fill);
+    ui.text_line(Face::Semibold, TAG_TEXT, TAG_H, x + 10.0, y, ink, text);
+    width
+}
+
+/// Horizon PE: a project's own page, over the list: everything its row has no room for.
+struct Page {
+    project: Project,
+    /// Its row in the list: what Install and Remove act on.
+    index: usize,
+    scroll: Scroller,
+}
+
+/// How a line of a page is drawn.
+#[derive(Clone, Copy, PartialEq)]
+enum Style {
+    Heading,
+    Body,
+    /// A list item's first line, with its dot, and its next ones.
+    Item,
+    ItemMore,
+    /// What to know before installing.
+    Caution,
+    Muted,
+    Gap,
+}
+
+/// The space a page's `Style::Gap` takes, the block its picture takes, and how far a list's
+/// items stand in.
+const PAGE_GAP: f32 = 14.0;
+const PAGE_TOP: f32 = 132.0;
+const ITEM_IN: f32 = 28.0;
+
+impl Style {
+    fn face(self) -> (Face, f32) {
+        match self {
+            Style::Heading => (Face::Semibold, TITLE_TEXT),
+            _ => (Face::Regular, BODY_TEXT),
+        }
+    }
+    fn ink(self) -> u32 {
+        match self {
+            Style::Caution => color::ACCENT,
+            Style::Muted => color::MUTED,
+            _ => color::text(),
+        }
+    }
+    fn height(self) -> f32 {
+        match self {
+            Style::Gap => PAGE_GAP,
+            Style::Heading => 40.0,
+            _ => BODY_LINE,
+        }
+    }
+    fn indent(self) -> f32 {
+        match self {
+            Style::Item | Style::ItemMore => ITEM_IN,
+            _ => 0.0,
+        }
+    }
+}
+
+/// A page's text as last wrapped: whose, how wide, and whether its description had come.
+struct PageText {
+    id: String,
+    width: f32,
+    loaded: bool,
+    lines: Vec<(Style, String)>,
+}
+
+/// What a mod's kind means for the player, on its page.
+fn kind_note(native: bool) -> &'static str {
+    if !native {
+        "Content mod: it adds content and changes none of the game's code. It loads the next \
+         time you start the game."
+    } else if cfg!(target_os = "ios") {
+        "Native mod: it changes the game's code, so it plays only once it is built into the \
+         app. After installing it, press Build at the top of the Mods page."
+    } else {
+        "Native mod: it changes the game's code, so it plays only once it is compiled. After \
+         installing it, press Compile on its row of the Mods page."
+    }
+}
+
+/// `text` wrapped to `width` in `style`, added to `out`.
+fn wrap_into(ui: &Ui<'_>, out: &mut Vec<(Style, String)>, style: Style, width: f32, text: &str) {
+    let (face, size) = style.face();
+    let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut style = style;
+    for line in wrapped(ui, face, size, width, &text) {
+        out.push((style, line));
+        if style == Style::Item {
+            style = Style::ItemMore;
+        }
+    }
+}
+
+/// A page's text under its picture, wrapped to `width`: what kind of mod it is, what to know
+/// before installing it, its description (its summary until that has come), its licence and
+/// where its own page is.
+fn page_lines(
+    ui: &Ui<'_>,
+    card: &Catalog,
+    shared: &Shared,
+    project: &Project,
+    width: f32,
+) -> Vec<(Style, String)> {
+    let mut out = Vec::new();
+    let gap = (Style::Gap, String::new());
+    if card.shelf == Shelf::Mods {
+        let note = kind_note(starling_catalog::is_native_mod(project));
+        wrap_into(ui, &mut out, Style::Body, width, note);
+        out.push(gap.clone());
+    }
+    if let Some(caution) = starling_catalog::caution(project) {
+        wrap_into(ui, &mut out, Style::Caution, width, &caution);
+        out.push(gap.clone());
+    }
+    match shared.page.as_ref().filter(|(id, _)| *id == project.id) {
+        Some((_, lines)) => {
+            for line in lines {
+                match line {
+                    Line::Heading(text) => wrap_into(ui, &mut out, Style::Heading, width, text),
+                    Line::Text(text) => wrap_into(ui, &mut out, Style::Body, width, text),
+                    Line::Item(text) => {
+                        wrap_into(ui, &mut out, Style::Item, width - ITEM_IN, text);
+                    }
+                    Line::Gap => out.push(gap.clone()),
+                }
+            }
+        }
+        None => {
+            wrap_into(ui, &mut out, Style::Body, width, &project.summary);
+            out.push(gap.clone());
+            let wait = "Loading its description...";
+            wrap_into(ui, &mut out, Style::Muted, width, wait);
+        }
+    }
+    out.push(gap);
+    let license = project.license.trim();
+    if !license.is_empty() {
+        let license = format!("License: {license}");
+        wrap_into(ui, &mut out, Style::Muted, width, &license);
+    }
+    if !project.page.trim().is_empty() {
+        let link = fitted(ui, Face::Regular, BODY_TEXT, width, &project.page);
+        out.push((Style::Muted, link));
+    }
+    out
+}
+
+/// The Minecraft versions a project's files are for: "For Minecraft 1.21.4, 26.1".
+fn versions_line(project: &Project) -> String {
+    if project.game_versions.is_empty() {
+        String::new()
+    } else {
+        format!("For Minecraft {}", project.game_versions.join(", "))
+    }
+}
+
+/// Horizon PE: a project's page, in the list's place: its picture with what it is and who made
+/// it, then its text (`page_lines`), which a finger scrolls. Its height goes to `card.page_h`.
+fn draw_page(
+    ui: &mut Ui<'_>,
+    card: &Catalog,
+    shared: &Shared,
+    page: &Page,
+    edge: f32,
+    pictures: &mut Vec<(String, [f32; 4])>,
+) {
+    let project = &page.project;
+    let (top, bottom) = (HEAD_H, ui.h - FOOT_H);
+    let mut y = top + 8.0 - page.scroll.offset;
+    let icon = project.icon.as_deref();
+    picture(ui, shared, icon, y, &project.title, pictures);
+    let text_w = edge - TEXT_X;
+    let tagged = match kind_tag(card, project) {
+        Some(kind) => tag(ui, TEXT_X, y + 14.0, kind) + 10.0,
+        None => 0.0,
+    };
+    let meta = meta_line(project);
+    let meta = fitted(ui, Face::Regular, BODY_TEXT, text_w - tagged, &meta);
+    let meta_x = TEXT_X + tagged;
+    ui.text(
+        Face::Regular,
+        BODY_TEXT,
+        meta_x,
+        y + 12.0,
+        color::MUTED,
+        &meta,
+    );
+    let versions = versions_line(project);
+    let versions = fitted(ui, Face::Regular, BODY_TEXT, text_w, &versions);
+    ui.text(
+        Face::Regular,
+        BODY_TEXT,
+        TEXT_X,
+        y + 56.0,
+        color::MUTED,
+        &versions,
+    );
+    y += PAGE_TOP;
+
+    let width = edge - MARGIN - 24.0;
+    let loaded = shared
+        .page
+        .as_ref()
+        .is_some_and(|(id, _)| *id == project.id);
+    let mut kept = card.page_text.borrow_mut();
+    let fresh = kept
+        .as_ref()
+        .is_some_and(|t| t.id == project.id && t.width == width && t.loaded == loaded);
+    if !fresh {
+        *kept = Some(PageText {
+            id: project.id.clone(),
+            width,
+            loaded,
+            lines: page_lines(ui, card, shared, project, width),
+        });
+    }
+    let lines = kept.as_ref().map_or(&[][..], |t| &t.lines[..]);
+    for (style, text) in lines {
+        let height = style.height();
+        if *style != Style::Gap && y + height > top && y < bottom {
+            let (face, size) = style.face();
+            let x = MARGIN + 12.0 + style.indent();
+            if *style == Style::Item {
+                ui.text(face, size, x - 18.0, y, style.ink(), "\u{b7}");
+            }
+            ui.text(face, size, x, y, style.ink(), text);
+        }
+        y += height;
+    }
+    card.page_h.set(y + page.scroll.offset - top + 16.0);
+}
+
+/// Horizon PE: what stands over a project's page: the way back, its name, and its button (the
+/// row's own: Install, or Installed with Remove).
+fn draw_page_head(
+    ui: &mut Ui<'_>,
+    card: &Catalog,
+    shared: &Shared,
+    page: &Page,
+    edge: f32,
+    drawn: &mut Vec<([f32; 4], Act)>,
+) {
+    let project = &page.project;
+    let back = [MARGIN, 8.0, 130.0, 62.0];
+    button(ui, back, "Back", false, Act::Back, drawn);
+    let rect = [edge - ROW_BUTTON_W, 8.0, ROW_BUTTON_W, 62.0];
+    if shared.installing.as_deref() == Some(project.title.as_str()) {
+        label(ui, rect, color::MUTED, "Installing");
+    } else if card.installed.contains(&project.id) {
+        let said = [rect[0] - 150.0, rect[1], 140.0, rect[3]];
+        label(ui, said, color::MUTED, "Installed");
+        button(ui, rect, "Remove", false, Act::Remove(page.index), drawn);
+    } else {
+        button(ui, rect, "Install", true, Act::Install(page.index), drawn);
+    }
+    let room = edge - MARGIN;
+    let title = fitted(ui, Face::Semibold, TITLE_TEXT, room, &project.title);
+    ui.text_line(
+        Face::Semibold,
+        TITLE_TEXT,
+        72.0,
+        MARGIN,
+        78.0,
+        color::text(),
+        &title,
+    );
 }
 
 /// A row's picture: on its way, its pixels, or none to be had (the lettered tile stays).
@@ -444,6 +777,9 @@ struct Shared {
     line: String,
     fraction: f32,
     finished: Option<(String, Result<Done, String>)>,
+    /// Horizon PE: the description of the project whose page is open (its id, then its lines),
+    /// once its source has answered.
+    page: Option<(String, Vec<Line>)>,
 }
 
 #[derive(Default)]
@@ -475,6 +811,13 @@ pub(super) struct Catalog {
     shared: Arc<Mutex<Shared>>,
     /// The buttons as last drawn (UI units), with what each does.
     buttons: RefCell<Vec<([f32; 4], Act)>>,
+    /// Horizon PE: which of the Mods shelf's mods the list shows.
+    kinds: Kinds,
+    /// Horizon PE: the project whose page is open over the list, that page's text as last
+    /// wrapped, and how tall it was drawn.
+    page: Option<Page>,
+    page_text: RefCell<Option<PageText>>,
+    page_h: Cell<f32>,
 }
 
 /// `text` on one line that fits `width`, cut with dots if it must be.
@@ -731,17 +1074,16 @@ fn draw_list(
     let row_w = edge - MARGIN;
     let text_w = row_w - ROW_BUTTON_W - 44.0 - (TEXT_X - MARGIN - 14.0);
     let rows = shared.feed.rows();
+    let listed = listed(card, rows);
     let scrolled = card.list.offset;
-    for i in list::rows_shown(scrolled, bottom - top, ROW_H, rows.len()) {
+    for at in list::rows_shown(scrolled, bottom - top, ROW_H, listed.len()) {
+        let i = listed[at];
         let project = &rows[i];
-        let y = top + i as f32 * ROW_H - scrolled;
+        let y = top + at as f32 * ROW_H - scrolled;
         let row = ROW_H - ROW_GAP;
         ui.rounded(MARGIN, y, row_w, row, 12.0, color::raised());
-        let title = if starling_catalog::is_native_mod(project) {
-            format!("{} (native mod)", project.title)
-        } else {
-            project.title.clone()
-        };
+        // Horizon PE: what kind of mod it is has a tag of its own, on the next line.
+        let title = project.title.clone();
         picture(
             ui,
             shared,
@@ -759,11 +1101,17 @@ fn draw_list(
             color::text(),
             &title,
         );
-        let meta = fitted(ui, Face::Regular, BODY_TEXT, text_w, &meta_line(project));
+        let tagged = match kind_tag(card, project) {
+            Some(kind) => tag(ui, TEXT_X, y + 48.0, kind) + 10.0,
+            None => 0.0,
+        };
+        let meta = meta_line(project);
+        let meta = fitted(ui, Face::Regular, BODY_TEXT, text_w - tagged, &meta);
+        let meta_x = TEXT_X + tagged;
         ui.text(
             Face::Regular,
             BODY_TEXT,
-            TEXT_X,
+            meta_x,
             y + 46.0,
             color::MUTED,
             &meta,
@@ -804,16 +1152,22 @@ fn draw_list(
                 drawn.push((part, Act::Install(i)));
             }
         }
+        // Horizon PE: a tap on the row, off its button (which is found first), opens its page.
+        let whole = [MARGIN, y, row_w, row];
+        if let Some(part) = list::shown_part(whole, top, bottom) {
+            drawn.push((part, Act::Details(i)));
+        }
     }
 
-    let y = top + content_h(rows.len()) - END_H - scrolled;
+    let y = top + content_h(listed.len()) - END_H - scrolled;
     if y >= bottom {
         return;
     }
+    let none = listed.is_empty();
     let (line, ink) = match shared.feed.tail() {
-        Tail::Loading => (loading_line(card.shelf, rows.is_empty()), color::MUTED),
+        Tail::Loading => (loading_line(card.shelf, none), color::MUTED),
         Tail::More => (loading_line(card.shelf, false), color::MUTED),
-        Tail::End if rows.is_empty() => ("Nothing found.".to_owned(), color::MUTED),
+        Tail::End if none => ("Nothing found.".to_owned(), color::MUTED),
         Tail::End => ("That's all of them.".to_owned(), color::MUTED),
         Tail::Failed(why) => (why.clone(), color::text()),
     };
@@ -1077,7 +1431,19 @@ fn draw_foot(
 ) {
     let foot = ui.h - FOOT_H + 7.0;
     let mut right = edge;
-    if card.shelf == Shelf::ResourcePacks && !card.view_installed {
+    // Horizon PE: the Mods shelf lists every mod, or those of one kind.
+    if card.shelf == Shelf::Mods && !card.view_installed && card.page.is_none() {
+        for (kinds, name) in KINDS.iter().rev() {
+            let width = ui.measure(Face::Semibold, BUTTON_TEXT, name) + 36.0;
+            right -= width;
+            let rect = [right, foot, width, 64.0];
+            let lit = card.kinds == *kinds;
+            button(ui, rect, name, lit, Act::Kinds(*kinds), drawn);
+            right -= 8.0;
+        }
+        right -= 4.0;
+    }
+    if card.shelf == Shelf::ResourcePacks && !card.view_installed && card.page.is_none() {
         let name = if card.everything {
             "Other game versions: On"
         } else {
@@ -1116,54 +1482,23 @@ fn draw_foot(
     }
 }
 
-/// Horizon PE: the catalog's button on the title screen, so the catalog (mods, resource packs and
-/// shader packs) is one tap from the main menu and not three pages into the options. It stands left of the menu's buttons, where the
-/// player's model stands on their right (own_skin.rs), at the height of that model's button.
+/// Horizon PE: a finger on the title screen's Catalog button (own_skin.rs draws it, as the
+/// menu's other buttons): lifting on it opens the catalog.
 #[cfg(target_os = "ios")]
 impl Game<'_> {
-    /// The button's place in the catalog's units; None off the title's main page, while the
-    /// catalog is open, and where the screen leaves it no room.
-    fn title_catalog_button(&self) -> Option<[f32; 4]> {
-        if self.catalog.shown || !self.title_main_shown() {
-            return None;
-        }
-        let [w, h] = self.touch_size();
-        let b = self.interface_batch([w, h]);
-        // The menu's buttons are 200 wide in the middle (title.rs, Mode::Main).
-        let room = (b.width / 2.0).floor() - 100.0;
-        if room < 110.0 {
-            return None;
-        }
-        let [ox, oy] = self.interface_origin();
-        let unit = b.scale / density(w as f32, h as f32);
-        let (bw, bh) = (100.0 * unit, 28.0 * unit);
-        let middle = (ox + room / 2.0) * unit;
-        let top = (oy + (b.height * 0.74).floor() - 2.0) * unit;
-        Some([middle - bw / 2.0, top, bw, bh])
-    }
-
-    pub(super) fn draw_title_catalog_button(&self, batch: &mut HudBatch) {
-        let Some(rect) = self.title_catalog_button() else {
-            return;
-        };
-        let mut ui = Ui::new(&self.gui.atlas, batch, (-1.0, -1.0));
-        plate(&mut ui, rect, "Catalog", true);
-        ui.finish();
-    }
-
-    /// A finger on the button: lifting on it opens the catalog. True when the button took it.
+    /// True when the button took the touch.
     pub(super) fn title_catalog_touch(&mut self, touch: &Touch) -> bool {
-        let Some(r) = self.title_catalog_button() else {
-            return false;
-        };
-        let [w, h] = self.touch_size();
-        let d = density(w as f32, h as f32);
-        let p = [touch.location.x as f32 / d, touch.location.y as f32 / d];
-        if p[0] < r[0] || p[0] > r[0] + r[2] || p[1] < r[1] || p[1] > r[1] + r[3] {
+        let b = self.interface_batch(self.touch_size());
+        let [ox, oy] = self.interface_origin();
+        let at = (
+            touch.location.x as f32 / b.scale - ox,
+            touch.location.y as f32 / b.scale - oy,
+        );
+        if self.catalog.shown || !self.title_catalog_at(at) {
             return false;
         }
         if touch.phase == TouchPhase::Ended {
-            self.open_catalog();
+            self.press_title_catalog();
         }
         true
     }
@@ -1182,6 +1517,7 @@ impl Game<'_> {
         let card = &mut self.catalog;
         card.shown = true;
         card.notice = None;
+        card.page = None;
         card.installed = starling_catalog::installed_projects(&Self::game_dir());
         // A picture that could not be had last time is asked for again.
         card.shared
@@ -1200,10 +1536,55 @@ impl Game<'_> {
             return false;
         }
         if card.removing.take().is_none() && card.removing_local.take().is_none() {
-            card.shown = false;
-            card.typing = false;
+            // Horizon PE: a project's page closes before the screen does.
+            if card.page.take().is_none() {
+                card.shown = false;
+                card.typing = false;
+            }
         }
         true
+    }
+
+    /// Horizon PE: opens the page of the list's row `index`, and asks its source for its
+    /// description on a thread of its own (the summary shows until it comes, and stays if it
+    /// does not).
+    fn catalog_open_page(&mut self, index: usize) {
+        let card = &mut self.catalog;
+        let shared = card.shared.clone();
+        let project = {
+            let mut s = shared.lock().unwrap_or_else(PoisonError::into_inner);
+            let Some(project) = s.feed.rows().get(index).cloned() else {
+                return;
+            };
+            s.page = None;
+            project
+        };
+        card.typing = false;
+        card.page_text.replace(None);
+        card.page = Some(Page {
+            project: project.clone(),
+            index,
+            scroll: Scroller::default(),
+        });
+        let summary = horizon_client::catalog_page::lines(&project.summary);
+        let id = project.id.clone();
+        let worker = shared.clone();
+        let started = std::thread::Builder::new()
+            .name("catalog page".into())
+            .spawn(move || {
+                let body = starling_catalog::browser::source(project.source)
+                    .and_then(|source| source.details(&project).ok())
+                    .map(|details| details.body)
+                    .filter(|body| !body.trim().is_empty())
+                    .unwrap_or_else(|| project.summary.clone());
+                let lines = horizon_client::catalog_page::lines(&body);
+                let mut s = worker.lock().unwrap_or_else(PoisonError::into_inner);
+                s.page = Some((project.id, lines));
+            });
+        if started.is_err() {
+            let mut s = shared.lock().unwrap_or_else(PoisonError::into_inner);
+            s.page = Some((id, summary));
+        }
     }
 
     /// Which rows say Installed: those whose file is in the game folder right now, and what the
@@ -1509,16 +1890,16 @@ impl Game<'_> {
     fn catalog_list_size(&self) -> (f32, f32) {
         let [w, h] = self.touch_size();
         let view = h as f32 / density(w as f32, h as f32) - HEAD_H - FOOT_H;
+        // Horizon PE: an open page is what scrolls, as tall as it was last drawn.
+        if self.catalog.page.is_some() {
+            return (view, self.catalog.page_h.get());
+        }
         let rows = if self.catalog.view_installed {
             shown_local(&self.catalog).len()
         } else {
-            self.catalog
-                .shared
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .feed
-                .rows()
-                .len()
+            let card = &self.catalog;
+            let shared = card.shared.lock().unwrap_or_else(PoisonError::into_inner);
+            listed(card, shared.feed.rows()).len()
         };
         (view, content_h(rows))
     }
@@ -1530,7 +1911,13 @@ impl Game<'_> {
         let home = Self::game_dir();
         let card = &self.catalog;
         let ahead = view + 3.0 * ROW_H;
-        let wanted: Vec<(String, PictureSource)> = if card.view_installed {
+        let wanted: Vec<(String, PictureSource)> = if let Some(page) = &card.page {
+            // Horizon PE: an open page shows its project's picture and no other.
+            let icon = page.project.icon.clone();
+            icon.map(|url| (url.clone(), PictureSource::Url(url)))
+                .into_iter()
+                .collect()
+        } else if card.view_installed {
             let rows = shown_local(card);
             list::rows_shown(card.list.offset, ahead, ROW_H, rows.len())
                 .filter_map(|i| local_picture(rows[i], &home))
@@ -1538,9 +1925,10 @@ impl Game<'_> {
         } else {
             let shared = card.shared.lock().unwrap_or_else(PoisonError::into_inner);
             let rows = shared.feed.rows();
-            list::rows_shown(card.list.offset, ahead, ROW_H, rows.len())
-                .filter_map(|i| {
-                    let url = rows[i].icon.clone()?;
+            let listed = listed(card, rows);
+            list::rows_shown(card.list.offset, ahead, ROW_H, listed.len())
+                .filter_map(|at| {
+                    let url = rows[listed[at]].icon.clone()?;
                     Some((url.clone(), PictureSource::Url(url)))
                 })
                 .collect()
@@ -1584,6 +1972,11 @@ impl Game<'_> {
     fn catalog_keep_up(&mut self) {
         let (view, content) = self.catalog_list_size();
         let card = &mut self.catalog;
+        // Horizon PE: an open page keeps inside its own ends, and the list waits under it.
+        if let Some(page) = card.page.as_mut() {
+            page.scroll.clamp(content - view);
+            return;
+        }
         card.list.clamp(content - view);
         if card.view_installed || !list::near_end(card.list.offset, view, content, NEAR_END) {
             return;
@@ -1605,10 +1998,12 @@ impl Game<'_> {
         if self.catalog.typing && self.keyboard_put_away("catalog") {
             self.catalog.typing = false;
         }
-        if self
-            .catalog
-            .typed_at
-            .is_some_and(|at| at.elapsed() >= TYPING_PAUSE)
+        // Horizon PE: a new list would take the open page's row from under it.
+        if self.catalog.page.is_none()
+            && self
+                .catalog
+                .typed_at
+                .is_some_and(|at| at.elapsed() >= TYPING_PAUSE)
         {
             self.catalog.typed_at = None;
             self.catalog.notice = None;
@@ -1660,6 +2055,7 @@ impl Game<'_> {
         if to_mods_page {
             self.catalog.shown = false;
             self.catalog.typing = false;
+            self.catalog.page = None;
             self.open_options_at(self.title.is_some(), horizon_client::options_ui::Page::Mods);
         }
     }
@@ -1725,7 +2121,9 @@ impl Game<'_> {
             let (w, h) = (ui.w, ui.h);
             let edge = w - MARGIN - if card.typing { w * NAV_BAR_SHARE } else { 0.0 };
             ui.fill(0.0, 0.0, w, h, color::bg());
-            if card.view_installed {
+            if let Some(page) = &card.page {
+                draw_page(&mut ui, card, &shared, page, edge, &mut pictures);
+            } else if card.view_installed {
                 draw_local_list(&mut ui, card, &shared, edge, &mut drawn, &mut pictures);
             } else {
                 draw_list(&mut ui, card, &shared, edge, &mut drawn, &mut pictures);
@@ -1765,7 +2163,11 @@ impl Game<'_> {
         // The rows go under these two.
         ui.fill(0.0, 0.0, w, HEAD_H, color::bg());
         ui.fill(0.0, h - FOOT_H, w, FOOT_H, color::bg());
-        draw_head(&mut ui, card, edge, &mut drawn);
+        if let Some(page) = &card.page {
+            draw_page_head(&mut ui, card, &shared, page, edge, &mut drawn);
+        } else {
+            draw_head(&mut ui, card, edge, &mut drawn);
+        }
         draw_foot(&mut ui, card, &shared, edge, &mut drawn);
         if let Some(project) = &card.removing {
             draw_confirm(&mut ui, &project.title, &card.removing_note, &mut drawn);
@@ -1789,19 +2191,24 @@ impl Game<'_> {
         let (view, content) = self.catalog_list_size();
         let most = content - view;
         let card = &mut self.catalog;
+        // Horizon PE: an open page is what a finger scrolls.
+        let scroller = match card.page.as_mut() {
+            Some(page) => &mut page.scroll,
+            None => &mut card.list,
+        };
         let tapped = match touch.phase {
             TouchPhase::Started => {
                 let on_list = at[1] >= HEAD_H && at[1] < bottom;
-                card.list.press(touch.id, at, on_list);
+                scroller.press(touch.id, at, on_list);
                 None
             }
             TouchPhase::Moved => {
-                card.list.moved(touch.id, at, most);
+                scroller.moved(touch.id, at, most);
                 None
             }
-            TouchPhase::Ended => card.list.lift(touch.id, at, most),
+            TouchPhase::Ended => scroller.lift(touch.id, at, most),
             TouchPhase::Cancelled => {
-                card.list.cancel(touch.id);
+                scroller.cancel(touch.id);
                 None
             }
         };
@@ -1884,6 +2291,12 @@ impl Game<'_> {
                     self.turn_off_local(&item);
                 }
             }
+            Act::Kinds(kinds) => {
+                card.kinds = kinds;
+                card.list.reset();
+            }
+            Act::Details(index) => self.catalog_open_page(index),
+            Act::Back => card.page = None,
         }
         true
     }

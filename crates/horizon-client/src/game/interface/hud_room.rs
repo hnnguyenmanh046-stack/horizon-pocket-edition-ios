@@ -56,7 +56,106 @@ impl HudArea {
     }
 }
 
+/// Horizon PE: what is drawn between `begin` and `finish` comes out `zoom` times its size, from
+/// the area's top left corner: inside, the area is that much smaller, so what lays itself out at
+/// its bottom middle (the hotbar) ends at the real bottom middle, only bigger.
+pub(super) struct HudZoom {
+    size: [f32; 2],
+    zoom: f32,
+    first_vertex: usize,
+    first_blend: usize,
+}
+
+impl HudZoom {
+    /// `lift`: how much of the area's bottom was given up to what is zoomed (`hotbar_lift`).
+    pub(super) fn begin(batch: &mut HudBatch, zoom: f32, lift: f32) -> Self {
+        let area = Self {
+            size: [batch.width, batch.height],
+            zoom,
+            first_vertex: batch.vertices.len(),
+            first_blend: batch.blends.len(),
+        };
+        batch.width /= zoom;
+        batch.height = (batch.height + lift) / zoom;
+        area
+    }
+
+    pub(super) fn finish(self, batch: &mut HudBatch) {
+        [batch.width, batch.height] = self.size;
+        if self.zoom == 1.0 {
+            return;
+        }
+        for vertex in &mut batch.vertices[self.first_vertex..] {
+            vertex.pos[0] *= self.zoom;
+            vertex.pos[1] *= self.zoom;
+        }
+        for (_, blend) in &mut batch.blends[self.first_blend..] {
+            use horizon_client::hud::Blend;
+            if let Blend::Depth(rect) | Blend::DepthGlint(rect) = blend {
+                *rect = rect.map(|v| (v as f32 * self.zoom).round() as u32);
+            }
+        }
+    }
+}
+
+/// Horizon PE: how much higher a hotbar `zoom` times its size reaches, in GUI pixels: what
+/// stands on the hotbar (hearts, the experience bar, the held item's name, chat) stands on it
+/// still.
+pub(super) fn hotbar_lift(zoom: f32) -> f32 {
+    22.0 * (zoom - 1.0)
+}
+
 impl Game<'_> {
+    /// Horizon PE: how many times its size the hotbar is drawn (`TouchControls::fit_big_hotbar`).
+    pub(super) fn hotbar_zoom(&self) -> f32 {
+        #[cfg(any(target_os = "android", target_os = "ios"))]
+        {
+            self.mobile.controls.hotbar_fit.zoom
+        }
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        {
+            1.0
+        }
+    }
+
+    /// Horizon PE: while a finger slides along the hotbar it covers the slot it is on: the slot
+    /// is shown again above it, twice the hotbar's size, with the item in it.
+    pub(super) fn draw_hotbar_pick(&self, batch: &mut HudBatch, zoom: f32, lift: f32) {
+        #[cfg(any(target_os = "android", target_os = "ios"))]
+        {
+            if !self.mobile.hotbar.active() {
+                return;
+            }
+            let area = HudZoom::begin(batch, zoom * 2.0, lift);
+            // In here the hotbar is half its size: slots of 10, a strip of 11.
+            let middle = batch.width / 2.0 + (self.selected as f32 - 4.0) * 10.0;
+            let most = (batch.width - 25.0).max(1.0);
+            let x = (middle - 12.0).clamp(1.0, most).floor();
+            let y = (batch.height - 11.0 - 4.0 - 24.0).floor();
+            let shade = horizon_client::hud::rgba(0, 0, 0, 180);
+            batch.fill(&self.gui.atlas, x + 1.0, y + 1.0, 22.0, 21.0, shade);
+            let frame = [hud_layout::GuiDraw::Sprite {
+                sprite: "hud/hotbar_selection".into(),
+                x: x as i32,
+                y: y as i32,
+                w: 24,
+                h: 23,
+                region: None,
+                color: hud_layout::WHITE,
+                blend: hud_layout::Blend::Textured,
+            }];
+            hud_layout::paint(batch, &self.gui.atlas, &frame);
+            if let Some(stack) = self.inventory[self.selected].as_ref() {
+                self.draw_item(batch, stack, x + 4.0, y + 4.0);
+            }
+            area.finish(batch);
+        }
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        {
+            let _ = (batch, zoom, lift);
+        }
+    }
+
     /// Menus use the framebuffer's GUI scale and lay out within its safe area.
     pub(in crate::game) fn interface_batch(&self, size: [u32; 2]) -> HudBatch {
         let mut batch = HudBatch::new(size, self.settings.gui_scale_inputs());
