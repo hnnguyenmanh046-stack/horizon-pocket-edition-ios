@@ -223,6 +223,10 @@ def with_arguments(text, call, count, new):
 # Starling keeps as `<name>_old` (game/starling/native_compat.rs).
 OLD_SHAPES = (
     (".native_text_width(", 1, ".native_text_width_old("),
+    # Horizon PE: a text's colour was opaque RGB (the top byte not read); it is ARGB now, and text
+    # with no alpha draws nothing. A mod made for the old hooks passes 0xFFFFFF for white, so its
+    # text was gone (Coordinates HUD's, Armor Status's numbers, the effects' names and timers).
+    (".native_text(", 5, ".native_text_old("),
     # Untinted, before it took a tint.
     (".native_sprite(", 4, ".native_sprite_old("),
     # A batch is laid out with its view's GUI scale settings now; the old constructor takes the last
