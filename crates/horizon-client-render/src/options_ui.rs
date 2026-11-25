@@ -273,6 +273,7 @@ impl Opt {
             Opt::TouchUiVibration => "UI vibration",
             Opt::TouchGameVibration => "Gameplay vibration",
             Opt::TouchAttackButtonLook => "Look while interacting",
+            Opt::TouchHoldAttack => "Hold Attack to keep hitting",
             Opt::TouchMouseSensitivity => "Virtual mouse sensitivity",
             Opt::TouchAnalog => "360-degree movement",
             Opt::TouchCircleSize => "Touch circle size",
@@ -694,6 +695,7 @@ impl Opt {
             Opt::TouchMouseSensitivity => {
                 Some(format!("{:.0}%", s.touch.virtual_mouse_sensitivity * 100.0))
             }
+            Opt::TouchHoldAttack => Some(if s.touch.hold_attack { "ON" } else { "OFF" }.into()),
             Opt::TouchAttackButtonLook => Some(
                 if s.touch.attack_button_look {
                     "ON"
@@ -1329,6 +1331,7 @@ impl Opt {
             Opt::TouchUiVibration => s.touch.ui_vibrate ^= true,
             Opt::TouchGameVibration => s.touch.vibrate ^= true,
             Opt::TouchAttackButtonLook => s.touch.attack_button_look ^= true,
+            Opt::TouchHoldAttack => s.touch.hold_attack ^= true,
             Opt::TouchAttackSide => s.touch.attack_indicator_left ^= true,
             Opt::TouchSwapJumpSneak => s.touch.swap_jump_sneak ^= true,
             Opt::TouchAutoSprint => s.touch.sprint_with_joystick ^= true,
@@ -4839,6 +4842,7 @@ impl OptionsUi {
                 rows.extend(pairs(&[
                     Opt::TouchCrosshairGestures,
                     Opt::TouchAttackButtonLook,
+                    Opt::TouchHoldAttack,
                     Opt::TouchSensitivity,
                     Opt::TouchSensitivityHorizontal,
                     Opt::TouchSensitivityVertical,

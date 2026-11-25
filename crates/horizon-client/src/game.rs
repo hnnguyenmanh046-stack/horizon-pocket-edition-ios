@@ -4957,6 +4957,8 @@ impl Game<'_> {
     // runs no code built elsewhere (no native builds).
     #[cfg(target_os = "ios")]
     fn draw_phone_offers(&mut self, batch: &mut HudBatch) {
+        // Under the cards: the title's own button for the catalog.
+        self.draw_title_catalog_button(batch);
         self.draw_update_offer(batch);
         self.draw_catalog(batch);
     }

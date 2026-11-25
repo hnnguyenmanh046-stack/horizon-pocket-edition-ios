@@ -1460,6 +1460,12 @@ impl Loading {
                 if let Some(r) = &mut self.renderer {
                     r.resize(size.width, size.height);
                 }
+                // Horizon PE: the boot renderer draws the setup and loading screens before the
+                // game's own is built, and it kept the size the window opened with: a phone
+                // turned from portrait while the game's files loaded showed the rest stretched.
+                if let Some(boot) = &mut self.boot_renderer {
+                    boot.resize(size.width, size.height);
+                }
                 self.apply_menu_settings();
             }
             WindowEvent::RedrawRequested => self.draw(),

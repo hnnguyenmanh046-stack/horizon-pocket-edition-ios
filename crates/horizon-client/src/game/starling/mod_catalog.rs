@@ -1117,6 +1117,59 @@ fn draw_foot(
     }
 }
 
+/// Horizon PE: the catalog's button on the title screen, so the catalog is one tap from the main
+/// menu and not three pages into the options. It stands left of the menu's buttons, where the
+/// player's model stands on their right (own_skin.rs), at the height of that model's button.
+#[cfg(target_os = "ios")]
+impl Game<'_> {
+    /// The button's place in the catalog's units; None off the title's main page, while the
+    /// catalog is open, and where the screen leaves it no room.
+    fn title_catalog_button(&self) -> Option<[f32; 4]> {
+        if self.catalog.shown || !self.title_main_shown() {
+            return None;
+        }
+        let [w, h] = self.touch_size();
+        let b = self.interface_batch([w, h]);
+        // The menu's buttons are 200 wide in the middle (title.rs, Mode::Main).
+        let room = (b.width / 2.0).floor() - 100.0;
+        if room < 110.0 {
+            return None;
+        }
+        let [ox, oy] = self.interface_origin();
+        let unit = b.scale / density(w as f32, h as f32);
+        let (bw, bh) = (100.0 * unit, 28.0 * unit);
+        let middle = (ox + room / 2.0) * unit;
+        let top = (oy + (b.height * 0.74).floor() - 2.0) * unit;
+        Some([middle - bw / 2.0, top, bw, bh])
+    }
+
+    pub(super) fn draw_title_catalog_button(&self, batch: &mut HudBatch) {
+        let Some(rect) = self.title_catalog_button() else {
+            return;
+        };
+        let mut ui = Ui::new(&self.gui.atlas, batch, (-1.0, -1.0));
+        plate(&mut ui, rect, "Mods", true);
+        ui.finish();
+    }
+
+    /// A finger on the button: lifting on it opens the catalog. True when the button took it.
+    pub(super) fn title_catalog_touch(&mut self, touch: &Touch) -> bool {
+        let Some(r) = self.title_catalog_button() else {
+            return false;
+        };
+        let [w, h] = self.touch_size();
+        let d = density(w as f32, h as f32);
+        let p = [touch.location.x as f32 / d, touch.location.y as f32 / d];
+        if p[0] < r[0] || p[0] > r[0] + r[2] || p[1] < r[1] || p[1] > r[1] + r[3] {
+            return false;
+        }
+        if touch.phase == TouchPhase::Ended {
+            self.open_catalog();
+        }
+        true
+    }
+}
+
 impl Game<'_> {
     /// A page's Catalog button: the screen, on that page's shelf.
     pub(super) fn open_catalog_on(&mut self, shelf: Shelf) {
