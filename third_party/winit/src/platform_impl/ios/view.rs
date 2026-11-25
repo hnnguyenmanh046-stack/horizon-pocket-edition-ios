@@ -57,8 +57,10 @@ fn keep_pointer_interaction_enabled() {
     }
     let class = objc2::class!(UIPointerInteraction);
     let Some(method) = class.instance_method(sel!(_updateInteractionIsEnabled)) else {
+        super::hardware_mouse::trace(format_args!("no _updateInteractionIsEnabled on this iOS"));
         return;
     };
+    super::hardware_mouse::trace(format_args!("pointer interaction hook installed"));
     // SAFETY: the same signature as the method it takes the place of.
     let hook = unsafe { mem::transmute::<UpdateEnabled, Imp>(pointer_interaction_enabled) };
     // SAFETY: as above; nothing else relies on the old implementation.
@@ -385,6 +387,7 @@ declare_class!(
             let mtm = MainThreadMarker::from(self);
             let phone =
                 UIDevice::currentDevice(mtm).userInterfaceIdiom() == UIUserInterfaceIdiom::Phone;
+            super::hardware_mouse::trace(format_args!("iOS asked the pointer's style (phone={phone})"));
             // No early `return`: this macro wraps the value the body ends with.
             if phone {
                 unsafe { msg_send_id![objc2::class!(UIPointerStyle), hiddenPointerStyle] }
@@ -411,6 +414,7 @@ declare_class!(
                     (0.0, 0.0)
                 }
             };
+            super::hardware_mouse::trace(format_args!("scroll gesture {dx} {dy}"));
             if (dx == 0.0 && dy == 0.0) || !super::hardware_mouse::scroll_gesture_allowed() {
                 return;
             }
@@ -670,6 +674,16 @@ impl WinitView {
             if touch_type == UITouchType::IndirectPointer && self.ivars().mouse.captured() {
                 continue;
             }
+            // On a phone, AssistiveTouch's pointer reports its clicks as touches while the mouse
+            // reports them through GameController: each click came twice. The mouse's own are kept.
+            if touch_type == UITouchType::IndirectPointer
+                && super::hardware_mouse::gc_mouse_present()
+                && UIDevice::currentDevice(MainThreadMarker::from(self)).userInterfaceIdiom()
+                    == UIUserInterfaceIdiom::Phone
+            {
+                super::hardware_mouse::trace(format_args!("dropped an indirect pointer touch"));
+                continue;
+            }
             // With AssistiveTouch on, iOS makes a finger's touch of a mouse's click as well as
             // GameController's own click: the game would click twice. A touch that begins while
             // a mouse is in use is that, and is left out until it ends.
@@ -679,6 +693,7 @@ impl WinitView {
                 let mut dropped = self.ivars().dropped_touches.borrow_mut();
                 if matches!(phase, UITouchPhase::Began) {
                     if super::hardware_mouse::mouse_recently_used() && assistive_touch_running() {
+                        super::hardware_mouse::trace(format_args!("dropped a direct touch"));
                         dropped.insert(id);
                         continue;
                     }
@@ -796,10 +811,16 @@ impl WinitView {
             if !supported {
                 return;
             }
-            let no_touches: Retained<objc2::runtime::AnyObject> =
-                msg_send_id![objc2::class!(NSArray), array];
-            let _: () = msg_send![&*pan, setAllowedTouchTypes: &*no_touches];
+            // Only a pointer's scroll (UITouchTypeIndirectPointer is 3), with no finger needed.
+            let indirect: Retained<objc2::runtime::AnyObject> =
+                msg_send_id![objc2::class!(NSNumber), numberWithInteger: 3isize];
+            let types: Retained<objc2::runtime::AnyObject> =
+                msg_send_id![objc2::class!(NSArray), arrayWithObject: &*indirect];
+            let _: () = msg_send![&*pan, setAllowedTouchTypes: &*types];
             let _: () = msg_send![&*pan, setAllowedScrollTypesMask: 3isize];
+            let _: () = msg_send![&*pan, setMinimumNumberOfTouches: 0usize];
+            let _: () = msg_send![&*pan, setMaximumNumberOfTouches: 0usize];
+            super::hardware_mouse::trace(format_args!("scroll recognizer installed"));
             pan.setDelegate(Some(ProtocolObject::from_ref(self)));
             self.addGestureRecognizer(&pan);
             self.ivars().scroll_gesture_recognizer.replace(Some(pan));
