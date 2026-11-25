@@ -531,6 +531,9 @@ pub struct Settings {
     /// weapon has recharged (game/starling/mobile_controls: `attack_hold_step`). Off: one hit a
     /// press, as a mouse click.
     pub hold_attack: bool,
+    /// Horizon PE: the hotbar is drawn as big as a thumb needs, up to slots of 6.6 mm, where no
+    /// button is in its way (`pocket::fit_hotbar`). Off: the size the GUI scale gives it.
+    pub big_hotbar: bool,
     pub gyroscope: bool,
     pub gyro_sensitivity: f32,
     pub attack_indicator_left: bool,
@@ -586,8 +589,9 @@ pub struct Settings {
     pub layouts: [[Placement; 14]; 3],
 }
 /// The factory defaults' revision. 1: toggle sprint and inventory walk controls on.
-/// 3 (Horizon PE): Sneak is a switch (a tap turns it on, another off).
-pub const DEFAULTS_REV: u32 = 3;
+/// 3 (Horizon PE test builds only): Sneak's button was made a switch of its own, which fought
+/// the game's own toggle. 4: that is taken back.
+pub const DEFAULTS_REV: u32 = 4;
 fn default_profile_name() -> String {
     "default".into()
 }
@@ -670,9 +674,6 @@ impl Default for Settings {
                 row[c as usize].visible_in_menu = false;
             }
             row[Control::Attack as usize].passthrough = true;
-            // Horizon PE: Sneak stays on until tapped again. Building at an edge takes one thumb
-            // to move and the other to place, and leaves none to hold it.
-            row[Control::Sneak as usize].toggleable = true;
         }
         Self {
             input_selection: InputSelection::Auto,
@@ -708,6 +709,7 @@ impl Default for Settings {
             crosshair_gestures: false,
             attack_button_look: true,
             hold_attack: true,
+            big_hotbar: true,
             gyroscope: false,
             gyro_sensitivity: 1.0,
             attack_indicator_left: true,
@@ -811,10 +813,12 @@ impl Settings {
         if s.defaults_rev < 2 && cfg!(target_os = "ios") {
             s.virtual_mouse_enabled = true;
         }
-        // Horizon PE: layouts saved before Sneak was a switch get it as one, once.
-        if s.defaults_rev < 3 {
+        // Horizon PE: revision 3 (test builds) made Sneak's button a switch of its own. The
+        // game already flips sneaking on each press, so the two together answered every second
+        // tap. A file of that revision gets the button back as it was.
+        if s.defaults_rev == 3 {
             for row in &mut s.layouts {
-                row[Control::Sneak as usize].toggleable = true;
+                row[Control::Sneak as usize].toggleable = false;
             }
         }
         s.defaults_rev = s.defaults_rev.max(DEFAULTS_REV);
@@ -2555,6 +2559,32 @@ mod tests {
         loaded.save_to(&path).unwrap();
         let again = Settings::load_from(&path);
         assert!(!again.sprint_toggle && !again.toggle_sprint && !again.inventory_controls);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Horizon PE: a test build's file, with Sneak's button made a switch, gets it back as a
+    /// plain button; a file the player made a switch in afterwards keeps it.
+    #[test]
+    fn the_sneak_switch_of_revision_3_is_taken_back_once() {
+        let dir = std::env::temp_dir().join(format!("horizon-sneak-rev-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("horizon-touch.json");
+        let mut old = Settings {
+            defaults_rev: 3,
+            ..Settings::default()
+        };
+        let sneak = Control::Sneak as usize;
+        for row in &mut old.layouts {
+            row[sneak].toggleable = true;
+        }
+        std::fs::write(&path, serde_json::to_vec(&old).unwrap()).unwrap();
+        let mut loaded = Settings::load_from(&path);
+        assert!(loaded.layouts.iter().all(|row| !row[sneak].toggleable));
+        assert_eq!(loaded.defaults_rev, DEFAULTS_REV);
+        assert!(!Settings::default().layouts[0][sneak].toggleable);
+        loaded.layouts[0][sneak].toggleable = true;
+        loaded.save_to(&path).unwrap();
+        assert!(Settings::load_from(&path).layouts[0][sneak].toggleable);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

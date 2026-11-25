@@ -482,11 +482,47 @@ impl Game<'_> {
             .is_some_and(|t| matches!(t.mode, Mode::Main))
     }
 
-    /// Horizon PE: whether the title's main page is what shows now (not the options or the
-    /// credits opened over it): where the catalog's button stands (mod_catalog.rs).
-    #[cfg(target_os = "ios")]
-    pub(in crate::game) fn title_main_shown(&self) -> bool {
-        self.title_main() && !matches!(self.screen, super::Screen::Options | super::Screen::Win)
+    /// Horizon PE (iOS): the title screen's Catalog button (mods, resource packs and shader
+    /// packs, one tap from the main menu): x, y and width in GUI pixels. It is one of the menu's
+    /// own buttons, the twin of Customize... on the other side: left of the menu's 200 wide
+    /// column where the player stands on its right, at the same height. None off the title's
+    /// main page, under the options or the credits, and where the screen leaves it no room.
+    fn title_catalog_layout(&self) -> Option<[f32; 3]> {
+        let hidden = matches!(self.screen, super::Screen::Options | super::Screen::Win);
+        if !cfg!(target_os = "ios") || !self.title_main() || hidden {
+            return None;
+        }
+        let r = self.renderer.as_ref()?;
+        let b = self.interface_batch([r.config.width, r.config.height]);
+        let room = (b.width.ceil() / 2.0).floor() - 100.0;
+        let x = ((room - BUTTON_WIDTH) / 2.0).floor();
+        let y = (b.height.ceil() * 0.74).floor() + 6.0;
+        (room >= BUTTON_WIDTH + 8.0).then_some([x, y, BUTTON_WIDTH])
+    }
+
+    /// Whether `cursor` (GUI pixels) is on the title screen's Catalog button.
+    pub(in crate::game) fn title_catalog_at(&self, cursor: (f32, f32)) -> bool {
+        self.title_catalog_layout()
+            .is_some_and(|[x, y, w]| ui::hovered(cursor, x, y, w, 20.0))
+    }
+
+    /// A press on the title screen's Catalog button opens the catalog.
+    pub(in crate::game) fn press_title_catalog(&mut self) {
+        #[cfg(target_os = "ios")]
+        if !self.catalog.shown {
+            self.audio.play_button_click();
+            self.open_catalog();
+        }
+    }
+
+    /// The title screen's Catalog button, drawn as the menu draws its own.
+    pub(in crate::game) fn draw_title_catalog(&self, batch: &mut HudBatch) {
+        let Some([x, y, w]) = self.title_catalog_layout() else {
+            return;
+        };
+        let hover = ui::hovered(self.cursor, x, y, w, 20.0);
+        let label = Text::literal("Catalog");
+        ui::button(batch, &self.gui.atlas, x, y, w, 20.0, &label, true, hover);
     }
 
     /// Where the title screen shows its player in a GUI `w` by `h`, once it is drawn there; None

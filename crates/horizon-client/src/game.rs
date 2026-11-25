@@ -4926,8 +4926,6 @@ impl Game<'_> {
     // runs no code built elsewhere (no native builds).
     #[cfg(target_os = "ios")]
     fn draw_phone_offers(&mut self, batch: &mut HudBatch) {
-        // Under the cards: the title's own button for the catalog.
-        self.draw_title_catalog_button(batch);
         self.draw_update_offer(batch);
         self.draw_catalog(batch);
     }
@@ -5058,6 +5056,8 @@ impl Game<'_> {
                 );
             }
             self.draw_title_player(&mut batch);
+            // Horizon PE: the title's Catalog button, on iOS (own_skin.rs).
+            self.draw_title_catalog(&mut batch);
             self.draw_build_badge(&mut batch);
             // ScreenEvent.Render.Post over the title's own screens: a mod draws
             // over them here (a pack browser over Create New World, say), and the
@@ -5122,6 +5122,12 @@ impl Game<'_> {
         };
         let margins = self.hud_safe_insets(&batch);
         let area = hud_room::HudArea::begin(&mut batch, margins);
+        // Horizon PE: a hotbar drawn bigger for a thumb reaches higher: the rest of the HUD
+        // lays itself out in what is left above it, so the hearts, the experience bar, the held
+        // item's name and chat stand on the hotbar as they always do.
+        let hotbar_zoom = if spectator { 1.0 } else { self.hotbar_zoom() };
+        let hotbar_lift = hud_room::hotbar_lift(hotbar_zoom);
+        batch.height -= hotbar_lift;
         let (w, h) = (batch.width, batch.height);
         let (wi, hi) = (w as i32, h as i32);
         self.ui.room = self.hud_room(w, h, show_hud);
@@ -5131,6 +5137,9 @@ impl Game<'_> {
                     g.draw_spectator_hotbar(batch);
                 } else {
                     let partial = g.clock.fraction() as f32;
+                    // Horizon PE: the hotbar at the size a thumb needs (`hotbar_zoom`).
+                    let zoomed = hud_room::HudZoom::begin(batch, hotbar_zoom, hotbar_lift);
+                    let (wi, hi) = (batch.width as i32, batch.height as i32);
                     let inputs = hud_layout::HotbarInputs {
                         selected: g.selected as i32,
                         right_handed: !g.settings.main_hand_left,
@@ -5162,6 +5171,8 @@ impl Game<'_> {
                             }
                         }
                     }
+                    zoomed.finish(batch);
+                    g.draw_hotbar_pick(batch, hotbar_zoom, hotbar_lift);
                 }
             });
             self.gui_layer("minecraft:effects", &mut batch, |g, batch| {
@@ -9918,6 +9929,12 @@ impl Game<'_> {
                     button: MouseButton::Left,
                     ..
                 } if self.title_player_at(self.cursor) => self.press_title_player(),
+                // Horizon PE: a mouse on the title's Catalog button (a finger: mod_catalog.rs).
+                WindowEvent::MouseInput {
+                    state: ElementState::Pressed,
+                    button: MouseButton::Left,
+                    ..
+                } if self.title_catalog_at(self.cursor) => self.press_title_catalog(),
                 WindowEvent::MouseInput {
                     state,
                     button: MouseButton::Left,

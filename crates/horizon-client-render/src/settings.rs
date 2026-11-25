@@ -863,6 +863,7 @@ pub enum Opt {
     TouchAttackButtonLook,
     /// Horizon PE: `touch.hold_attack`.
     TouchHoldAttack,
+    TouchBigHotbar,
     TouchDynamicJoystick,
     TouchDynamicAreaX,
     TouchDynamicAreaY,

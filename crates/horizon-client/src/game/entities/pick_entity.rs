@@ -28,19 +28,6 @@ fn nearest_entity(
     })
 }
 
-/// Horizon PE: what the crosshair is on, as a held Attack button sorts it: a monster is hit
-/// without being asked twice, another creature only when the press began on it, a thing that is
-/// not alive (a boat, an item frame, an end crystal) only by a press of its own.
-#[cfg(any(target_os = "android", target_os = "ios"))]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::game) enum HeldAttackTarget {
-    Monster(i32),
-    Living(i32),
-    Thing,
-    Block,
-    Nothing,
-}
-
 impl Game<'_> {
     fn crosshair_entity_hit(&self) -> Option<CrosshairEntityHit> {
         if let Some(entity) = self.targeting().entity {
@@ -91,18 +78,21 @@ impl Game<'_> {
 
     /// Horizon PE: what a held Attack button finds under the crosshair (mobile_controls).
     #[cfg(any(target_os = "android", target_os = "ios"))]
-    pub(in crate::game) fn held_attack_target(&self) -> HeldAttackTarget {
+    pub(in crate::game) fn held_attack_target(
+        &self,
+    ) -> horizon_client::android_controls::pocket::HoldTarget {
+        use horizon_client::android_controls::pocket::HoldTarget;
         if let Some(hit) = self.crosshair_entity_hit() {
             return match self.mobs.iter().find(|mob| mob.id as i32 == hit.id) {
-                Some(mob) if mob.is_enemy() => HeldAttackTarget::Monster(hit.id),
-                Some(_) => HeldAttackTarget::Living(hit.id),
-                None => HeldAttackTarget::Thing,
+                Some(mob) if mob.is_enemy() => HoldTarget::Monster(hit.id),
+                Some(_) => HoldTarget::Living(hit.id),
+                None => HoldTarget::Thing,
             };
         }
         if self.pick().is_some() {
-            HeldAttackTarget::Block
+            HoldTarget::Block
         } else {
-            HeldAttackTarget::Nothing
+            HoldTarget::Nothing
         }
     }
 
