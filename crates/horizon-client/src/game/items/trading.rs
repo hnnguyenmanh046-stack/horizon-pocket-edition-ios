@@ -1028,7 +1028,7 @@ mod tests {
         };
         assert_eq!(drag(0, -0.125), 3, "25 steps of an eighth of a row down");
         assert_eq!(drag(5, 0.125), 2, "and up, no faster");
-        assert_eq!(scrolled(3, 5, -0.125), 3, "which the wheel's rule alone never moved");
+        assert_eq!(scrolled(3, 5, -0.125), 3, "the wheel's rule alone");
     }
 
     #[test]
