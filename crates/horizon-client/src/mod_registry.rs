@@ -70,8 +70,7 @@ pub fn load_index(home: &Path, at: &str) -> Result<Index, String> {
         true => Index::parse_local(text),
         false => Index::parse(text),
     };
-    let read =
-        |at: &str| fetch_text(at).and_then(|text| parse(&text).map(|index| (index, text)));
+    let read = |at: &str| fetch_text(at).and_then(|text| parse(&text).map(|index| (index, text)));
     let fetched = read(at).or_else(|e| {
         // Horizon PE: the registry's own place has a stand-in (`fallback_location`).
         if at != INDEX_URL {

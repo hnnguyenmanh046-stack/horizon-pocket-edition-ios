@@ -13822,10 +13822,17 @@ mod tests {
         };
         assert_eq!(peak(Some(4.0), Some(8.0)), 320, "the headroom in use");
         assert_eq!(peak(Some(1.0), Some(8.0)), 640, "none in use yet: the most");
-        assert_eq!(peak(Some(1.5), Some(8.0)), 200, "never under the lowest peak");
+        assert_eq!(
+            peak(Some(1.5), Some(8.0)),
+            200,
+            "never under the lowest peak"
+        );
         assert_eq!(peak(None, None), 200, "nothing said");
         assert_eq!(peak(Some(f32::NAN), Some(f32::INFINITY)), 200);
-        assert_eq!(super::ios_reported(&wgpu::DisplayHdrInfo::default()).peak, 200);
+        assert_eq!(
+            super::ios_reported(&wgpu::DisplayHdrInfo::default()).peak,
+            200
+        );
     }
     #[test]
     fn macos_hdr_uses_potential_instead_of_brightness_dependent_current() {
@@ -15433,7 +15440,11 @@ fn ios_reported(info: &wgpu::DisplayHdrInfo) -> crate::graphics::Reported {
     let over_white = |n: &f32| n.is_finite() && *n > 1.05;
     let headroom = info
         .headroom
-        .and_then(|h| h.current.filter(over_white).or(h.potential.filter(over_white)))
+        .and_then(|h| {
+            h.current
+                .filter(over_white)
+                .or(h.potential.filter(over_white))
+        })
         .unwrap_or(2.5);
     crate::graphics::Reported {
         paper_white: 80,
