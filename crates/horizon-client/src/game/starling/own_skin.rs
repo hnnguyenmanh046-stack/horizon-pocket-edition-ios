@@ -509,7 +509,7 @@ impl Game<'_> {
     /// A press on the title screen's Catalog button opens the catalog.
     pub(in crate::game) fn press_title_catalog(&mut self) {
         #[cfg(target_os = "ios")]
-        if !self.catalog.shown {
+        if !self.catalog_open() {
             self.audio.play_button_click();
             self.open_catalog();
         }
