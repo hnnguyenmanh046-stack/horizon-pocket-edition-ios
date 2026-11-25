@@ -34,7 +34,33 @@ pub(super) struct MobileControls {
     was_in_menu: Option<bool>,
     /// The options changed the touch settings since they were last written (`mobile_options_apply`).
     touch_unsaved: bool,
+    /// Horizon PE: the press of the Attack button being held (`attack_hold_step`).
+    attack_hold: AttackHold,
+    /// Horizon PE: the finger that landed on the hotbar and slides along it.
+    hotbar_finger: Option<u64>,
 }
+
+/// Horizon PE: one press of the Attack button, from the finger landing to its lifting.
+#[derive(Default)]
+struct AttackHold {
+    /// When the finger landed; None while the button is up.
+    since: Option<Instant>,
+    /// The creature the press landed on: this hold hits it again without a new press.
+    started_on: Option<i32>,
+    /// This hold has hit something alive: it breaks no blocks any more.
+    fought: bool,
+    /// This hold has hit or mined: lifting it is not a tap in the air.
+    acted: bool,
+    /// The last hit this hold made by itself.
+    hit_at: Option<Instant>,
+}
+
+/// How much of a turn is kept while a held Attack button steers over a creature.
+const ON_TARGET_TURN: f32 = 0.6;
+/// A press this short that found nothing to act on still swings once, as a click does.
+const AIR_TAP: std::time::Duration = std::time::Duration::from_millis(250);
+/// The least between two hits a hold makes by itself, where the rules have no recharge.
+const HOLD_HIT_GAP: std::time::Duration = std::time::Duration::from_millis(250);
 
 /// Whether the touch controls draw: their menu state `drawn` is this frame's `now` (not one
 /// from before the screen changed), and they are either the menu's or a world's (`in_world`).
@@ -209,6 +235,71 @@ impl Game<'_> {
     /// sliders as much as the controls' own. Writing the layout puts ~37 KB on shared storage after
     /// reading the default one back, ~50 ms a time on a POCO F6 Pro: the touch events that queued
     /// behind each write kept the game frozen for as long as a finger moved any slider, 0.1 to 3.5 s.
+    /// Horizon PE: what a held Attack button does this frame; the attack trigger's value while
+    /// it is held (None: the button is up, the trigger is whatever else made it).
+    ///
+    /// A mouse's held button mines and hits once. A thumb that holds the button to steer with it
+    /// wants the hit again when the weapon has recharged, and wants nothing it did not mean:
+    /// - on a block it mines, until this hold has hit a creature (a fight breaks no blocks);
+    /// - on a monster it hits each time the attack has recharged;
+    /// - on any other creature it hits only if the press began on it, so nothing that walks in
+    ///   front (a villager, a pet, another player) is hit by a hold that was mining;
+    /// - on a thing that is not alive only the press itself hits;
+    /// - on nothing it does nothing: a swing at air would reset the recharge. A press shorter
+    ///   than [`AIR_TAP`] that found nothing still swings once when lifted, as a click.
+    fn attack_hold_step(&mut self, held: bool) -> Option<f32> {
+        use crate::game::pick_entity::HeldAttackTarget as Target;
+        let now = Instant::now();
+        let mut hold = std::mem::take(&mut self.mobile.attack_hold);
+        if !held {
+            if let Some(since) = hold.since
+                && !hold.acted
+                && now.duration_since(since) < AIR_TAP
+                && self.screen == Screen::Playing
+            {
+                self.remote_start_attack();
+            }
+            return None;
+        }
+        let pressed = hold.since.is_none();
+        if pressed {
+            hold.since = Some(now);
+        }
+        let target = self.held_attack_target();
+        let trigger = match target {
+            Target::Block if !hold.fought => {
+                hold.acted = true;
+                1.0
+            }
+            Target::Block | Target::Nothing => 0.0,
+            Target::Thing => {
+                if pressed {
+                    hold.acted = true;
+                    self.remote_start_attack();
+                }
+                0.0
+            }
+            Target::Monster(id) | Target::Living(id) => {
+                if pressed {
+                    hold.started_on = Some(id);
+                }
+                let chosen = matches!(target, Target::Monster(_)) || hold.started_on == Some(id);
+                let ready = pressed
+                    || (self.attack_strength_scale() >= 1.0
+                        && hold
+                            .hit_at
+                            .is_none_or(|at| now.duration_since(at) >= HOLD_HIT_GAP));
+                if chosen && ready && self.remote_start_attack() {
+                    hold.fought = true;
+                    hold.acted = true;
+                    hold.hit_at = Some(now);
+                }
+                0.0
+            }
+        };
+        self.mobile.attack_hold = hold;
+        Some(trigger)
+    }
     pub(in crate::game) fn mobile_options_apply(&mut self, save: bool) {
         if self.mobile.controls.settings != self.settings.touch {
             self.mobile.controls.settings = self.settings.touch.clone();
@@ -356,6 +447,7 @@ impl Game<'_> {
             state.triggers = [1., 0.];
             tc.latch_use();
         }
+        let attack_held = tc.attack_button_held() && tc.settings.hold_attack;
         let tap = tc.take_tap();
 
         let chat = std::mem::take(&mut tc.chat_requested);
@@ -372,6 +464,9 @@ impl Game<'_> {
             } else if !held_use && !rocket_boost {
                 state.triggers[0] = 1.;
             }
+        }
+        if let Some(trigger) = self.attack_hold_step(attack_held && !in_menu && !editing) {
+            state.triggers[1] = trigger;
         }
         self.pad.set_touch_state(state);
         // The chat and camera buttons act as their mappings, not as the D-pad buttons that held
@@ -616,15 +711,35 @@ impl Game<'_> {
             return;
         }
         let [left, top, right, bottom] = self.hud_safe_insets(&b);
-        if t.phase == TouchPhase::Started
-            && !self.mobile.controls.control_at_point(n)
-            && let Some(slot) = horizon_client::android_controls::hotbar_slot(
+        // Horizon PE: the finger that landed on the hotbar picks the slot under it for as long
+        // as it stays down, so a thumb slides to the slot it wants and lifts.
+        if self.mobile.hotbar_finger == Some(t.id) {
+            let slot = horizon_client::android_controls::hotbar_slot_touch(
                 b.width - left - right,
                 b.height - top - bottom,
                 [p[0] - left, p[1] - top],
+                true,
+            );
+            if let Some(slot) = slot
+                && self.selected != slot
+            {
+                self.selected = slot;
+            }
+            if matches!(t.phase, TouchPhase::Ended | TouchPhase::Cancelled) {
+                self.mobile.hotbar_finger = None;
+            }
+        }
+        if t.phase == TouchPhase::Started
+            && !self.mobile.controls.control_at_point(n)
+            && let Some(slot) = horizon_client::android_controls::hotbar_slot_touch(
+                b.width - left - right,
+                b.height - top - bottom,
+                [p[0] - left, p[1] - top],
+                false,
             )
         {
             self.selected = slot;
+            self.mobile.hotbar_finger = Some(t.id);
             self.mobile.controls.ignore(t.id);
             return;
         }
@@ -665,6 +780,20 @@ impl Game<'_> {
                 (self.cursor.1 + delta[1] * b.height * speed).clamp(0., b.height),
             );
         }
+        // Horizon PE: steering from a held Attack button turns slower while the crosshair is on
+        // a creature, so a thumb stays on it. Nothing turns the view for the player.
+        let on_creature = self.mobile.attack_hold.since.is_some() && {
+            use crate::game::pick_entity::HeldAttackTarget as Target;
+            matches!(
+                self.held_attack_target(),
+                Target::Monster(_) | Target::Living(_)
+            )
+        };
+        let turn = if on_creature {
+            turn.map(|v| v * ON_TARGET_TURN)
+        } else {
+            turn
+        };
         if turn != [0., 0.] {
             self.tutorial.mouse(turn[0] as f64, turn[1] as f64);
             self.turn_player(turn[0] as f64 / 0.15, turn[1] as f64 / 0.15);

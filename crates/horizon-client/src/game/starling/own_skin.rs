@@ -482,6 +482,13 @@ impl Game<'_> {
             .is_some_and(|t| matches!(t.mode, Mode::Main))
     }
 
+    /// Horizon PE: whether the title's main page is what shows now (not the options or the
+    /// credits opened over it): where the catalog's button stands (mod_catalog.rs).
+    #[cfg(target_os = "ios")]
+    pub(in crate::game) fn title_main_shown(&self) -> bool {
+        self.title_main() && !matches!(self.screen, super::Screen::Options | super::Screen::Win)
+    }
+
     /// Where the title screen shows its player in a GUI `w` by `h`, once it is drawn there; None
     /// before, and on the title's other pages.
     fn title_layout(&self, w: f32, h: f32) -> Option<TitleLayout> {

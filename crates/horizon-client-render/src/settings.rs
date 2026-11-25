@@ -861,6 +861,8 @@ pub enum Opt {
     TouchUiVibration,
     TouchGameVibration,
     TouchAttackButtonLook,
+    /// Horizon PE: `touch.hold_attack`.
+    TouchHoldAttack,
     TouchDynamicJoystick,
     TouchDynamicAreaX,
     TouchDynamicAreaY,
