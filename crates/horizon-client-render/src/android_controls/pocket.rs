@@ -269,10 +269,7 @@ pub fn fit_hotbar(room: &HotbarRoom) -> HotbarFit {
             hot[0] + hot[2] + gap
         };
         let moved = [x, inventory[1], inventory[2], inventory[3]];
-        if x < 0.0
-            || x + inventory[2] > sw
-            || obstacles.iter().any(|o| overlap(inset(moved), *o))
-        {
+        if x < 0.0 || x + inventory[2] > sw || obstacles.iter().any(|o| overlap(inset(moved), *o)) {
             continue;
         }
         let own = inventory[2] * room.inventory_own;
