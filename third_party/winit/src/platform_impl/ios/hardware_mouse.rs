@@ -20,7 +20,7 @@ use std::{
     cell::{Cell, RefCell},
     rc::Rc,
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
         OnceLock,
     },
     time::Instant,
@@ -35,6 +35,23 @@ static START: OnceLock<Instant> = OnceLock::new();
 static LAST_ACTIVE: AtomicU64 = AtomicU64::new(0);
 static LAST_WHEEL: AtomicU64 = AtomicU64::new(0);
 static LAST_SCROLL_GESTURE: AtomicU64 = AtomicU64::new(0);
+
+static TRACED: AtomicU32 = AtomicU32::new(0);
+
+/// A line in the game's stderr log (Horizon PE/logs), the first hundred or so only: what the mouse
+/// and iOS did, for finding why a click comes twice or a wheel does nothing.
+pub(super) fn trace(args: std::fmt::Arguments<'_>) {
+    if TRACED.fetch_add(1, Ordering::Relaxed) < 150 {
+        eprintln!("[winit-mouse] {args}");
+    }
+}
+
+/// A GCMouse is connected now (kept by `Mouse::update`).
+static MICE_PRESENT: AtomicBool = AtomicBool::new(false);
+
+pub(super) fn gc_mouse_present() -> bool {
+    MICE_PRESENT.load(Ordering::Relaxed)
+}
 
 fn now_ms() -> u64 {
     START.get_or_init(Instant::now).elapsed().as_millis() as u64 + 1
@@ -187,6 +204,11 @@ impl Mouse {
                         let changed = RcBlock::new(
                             move |_: &AnyObject, _: f32, down: objc2::runtime::Bool| {
                                 LAST_ACTIVE.store(now_ms(), Ordering::Relaxed);
+                                trace(format_args!(
+                                    "GameController {button:?} down={} captured={} relative={relative}",
+                                    down.as_bool(),
+                                    captured.get()
+                                ));
                                 device(DeviceEvent::Button { button: match button { MouseButton::Left => 0, MouseButton::Right => 1, _ => 2 },
                                     state: if down.as_bool() { ElementState::Pressed } else { ElementState::Released } });
                                 // A UIKit indirect pointer (an iPad's trackpad) delivers the
@@ -219,6 +241,7 @@ impl Mouse {
                     let now = now_ms();
                     LAST_WHEEL.store(now, Ordering::Relaxed);
                     LAST_ACTIVE.store(now, Ordering::Relaxed);
+                    trace(format_args!("GameController wheel {x} {y}"));
                     device(DeviceEvent::MouseWheel { delta: MouseScrollDelta::LineDelta(x, y) });
                     send(window, WindowEvent::MouseWheel { device_id: DEVICE_ID,
                         delta: MouseScrollDelta::LineDelta(x, y), phase: TouchPhase::Moved });
@@ -229,6 +252,7 @@ impl Mouse {
                 .iter()
                 .map(|m| Retained::retain(m as *const AnyObject as *mut AnyObject).unwrap())
                 .collect();
+            MICE_PRESENT.store(!known.is_empty(), Ordering::Relaxed);
         }
     }
 }
