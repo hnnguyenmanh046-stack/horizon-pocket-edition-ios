@@ -534,6 +534,12 @@ pub struct Settings {
     /// Horizon PE: the hotbar is drawn as big as a thumb needs, up to slots of 6.6 mm, where no
     /// button is in its way (`pocket::fit_hotbar`). Off: the size the GUI scale gives it.
     pub big_hotbar: bool,
+    /// Horizon PE: the slot width the bigger hotbar is asked for, in millimetres
+    /// (`pocket::SLOT_MM_RANGE`): "Hotbar size" on the Touch page and in the Control Hub.
+    pub hotbar_mm: f32,
+    /// Horizon PE: a held Use button with a block in hand places only on the side its first
+    /// block went on (`pocket::PlaceHold`). Off: on whatever side the crosshair is on.
+    pub place_one_way: bool,
     pub gyroscope: bool,
     pub gyro_sensitivity: f32,
     pub attack_indicator_left: bool,
@@ -710,6 +716,8 @@ impl Default for Settings {
             attack_button_look: true,
             hold_attack: true,
             big_hotbar: true,
+            hotbar_mm: super::pocket::SLOT_MM,
+            place_one_way: true,
             gyroscope: false,
             gyro_sensitivity: 1.0,
             attack_indicator_left: true,
@@ -950,6 +958,12 @@ impl Settings {
             self.button_scale.clamp(0.5, 2.0)
         } else {
             1.0
+        };
+        let [least, most] = super::pocket::SLOT_MM_RANGE;
+        self.hotbar_mm = if self.hotbar_mm.is_finite() {
+            self.hotbar_mm.clamp(least, most)
+        } else {
+            super::pocket::SLOT_MM
         };
         self.dynamic_area_x = if self.dynamic_area_x.is_finite() {
             self.dynamic_area_x.clamp(0.0, 1.0)

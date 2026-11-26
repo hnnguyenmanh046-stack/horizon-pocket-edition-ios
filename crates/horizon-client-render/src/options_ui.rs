@@ -275,6 +275,8 @@ impl Opt {
             Opt::TouchAttackButtonLook => "Look while interacting",
             Opt::TouchHoldAttack => "Hold Attack to keep hitting",
             Opt::TouchBigHotbar => "Bigger hotbar",
+            Opt::TouchHotbarSize => "Hotbar size",
+            Opt::TouchPlaceOneWay => "Hold Use builds one way",
             Opt::TouchMouseSensitivity => "Virtual mouse sensitivity",
             Opt::TouchAnalog => "360-degree movement",
             Opt::TouchCircleSize => "Touch circle size",
@@ -453,6 +455,10 @@ impl Opt {
             Opt::TouchSensitivityVertical => unit(s.touch.sensitivity_vertical, 0.1, 3.0),
             Opt::TouchMouseSensitivity => unit(s.touch.virtual_mouse_sensitivity, 0.25, 3.0),
             Opt::TouchButtonScale => unit(s.touch.button_scale, 0.5, 2.0),
+            Opt::TouchHotbarSize => {
+                let [least, most] = crate::android_controls::pocket::SLOT_MM_RANGE;
+                unit(s.touch.hotbar_mm, least, most)
+            }
 
             Opt::ModSetting(i, j) => {
                 Kind::Slider(mod_setting(s, i, j).map_or(0.0, |m| m.value.fraction()))
@@ -698,6 +704,8 @@ impl Opt {
             }
             Opt::TouchHoldAttack => Some(if s.touch.hold_attack { "ON" } else { "OFF" }.into()),
             Opt::TouchBigHotbar => Some(if s.touch.big_hotbar { "ON" } else { "OFF" }.into()),
+            Opt::TouchHotbarSize => Some(format!("{:.1} mm slots", s.touch.hotbar_mm)),
+            Opt::TouchPlaceOneWay => Some(if s.touch.place_one_way { "ON" } else { "OFF" }.into()),
             Opt::TouchAttackButtonLook => Some(
                 if s.touch.attack_button_look {
                     "ON"
@@ -1190,6 +1198,12 @@ impl Opt {
             Opt::TouchSensitivityVertical => s.touch.sensitivity_vertical = 0.1 + v * 2.9,
             Opt::TouchMouseSensitivity => s.touch.virtual_mouse_sensitivity = 0.25 + v * 2.75,
             Opt::TouchButtonScale => s.touch.button_scale = 0.5 + v * 1.5,
+            Opt::TouchHotbarSize => {
+                let [least, most] = crate::android_controls::pocket::SLOT_MM_RANGE;
+                s.touch.hotbar_mm = least + v * (most - least);
+                // The size is the bigger hotbar's: asking for one turns it on.
+                s.touch.big_hotbar = true;
+            }
 
             Opt::ChatDelay => values::set(s, v),
             Opt::FovEffects | Opt::DarknessPulsing => s.file.set(
@@ -1335,6 +1349,7 @@ impl Opt {
             Opt::TouchAttackButtonLook => s.touch.attack_button_look ^= true,
             Opt::TouchHoldAttack => s.touch.hold_attack ^= true,
             Opt::TouchBigHotbar => s.touch.big_hotbar ^= true,
+            Opt::TouchPlaceOneWay => s.touch.place_one_way ^= true,
             Opt::TouchAttackSide => s.touch.attack_indicator_left ^= true,
             Opt::TouchSwapJumpSneak => s.touch.swap_jump_sneak ^= true,
             Opt::TouchAutoSprint => s.touch.sprint_with_joystick ^= true,
@@ -4846,7 +4861,9 @@ impl OptionsUi {
                     Opt::TouchCrosshairGestures,
                     Opt::TouchAttackButtonLook,
                     Opt::TouchHoldAttack,
+                    Opt::TouchPlaceOneWay,
                     Opt::TouchBigHotbar,
+                    Opt::TouchHotbarSize,
                     Opt::TouchSensitivity,
                     Opt::TouchSensitivityHorizontal,
                     Opt::TouchSensitivityVertical,

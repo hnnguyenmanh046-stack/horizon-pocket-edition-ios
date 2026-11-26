@@ -348,13 +348,23 @@ impl Game<'_> {
         #[cfg(any(target_os = "android", target_os = "ios"))]
         {
             use horizon_client::android_display::{DisplayOption as D, safe_zone};
-            safe_zone(
+            let zone = safe_zone(
                 [batch.width, batch.height],
                 [
                     D::SafeHorizontal.value(&self.settings),
                     D::SafeVertical.value(&self.settings),
                 ],
-            )
+            );
+            // Horizon PE: the hotbar, and the HUD on it, stand above the strip iOS keeps at
+            // the bottom for the home bar: a thumb on the hotbar is then not on the edge the
+            // system's own swipes start from. A device with a home button has no strip.
+            #[cfg(target_os = "ios")]
+            let zone = {
+                use horizon_client::android_controls::pocket::above_home_bar;
+                let strip = crate::android::safe_insets()[3] as f32 / batch.scale.max(1.0);
+                above_home_bar(zone, strip, batch.height)
+            };
+            zone
         }
         #[cfg(not(any(target_os = "android", target_os = "ios")))]
         {

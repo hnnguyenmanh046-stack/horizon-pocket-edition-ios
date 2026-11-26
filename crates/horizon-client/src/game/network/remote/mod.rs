@@ -9761,6 +9761,11 @@ impl Game<'_> {
             return;
         }
         let (attack, use_item) = (self.left, self.right);
+        // Horizon PE: the hold that built one way ends with the button.
+        #[cfg(any(target_os = "android", target_os = "ios"))]
+        if !use_item {
+            self.place_hold_release();
+        }
         // handleKeybinds: keySwapOffhand.consumeClick, before attacking and using (an
         // anticheat's Post check wants it before the tick's move, not whenever the key went down).
         let swaps = self
@@ -11457,7 +11462,15 @@ impl horizon_client::interaction_input::TargetUseWorld for RemoteUseWorld<'_, '_
                 return false;
             }
         }
-        self.0.remote_use_block(Hand::Main)
+        // Horizon PE: the side a hold's first block went on is the hold's (`place_hold_step`).
+        #[cfg(any(target_os = "android", target_os = "ios"))]
+        let face = self.0.pick().map(|hit| hit.face);
+        let used = self.0.remote_use_block(Hand::Main);
+        #[cfg(any(target_os = "android", target_os = "ios"))]
+        if used && let Some(face) = face {
+            self.0.place_hold_used(face);
+        }
+        used
     }
     fn use_item(&mut self) {
         self.0.remote_use_hands(self.1);

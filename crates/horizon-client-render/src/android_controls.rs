@@ -667,6 +667,7 @@ impl TouchControls {
             area,
             gui,
             px_per_mm,
+            slot_mm: self.settings.hotbar_mm,
             obstacles: &obstacles,
             inventory: factory.then_some(block),
             inventory_own: own[2] / block[2].max(f32::EPSILON),
