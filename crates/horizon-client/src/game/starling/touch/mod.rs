@@ -813,6 +813,7 @@ impl Game<'_> {
             || self.catalog_touch(t)
             || self.whats_new_touch(t)
             || self.title_catalog_touch(t)
+            || self.title_whats_new_touch(t)
         {
             return true;
         }
