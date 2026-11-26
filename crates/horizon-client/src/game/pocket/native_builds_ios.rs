@@ -18,7 +18,9 @@
 use super::Game;
 use horizon_client::hud::HudBatch;
 use horizon_client::mod_builds::{self, Pending, State, mods_label};
-use horizon_client::mod_list::{NOT_BUILT, NativeGame, NativeGameAct, NativePage};
+use horizon_client::mod_list::{
+    NOT_BUILT, NativeGame, NativeGameAct, NativePage, NativePart,
+};
 use horizon_client::{options_ui::Page, text::Text, toasts::SystemToast, ui};
 use horizon_mod_package::index::native::Any;
 use serde_json::Value;
@@ -104,6 +106,17 @@ fn save_pending(pending: Option<&Pending>) {
 fn load_pending() -> Option<Pending> {
     let text = std::fs::read_to_string(pending_path()).ok()?;
     serde_json::from_str(&text).ok()
+}
+
+/// A part of the Mods page's top: a section's title, what it says, and what needs doing.
+fn title(game: &mut NativeGame, words: &str) {
+    game.parts.push(NativePart::Title(words.to_owned()));
+}
+fn text(game: &mut NativeGame, words: String) {
+    game.parts.push(NativePart::Text(words));
+}
+fn warning(game: &mut NativeGame, words: String) {
+    game.parts.push(NativePart::Warning(words));
 }
 
 /// The toast of a build ready to install.
@@ -482,38 +495,50 @@ impl Game<'_> {
         let mut game = NativeGame::default();
         let name = horizon_client::ios_releases::EDITION.name();
         let version = crate::android::app_version().map_or_else(String::new, |(v, _)| v);
-        let ids: Vec<String> = built.iter().map(|(id, v)| format!("{id} {v}")).collect();
-        game.lines.push((
-            if built.is_empty() {
-                format!("This app: {name} {version} without mods compiled in.")
-            } else {
-                format!("This app: {name} {version} with {}.", mods_label(&ids))
+        // Mods by the names the list below gives them.
+        let listed = |ids: &[String]| {
+            let titles: Vec<String> = ids
+                .iter()
+                .map(|id| {
+                    let found = self.settings.mods.installed.iter().find(|m| m.id == *id);
+                    found.map_or_else(|| id.clone(), |m| m.title.clone())
+                })
+                .collect();
+            mods_label(&titles)
+        };
+        title(&mut game, "This app");
+        text(
+            &mut game,
+            match built.len() {
+                0 => format!("{name} {version}. No mods are built into it."),
+                1 => format!("{name} {version}. 1 mod is built into it."),
+                n => format!("{name} {version}. {n} mods are built into it."),
             },
-            false,
-        ));
+        );
         if let Some(p) = &pending {
             let ids: Vec<String> = p
                 .mods
                 .iter()
                 .map(|m| mod_builds::id_of(m).to_owned())
                 .collect();
-            let mods = mods_label(&ids);
+            let mods = listed(&ids);
             let of = p.tag.trim_start_matches('v');
             if let Some(why) = &p.failed {
-                game.lines
-                    .push((format!("The build with {mods} failed. {why}"), true));
+                title(&mut game, "The build failed");
+                warning(&mut game, why.clone());
+                text(&mut game, format!("It was a build with {mods}."));
                 game.buttons
                     .push(("Dismiss".to_owned(), NativeGameAct::PlayWithout));
             } else if p.ipa.is_some() {
-                game.lines.push((
-                    format!(
-                        "{name} {of} with {mods} is built and downloaded. Install it over this \
-                         app: your worlds, settings and accounts stay. Install opens the share \
-                         sheet: pick SideStore, AltStore, LiveContainer or the app you sideload \
-                         with."
-                    ),
-                    false,
-                ));
+                title(&mut game, "Your build is ready");
+                text(&mut game, format!("{name} {of} with {mods}."));
+                text(
+                    &mut game,
+                    "Tap Install... and pick the app you sideload with (SideStore, AltStore, \
+                     LiveContainer). It installs over this app: your worlds, settings and \
+                     accounts stay."
+                        .to_owned(),
+                );
                 game.buttons
                     .push(("Install...".to_owned(), NativeGameAct::Install));
                 game.buttons
@@ -521,11 +546,15 @@ impl Game<'_> {
                 game.buttons
                     .push(("Dismiss".to_owned(), NativeGameAct::PlayWithout));
             } else {
-                game.lines
-                    .push((format!("Building {name} {of} with {mods}."), false));
+                title(&mut game, "Building");
+                text(&mut game, format!("{name} {of} with {mods}."));
                 if !state.progress.is_empty() {
-                    game.lines.push((state.progress.clone(), false));
+                    text(&mut game, state.progress.clone());
                 }
+                text(
+                    &mut game,
+                    "Keep playing: the game tells you when it is ready.".to_owned(),
+                );
                 game.buttons
                     .push(("Stop following".to_owned(), NativeGameAct::PlayWithout));
             }
@@ -533,14 +562,19 @@ impl Game<'_> {
         let building = pending.as_ref().is_some_and(Pending::under_way);
         let have: BTreeSet<String> = catalog.keys().cloned().collect();
         let asked: BTreeSet<&str> = build.iter().map(|m| mod_builds::id_of(m)).collect();
-        // Another version of a mod in the folder than the app has is a mod to build, too.
-        let same = build.iter().all(|m| {
+        // A mod the app lacks, or has in another version than the folder's, is one to build.
+        let to_build = |m: &&String| {
             let id = mod_builds::id_of(m);
             catalog
                 .get(id)
-                .is_some_and(|version| mod_builds::named(id, version) == *m)
-        });
-        let missing = !wanted.is_subset(&have) || !same;
+                .is_none_or(|version| mod_builds::named(id, version) != **m)
+        };
+        let fresh: Vec<String> = build
+            .iter()
+            .filter(to_build)
+            .map(|m| mod_builds::id_of(m).to_owned())
+            .collect();
+        let missing = !wanted.is_subset(&have) || !fresh.is_empty();
         let leftover: Vec<String> = have
             .iter()
             .filter(|id| !asked.contains(id.as_str()))
@@ -548,74 +582,100 @@ impl Game<'_> {
             .collect();
         let ids: Vec<String> = asked.iter().map(|id| (*id).to_owned()).collect();
         if !untaken.is_empty() {
-            game.lines.push((
+            title(&mut game, "Can't be built");
+            warning(
+                &mut game,
                 format!(
-                    "{} can't be built into the app: {} made in the older format, which changes \
-                     the game's own source. The catalog's version, if it has one, can.",
-                    mods_label(&untaken),
-                    if untaken.len() == 1 {
-                        "it is"
-                    } else {
-                        "they are"
-                    }
+                    "{} {} in an older format that can't be built into the app. Use the \
+                     catalog's version, if it has one.",
+                    listed(&untaken),
+                    if untaken.len() == 1 { "is" } else { "are" }
                 ),
-                true,
-            ));
+            );
         }
         let to_do = missing || !leftover.is_empty();
         if building {
             // Said above.
         } else if to_do && build.is_empty() {
-            game.lines.push((
+            title(&mut game, "Nothing to build");
+            text(
+                &mut game,
                 format!(
-                    "Every catalog mod is off, so none of them runs. Installing the normal \
-                     {name} release takes them out of the app."
+                    "Every added mod is off, so none of them runs. To take them out of the app, \
+                     install the normal {name} release."
                 ),
-                false,
-            ));
+            );
         } else if build.len() > mod_builds::MOST_MODS {
-            game.lines.push((
+            title(&mut game, "Too many mods");
+            warning(
+                &mut game,
                 format!(
-                    "A build takes at most {} mods, and {} are turned on: turn some off.",
+                    "A build takes at most {} mods, and {} are turned on. Turn some off.",
                     mod_builds::MOST_MODS,
                     build.len()
                 ),
-                true,
-            ));
+            );
         } else if to_do || (update.is_some() && !build.is_empty()) {
-            let what = match (&update, missing) {
-                (Some(new), _) => format!(
-                    "{name} {new} is out. This app has mods compiled in, so it is updated by \
-                     building {new} with them: {}.",
-                    mods_label(&ids)
-                ),
-                (None, true) => format!(
-                    "The mods turned on aren't all in this app. On iOS they are compiled into \
-                     it: a build with {} takes about 30 to 60 minutes, or no time when someone \
-                     built the same mods before. You can keep playing meanwhile.",
-                    mods_label(&ids)
-                ),
-                (None, false) => format!(
-                    "{} is off but still in this app: a build with {} takes it out.",
-                    mods_label(&leftover),
-                    mods_label(&ids)
-                ),
-            };
-            game.lines.push((what, false));
+            match (&update, missing) {
+                (Some(new), _) => {
+                    title(&mut game, "Update available");
+                    text(
+                        &mut game,
+                        format!(
+                            "{name} {new} is out. This app has mods built in, so it updates \
+                             with a build: {new} with {}.",
+                            listed(&ids)
+                        ),
+                    );
+                }
+                (None, true) => {
+                    title(&mut game, "Build needed");
+                    text(
+                        &mut game,
+                        format!("Not in this app yet: {}.", listed(&fresh)),
+                    );
+                    text(
+                        &mut game,
+                        "On iPhone and iPad a mod with code is built into the app. Tap Build \
+                         and keep playing. It takes 30 to 60 minutes, or no time if someone \
+                         built the same mods before."
+                            .to_owned(),
+                    );
+                }
+                (None, false) => {
+                    title(&mut game, "Build needed");
+                    let (verb, them) = if leftover.len() == 1 {
+                        ("is", "it")
+                    } else {
+                        ("are", "them")
+                    };
+                    text(
+                        &mut game,
+                        format!(
+                            "{} {verb} off but still in this app. Tap Build to take {them} out.",
+                            listed(&leftover)
+                        ),
+                    );
+                }
+            }
             if mod_builds::service().is_some() {
                 game.buttons
                     .push(("Build".to_owned(), NativeGameAct::Compile));
             } else {
-                game.lines.push((
-                    "This build of the app has no build service to ask. On a computer, the \
-                     repository's mod-build workflow makes it (its README says how)."
+                warning(
+                    &mut game,
+                    "This copy of the app has no build service, so it can't build mods here. On \
+                     a computer, the repository's mod-build workflow can."
                         .to_owned(),
-                    true,
-                ));
+                );
             }
         }
-        if let Some((text, warning)) = &state.message {
-            game.lines.push((text.clone(), *warning));
+        if let Some((said, red)) = &state.message {
+            if *red {
+                warning(&mut game, said.clone());
+            } else {
+                text(&mut game, said.clone());
+            }
         }
         Some(game)
     }

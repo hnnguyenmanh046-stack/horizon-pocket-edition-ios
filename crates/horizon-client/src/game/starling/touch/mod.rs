@@ -809,7 +809,11 @@ impl Game<'_> {
         // iOS: the prompt of a newer release and the catalog (its folder needs no offer, and
         // its native builds are the Mods page's).
         #[cfg(target_os = "ios")]
-        if self.update_offer_touch(t) || self.catalog_touch(t) || self.title_catalog_touch(t) {
+        if self.update_offer_touch(t)
+            || self.catalog_touch(t)
+            || self.whats_new_touch(t)
+            || self.title_catalog_touch(t)
+        {
             return true;
         }
         #[cfg(target_os = "android")]

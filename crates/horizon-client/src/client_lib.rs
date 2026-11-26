@@ -217,6 +217,8 @@ pub mod voxel_occlusion;
 // Keep the old path for native callers while giving the implementation a name
 // that does not collide with the gameplay adapter in `game/interface/entity_culling/mod.rs`.
 pub use voxel_occlusion as entity_culling;
+// Horizon PE: a release's notes, shown once (game/pocket/whats_new.rs).
+pub mod whats_new;
 pub mod win_screen;
 pub mod world_primitives;
 pub mod world_spawn;
