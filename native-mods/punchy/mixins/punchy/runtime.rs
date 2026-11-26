@@ -148,8 +148,12 @@ pub(super) fn tick(game: &mut Game<'_>) {
     }
     let using = game.used_hand();
     let items = [game.held().cloned(), game.offhand.clone()];
-    let use_down = game.native_mapping("key.use").is_some_and(|m| m.0);
-    let attack_down = game.native_mapping("key.attack").is_some_and(|m| m.0);
+    // A mouse or key held, or the touch controls' button held (they press through the pad, which
+    // the key mappings do not show: the hand stood still for a finger's attack).
+    let use_down = game.native_mapping("key.use").is_some_and(|m| m.0)
+        || game.touch_use_held();
+    let attack_down = game.native_mapping("key.attack").is_some_and(|m| m.0)
+        || game.touch_attack_held();
     let speed = global_speed(game);
     STATE.with(|cell| {
         let mut s=cell.borrow_mut();load(&mut s);
