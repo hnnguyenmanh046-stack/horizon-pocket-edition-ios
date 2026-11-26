@@ -18,6 +18,7 @@ It says nothing of a phone's own costs (its storage, its GPU's shader compiler):
 work of reading the game files and a world is the same code there.
 """
 import argparse
+import json
 import os
 import statistics
 import sys
@@ -70,6 +71,57 @@ def run(sides, work, rounds):
     return times
 
 
+def traced(side, home):
+    """One more start of each, not counted, with the game's own timeline written
+    (HORIZON_STARTUP_TRACE): which named step took how long, on which thread."""
+    trace = home / 'startup-trace.jsonl'
+    os.environ['HORIZON_STARTUP_TRACE'] = str(trace)
+    try:
+        one_round(side, home)
+    finally:
+        del os.environ['HORIZON_STARTUP_TRACE']
+    threads, steps, marks = {}, [], []
+    for line in trace.read_text(encoding='utf-8', errors='replace').splitlines():
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if event.get('ph') == 'M':
+            threads[event['tid']] = event['args']['name']
+        elif event.get('ph') == 'X':
+            steps.append(event)
+        else:
+            marks.append(event)
+    log = [line for line in (home / 'client.log').read_text(encoding='utf-8', errors='replace').splitlines()
+           if ' ms' in line and 'Horizon:' in line]
+    return threads, steps, marks, log
+
+
+def timeline(name, threads, steps, marks, log):
+    print(f'--- {name}: steps of 10 ms and more, in the order they began (ms since the start)')
+    for event in sorted(steps, key=lambda e: e['ts']):
+        if event['dur'] >= 10_000:
+            print(f"{event['ts'] / 1000:9.0f} {event['dur'] / 1000:8.0f} ms  "
+                  f"{threads.get(event['tid'], event['tid'])}: {event['name']}")
+    print(f'--- {name}: marks')
+    for event in sorted(marks, key=lambda e: e.get('ts', 0)):
+        print(f"{event.get('ts', 0) / 1000:9.0f}  {event.get('name')}")
+    print(f'--- {name}: what the game logged')
+    for line in log:
+        print('   ', line)
+
+
+def compare(old, new):
+    total = {}
+    for side, (_, steps, _, _) in (('old', old), ('new', new)):
+        for event in steps:
+            total.setdefault(event['name'], {'old': 0, 'new': 0})[side] += event['dur'] / 1000
+    print('--- steps whose time differs by 20 ms and more (old, new, ms; all threads added up)')
+    for name, t in sorted(total.items(), key=lambda item: item[1]['old'] - item[1]['new']):
+        if abs(t['new'] - t['old']) >= 20:
+            print(f"{t['old']:8.0f} {t['new']:8.0f} {t['new'] - t['old']:+8.0f}  {name}")
+
+
 def report(times):
     lines = ['| | release before | this source | difference |', '| --- | --- | --- | --- |']
     slower = []
@@ -100,6 +152,13 @@ def main():
     # Short: Unix socket paths are limited to about 100 bytes.
     with tempfile.TemporaryDirectory(prefix='hlt-', dir='/tmp') as directory:
         times = run(sides, Path(directory), args.rounds)
+        try:
+            traces = {name: traced(side, Path(directory) / name) for name, side in sides.items()}
+            for name, trace in traces.items():
+                timeline(name, *trace)
+            compare(traces['old'], traces['new'])
+        except Exception as error:  # the timeline explains; it does not decide
+            print(f'no timeline: {error!r}')
     lines, slower = report(times)
     print('\n'.join(lines))
     summary = os.environ.get('GITHUB_STEP_SUMMARY')
