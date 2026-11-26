@@ -13,6 +13,13 @@ impl Game<'_> {
 
     /// Minecraft.startUseItem: use one crosshair target, then the item itself.
     fn remote_use_inner(&mut self, attempt: mod_api::InteractionAttempt) {
+        // Horizon PE: a held Use button with a block in hand builds one way
+        // (mobile_controls: `place_hold_step`). A repeat on another side waits, without the
+        // delay of a use, for the crosshair to come back to the hold's side.
+        #[cfg(any(target_os = "android", target_os = "ios"))]
+        if !self.place_hold_step(matches!(attempt, mod_api::InteractionAttempt::Held)) {
+            return;
+        }
         // Minecraft.startUseItem returns before resetting rightClickDelay
         // while a survival block break is active.
         if self.remote.as_ref().is_some_and(|r| r.is_destroying) {

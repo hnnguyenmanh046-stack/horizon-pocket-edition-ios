@@ -26,6 +26,9 @@ pub struct TouchUi {
     /// GUI-space offset below the title screen account button; zero in game.
     pub utility_offset_y: f32,
     pub hub_visible: bool,
+    /// Horizon PE: a hotbar slot's width as it is drawn now, in millimetres, for the Buttons
+    /// tab's "Hotbar Size" (0: the game's own size). None where no hotbar is drawn (the title).
+    pub hotbar_slot_mm: Option<f32>,
     /// Options' pauseOnLostFocus, as the game has it: the Recommended tab's "Pause in the
     /// Background" row.
     pub pause_in_background: bool,
@@ -59,6 +62,8 @@ pub struct TouchUi {
     pub gyro_sensitivity_dragging: bool,
     /// The global button scale slider of the Buttons tab is being dragged.
     pub button_scale_dragging: bool,
+    /// Horizon PE: the hotbar size slider of the Buttons tab is being dragged.
+    pub hotbar_size_dragging: bool,
     /// Step state for the Floating Menu "Send Custom Input" picker modal.
     pub custom_input_picker: crate::android_controls::PickerStep,
     /// Horizontal scroll offset for the Floating Menu custom keyboard picker.
@@ -128,6 +133,8 @@ impl Default for TouchUi {
             resolution_scale_dragging: false,
             gyro_sensitivity_dragging: false,
             button_scale_dragging: false,
+            hotbar_size_dragging: false,
+            hotbar_slot_mm: None,
             custom_input_picker: crate::android_controls::PickerStep::None,
             custom_kb_scroll_x: 0.0,
             custom_kb_drag: None,
@@ -158,6 +165,17 @@ impl Default for TouchUi {
             f3_latched: false,
         }
     }
+}
+
+/// Horizon PE: where the Buttons tab's "Hotbar Size" card starts, under its last row.
+const HOTBAR_SIZE_Y: f32 = 342.0;
+
+/// Horizon PE: the slot width (millimetres) the "Hotbar Size" slider means with a finger at `x`,
+/// its card starting at `cx` and `cw` wide.
+fn hotbar_size_at(x: f32, cx: f32, cw: f32) -> f32 {
+    let [least, most] = crate::android_controls::pocket::SLOT_MM_RANGE;
+    let t = ((x - cx - 14.0) / (cw - 28.0).max(40.0)).clamp(0.0, 1.0);
+    least + t * (most - least)
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -207,6 +225,8 @@ pub enum InGameMenuAction {
     StepGyroSensitivity(i32),
     SetButtonScale(f32),
     StepButtonScale(i32),
+    /// Horizon PE: the slot width the hotbar is asked for, in millimetres.
+    SetHotbarSize(f32),
     TriggerKey(KeyCode),
     OpenKeyboard,
     /// Kill the game process now (no save, no shutdown sequence).
@@ -2036,6 +2056,7 @@ impl TouchUi {
                             self.mouse_speed_dragging = false;
                             self.gyro_sensitivity_dragging = false;
                             self.button_scale_dragging = false;
+                            self.hotbar_size_dragging = false;
                             self.hub_scroll_drag = None;
                         }
                     }
@@ -2074,6 +2095,7 @@ impl TouchUi {
                     self.resolution_scale_dragging = false;
                     self.gyro_sensitivity_dragging = false;
                     self.button_scale_dragging = false;
+                    self.hotbar_size_dragging = false;
                     self.hub_scroll_drag = Some((id, start[1], self.hub_scroll, true));
                 }
                 TouchPhase::Moved if delta[0].abs() > 6.0 => {
@@ -2087,6 +2109,7 @@ impl TouchUi {
                     self.resolution_scale_dragging = false;
                     self.gyro_sensitivity_dragging = false;
                     self.button_scale_dragging = false;
+                    self.hotbar_size_dragging = false;
                     return Some(if phase == TouchPhase::Ended {
                         tap.clone()
                     } else {
@@ -2195,6 +2218,22 @@ impl TouchUi {
                 }
                 TouchPhase::Ended | TouchPhase::Cancelled => {
                     self.button_scale_dragging = false;
+                    self.hotbar_size_dragging = false;
+                    return Some(InGameMenuAction::Close);
+                }
+                _ => {}
+            }
+        }
+
+        // Horizon PE: the hotbar size slider on Tab 3, dragged.
+        if self.hotbar_size_dragging {
+            match phase {
+                TouchPhase::Moved => {
+                    let size = hotbar_size_at(p[0], cx, cw);
+                    return Some(InGameMenuAction::SetHotbarSize(size));
+                }
+                TouchPhase::Ended | TouchPhase::Cancelled => {
+                    self.hotbar_size_dragging = false;
                     return Some(InGameMenuAction::Close);
                 }
                 _ => {}
@@ -2521,6 +2560,7 @@ impl TouchUi {
                 self.mouse_speed_dragging = false;
                 self.gyro_sensitivity_dragging = false;
                 self.button_scale_dragging = false;
+                self.hotbar_size_dragging = false;
                 self.custom_input_picker = crate::android_controls::PickerStep::None;
                 self.custom_kb_drag = None;
                 self.hub_scroll_drag = None;
@@ -2659,6 +2699,13 @@ impl TouchUi {
                     let t = ((p[0] - sl_x) / sl_w).clamp(0.0, 1.0);
                     self.slider_gesture =
                         Some((id, p, InGameMenuAction::SetButtonScale(0.50 + t * 1.50)));
+                    return Some(InGameMenuAction::Close);
+                }
+                // Horizon PE: the hotbar size slider, under the tab's rows.
+                if inside([cx, body_y + HOTBAR_SIZE_Y, cw, 50.0]) {
+                    self.hotbar_size_dragging = true;
+                    let size = hotbar_size_at(p[0], cx, cw);
+                    self.slider_gesture = Some((id, p, InGameMenuAction::SetHotbarSize(size)));
                     return Some(InGameMenuAction::Close);
                 }
             }
@@ -2842,6 +2889,10 @@ impl TouchUi {
                 }
             }
             3 => {
+                if inside([cx, body_y + HOTBAR_SIZE_Y, cw, 50.0]) {
+                    let size = hotbar_size_at(p[0], cx, cw);
+                    return Some(InGameMenuAction::SetHotbarSize(size));
+                }
                 if inside([cx, body_y + 234., cw, 46.]) {
                     return Some(InGameMenuAction::ToggleOffhandButton);
                 }
@@ -3175,7 +3226,8 @@ impl TouchUi {
             0 => 502.0,
             1 => 430.0,
             2 => 470.0,
-            3 => 350.0,
+            // Horizon PE: with the hotbar size slider under the rows.
+            3 => HOTBAR_SIZE_Y + 58.0,
             _ => 340.0,
         };
         let max_scroll = (content_height - body_h).max(0.0);
@@ -3904,6 +3956,41 @@ impl TouchUi {
                 ui.border(gyro_thumb_x - 7.0, gyro_sl_y - 4.0, 14.0, 14.0, 7.0, text_c);
             }
             3 => {
+                // Horizon PE: the hotbar's size, drawn as the button scale's card is.
+                {
+                    let y = body_y + HOTBAR_SIZE_Y;
+                    ui.rounded(cx, y, cw, 50.0, 11.0, card_bg);
+                    ui.border(cx, y, cw, 50.0, 11.0, border_c);
+                    ui.text(
+                        Face::SemiBold,
+                        10.8,
+                        cx + 14.0,
+                        y + 6.0,
+                        text_c,
+                        "Hotbar Size",
+                    );
+                    let shown = match self.hotbar_slot_mm {
+                        Some(mm) if mm > 0.0 => format!("{mm:.1} mm"),
+                        Some(_) => "Normal".to_owned(),
+                        None => format!("{:.1} mm", settings.hotbar_mm),
+                    };
+                    let pill = [cx + cw - 60.0, y + 6.0, 48.0, 18.0];
+                    ui.rounded(pill[0], pill[1], pill[2], pill[3], 6.0, card_sel);
+                    ui.border(pill[0], pill[1], pill[2], pill[3], 6.0, accent);
+                    ui.centered_fit(Face::SemiBold, 9.4, pill, accent_hi, &shown);
+                    let [least, most] = crate::android_controls::pocket::SLOT_MM_RANGE;
+                    let (x, w) = (cx + 14.0, (cw - 28.0).max(40.0));
+                    let at = if settings.big_hotbar {
+                        ((settings.hotbar_mm - least) / (most - least)).clamp(0.0, 1.0)
+                    } else {
+                        0.0
+                    };
+                    ui.rounded(x, y + 33.0, w, 6.0, 3.0, sidebar_bg);
+                    ui.rounded(x, y + 33.0, (w * at).max(6.0), 6.0, 3.0, accent);
+                    let thumb = x + w * at;
+                    ui.rounded(thumb - 7.0, y + 29.0, 14.0, 14.0, 7.0, accent_hi);
+                    ui.border(thumb - 7.0, y + 29.0, 14.0, 14.0, 7.0, text_c);
+                }
                 draw_toggle_row(
                     &mut ui,
                     body_y + 234.,

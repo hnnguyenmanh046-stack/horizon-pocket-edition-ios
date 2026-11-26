@@ -38,6 +38,8 @@ pub(super) struct MobileControls {
     attack_hold: horizon_client::android_controls::pocket::AttackHold,
     /// Horizon PE: the finger that landed on the hotbar and slides along it.
     pub hotbar: horizon_client::android_controls::pocket::HotbarSlide,
+    /// Horizon PE: the hold of the Use button that is placing blocks (`place_hold_step`).
+    place_hold: horizon_client::android_controls::pocket::PlaceHold,
 }
 
 /// How much of a turn is kept while a held Attack button steers over a creature.
@@ -239,6 +241,41 @@ impl Game<'_> {
         }
         Some(if step.mine { 1.0 } else { 0.0 })
     }
+    /// Horizon PE: a use of the Use mapping is about to act. `repeat`: it is the repeat of a
+    /// button that is still held, not a press. A press chooses its side anew. A repeat with a
+    /// block in hand keeps to the side of the hold's first block (`pocket::PlaceHold`): false
+    /// when the crosshair is on another side, and then nothing at all is used this tick, so
+    /// what the other hand holds is not used in the block's place.
+    ///
+    /// Only for the touch controls and only for blocks: a tool swept over the ground, a mouse
+    /// and a controller act as they always did.
+    pub(in crate::game) fn place_hold_step(&mut self, repeat: bool) -> bool {
+        if !repeat {
+            self.mobile.place_hold.reset();
+            return true;
+        }
+        if !self.touch_shown() || !self.mobile.controls.settings.place_one_way {
+            return true;
+        }
+        let block_in_hand = self
+            .held()
+            .into_iter()
+            .chain(self.offhand.as_ref())
+            .any(|s| self.items().get(&s.item).is_some_and(|i| i.block.is_some()));
+        if !block_in_hand || self.pick_entity_hit().is_some() {
+            return true;
+        }
+        self.pick()
+            .is_none_or(|hit| self.mobile.place_hold.allows(hit.face))
+    }
+    /// Horizon PE: a use on the side `face` of a block did something.
+    pub(in crate::game) fn place_hold_used(&mut self, face: [i32; 3]) {
+        self.mobile.place_hold.used(face);
+    }
+    /// Horizon PE: the Use mapping is up.
+    pub(in crate::game) fn place_hold_release(&mut self) {
+        self.mobile.place_hold.reset();
+    }
     /// Horizon PE: the room a bigger hotbar has this frame: the surface in pixels, the HUD's
     /// area in it, pixels to a GUI pixel and pixels to a millimetre (0: the hotbar stays as it
     /// is, as with a mouse or a controller in hand, outside a world, or watching as a spectator).
@@ -385,6 +422,8 @@ impl Game<'_> {
         tc.viewport(width, height);
         tc.safe_insets(width, height, crate::android::safe_insets());
         tc.fit_big_hotbar(hotbar_surface, hotbar_area, hotbar_gui, hotbar_per_mm);
+        // The Control Hub's "Hotbar Size" shows the size the hotbar has, where one is drawn.
+        self.mobile.ui.hotbar_slot_mm = (hotbar_per_mm > 0.0).then_some(tc.hotbar_fit.slot_mm);
         let flying = self.player.as_ref().is_some_and(|p| p.flying);
         if shown && flying && !tc.vertical_movement {
             self.toggles.0[0] = horizon_client::keymapping::KeyState::toggle(true, true);
@@ -709,6 +748,10 @@ impl Game<'_> {
             .hotbar
             .touch(t.id, started, ended, landed, column)
         {
+            // A thumb that slides feels each slot it comes to.
+            if slot != self.selected {
+                self.android_touch_haptic(10);
+            }
             self.selected = slot;
             return;
         }
@@ -1831,6 +1874,14 @@ impl Game<'_> {
                 InGameMenuAction::SetButtonScale(val) => {
                     self.mobile.controls.settings.button_scale = val.clamp(0.50, 2.00);
                     let _ = self.mobile.controls.settings.save();
+                }
+                InGameMenuAction::SetHotbarSize(mm) => {
+                    let [least, most] = horizon_client::android_controls::pocket::SLOT_MM_RANGE;
+                    let settings = &mut self.mobile.controls.settings;
+                    settings.hotbar_mm = mm.clamp(least, most);
+                    // The size is the bigger hotbar's: asking for one turns it on.
+                    settings.big_hotbar = true;
+                    let _ = settings.save();
                 }
                 InGameMenuAction::StepButtonScale(dir) => {
                     self.mobile.controls.settings.button_scale =
