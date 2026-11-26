@@ -141,7 +141,14 @@ impl Game<'_> {
         for line in &lines {
             match line {
                 Line::Heading(words) => {
-                    ui.text(Face::Semibold, HEADING[0], x + PAD, ty, color::text(), words);
+                    ui.text(
+                        Face::Semibold,
+                        HEADING[0],
+                        x + PAD,
+                        ty,
+                        color::text(),
+                        words,
+                    );
                     ty += HEADING[1];
                 }
                 Line::Item(words, first) => {
