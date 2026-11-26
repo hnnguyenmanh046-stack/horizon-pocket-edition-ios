@@ -1,0 +1,9 @@
+{
+  "game": "26.3",
+  "hooks": 2,
+  "horizon": "54e4aec0af1064a6ce3b9f192c55e2c43952b061",
+  "id": "lan_tunnel",
+  "mixins": "4342a0bfbe71d4d14185528d64e496d6022f16a1",
+  "schema": 1,
+  "version": "0.1.0"
+}
