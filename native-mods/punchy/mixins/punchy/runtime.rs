@@ -471,7 +471,7 @@ pub(super) fn begin(game: &mut Game<'_>, alpha: f64) {
                         let weight = s.active.as_ref().map_or(1., |p| {
                             p.previous_weight + (p.weight - p.previous_weight) * s.render_alpha
                         });
-                        let arm = tuning.arm_transform(id, left).unwrap_or_default();
+                        let arm = tuning.arm_transform("minecraft:netherite_sword", left).unwrap_or_default();
                         let item = tuning.item_transform(id, left).unwrap_or_default();
                         let suppress_tuning = animation.is_some_and(|(c, t, _)| {
                             c.effect_active("disable_arm_tuning", t)
