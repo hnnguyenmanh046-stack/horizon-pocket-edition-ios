@@ -773,6 +773,33 @@ impl OptionsUi {
                             let label = Text::literal(text);
                             self.heading_row(&mut out, label, &mut y, w, top);
                         }
+                        Row::Body(text, warning) => {
+                            // No wider than the list's buttons (a glyph is at most 6 pixels
+                            // wide): the scroll bar stands just past them.
+                            let chars = (((list_w - 10.0) / 6.0).floor() as usize).max(16);
+                            let color = if warning {
+                                rgba(255, 85, 85, 255)
+                            } else {
+                                0xFFA0A0A0
+                            };
+                            for line in wrap_words(&text, chars) {
+                                out.push(Widget {
+                                    x: text_left,
+                                    y: y + 4.0,
+                                    w: text_w,
+                                    h: 9.0,
+                                    kind: WKind::Text {
+                                        text: Text::literal(line),
+                                        color,
+                                        centered: true,
+                                    },
+                                    list: false,
+                                    row: 0,
+                                });
+                                y += 11.0;
+                            }
+                            y += 5.0;
+                        }
                         Row::Note(text) => {
                             out.push(Widget {
                                 x: text_left,

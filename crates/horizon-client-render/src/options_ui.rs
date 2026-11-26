@@ -2827,8 +2827,8 @@ fn native_game_rows(s: &Settings) -> Vec<Row> {
         use crate::mod_list::NativePart;
         rows.push(match part {
             NativePart::Title(text) => Row::Title(text.clone()),
-            NativePart::Text(text) => Row::Paragraph(text.clone()),
-            NativePart::Warning(text) => Row::Warning(text.clone()),
+            NativePart::Text(text) => Row::Body(text.clone(), false),
+            NativePart::Warning(text) => Row::Body(text.clone(), true),
         });
     }
     let widget = |(label, act): &(String, crate::mod_list::NativeGameAct), w: f32| {
@@ -2863,7 +2863,7 @@ fn native_game_page_rows(s: &Settings) -> Vec<Row> {
     // Horizon PE (iOS): the list has a title of its own, and says what a tap does.
     if cfg!(target_os = "ios") {
         rows.push(Row::Title("Installed mods".into()));
-        rows.push(Row::Paragraph("Tap a mod to turn it on or off.".into()));
+        rows.push(Row::Body("Tap a mod to turn it on or off.".into(), false));
     }
     rows.push(Row::Buttons(
         button(
@@ -2995,6 +2995,9 @@ enum Row {
     Heading(String),
     /// Horizon PE: a heading in the page's own words (the Mods page's top).
     Title(String),
+    /// Horizon PE: text in as many lines as the list's own width takes, red when it warns (the
+    /// Mods page's top). A `Paragraph` runs the page's whole width, under the list's scroll bar.
+    Body(String, bool),
     /// A line of grey text (a path).
     Note(String),
     /// Grey text in as many lines as the page's width takes (a page's explanations).
@@ -8485,6 +8488,23 @@ mod tests {
         assert!(found("Build needed", u32::MAX), "a title");
         assert!(found("Not in this app yet: Zoom 1.0.0.", 0xFFA0A0A0));
         assert!(found("No build service.", rgba(255, 85, 85, 255)));
+        // A long text is cut to the list's width (310: 50 characters), clear of the scroll bar.
+        let long = "word ".repeat(40);
+        s.mods.native_game = Some(NativeGame {
+            parts: vec![NativePart::Text(long), NativePart::Warning("w ".repeat(90))],
+            ..NativeGame::default()
+        });
+        let mut ui = OptionsUi::default();
+        ui.show(Page::NativeGame);
+        let (widgets, ..) = ui.layout(&s, 480.0, 400.0);
+        let longest = widgets
+            .iter()
+            .filter_map(|w| match &w.kind {
+                WKind::Text { text, .. } => Some(text.plain().chars().count()),
+                _ => None,
+            })
+            .max();
+        assert_eq!(longest, Some(49), "ten words of five, less the last space");
     }
 
     #[test]
