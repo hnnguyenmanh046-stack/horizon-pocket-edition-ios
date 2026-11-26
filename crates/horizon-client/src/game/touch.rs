@@ -31,6 +31,18 @@ use winit::{
     window::WindowId,
 };
 
+impl Game<'_> {
+    /// The touch controls' attack is held (a finger on its button, or a tap that hits): Punchy's
+    /// hands swing for it, as for a mouse button.
+    pub(super) fn touch_attack_held(&self) -> bool {
+        self.touch.controls.held(Button::Attack)
+            || self.touch.attack_until.is_some_and(|t| Instant::now() < t)
+    }
+    pub(super) fn touch_use_held(&self) -> bool {
+        self.touch.controls.held(Button::Use)
+            || self.touch.use_until.is_some_and(|t| Instant::now() < t)
+    }
+}
 pub(super) const HELP: &[&str] = &[
     "touch-layout [edit|done|reset]  the touch controls' layout (touch-layout.json): show it, edit it in place, save, or go back to the default",
 ];
