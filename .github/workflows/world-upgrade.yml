@@ -31,6 +31,9 @@ env:
   CARGO_INCREMENTAL: "0"
   CARGO_PROFILE_FAST_DEBUG: "0"
   CARGO_PROFILE_RELEASE_DEBUG: "0"
+  # The engine this source is built on, as its makers released it (IOS-SYNC.md "Base"): Starling
+  # v0.9.0. Loading times are held to it (tools/load_times.py).
+  ENGINE: ff303502a4f7982551a0e0d3622d9268efe9e829
 
 jobs:
   upgrade:
@@ -67,6 +70,11 @@ jobs:
           ref: ${{ steps.old.outputs.ref }}
           path: old
           persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.ENGINE }}
+          path: engine
+          persist-credentials: false
       - name: Install what the games link against, a virtual screen and a software GPU
         run: |
           sudo apt-get update
@@ -82,6 +90,7 @@ jobs:
           workspaces: |
             port
             old
+            engine
           shared-key: world-upgrade
           cache-on-failure: true
       - uses: actions/cache@v4
@@ -104,7 +113,7 @@ jobs:
         run: |
           set -euo pipefail
           server=$(tail -n 1 server-jar.txt)
-          for tree in port old; do
+          for tree in port old engine; do
             export HORIZON_HOME="$RUNNER_TEMP/prepare-$tree/home" HORIZON_LAUNCHER_HOME="$RUNNER_TEMP/prepare-$tree/launcher"
             export XDG_DATA_HOME="$RUNNER_TEMP/prepare-$tree/data" XDG_CONFIG_HOME="$RUNNER_TEMP/prepare-$tree/config"
             (cd "$tree" && cargo run --release -p horizon-prepare -- --root "$PWD" --prepare --complete \
@@ -124,15 +133,20 @@ jobs:
           else
             cargo build --profile fast -p horizon-client --bin horizon-client
           fi
+      - name: Build the engine alone
+        working-directory: engine
+        run: cargo build --profile fast -p horizon-game --bin horizon-client
       - name: The release before plays; this source's game opens its folder
         run: |
           python3 port/tools/world_upgrade.py --xvfb --offscreen \
             --old-client old/target/fast/horizon-client --old-resources resources-old \
             --new-client port/target/fast/horizon-client --new-resources resources-port
-      # Horizon PE: and neither build may be slower to load than the release before
-      # (tools/load_times.py): start to title, and opening a saved world, by turns.
-      - name: This source loads as fast as the release before
+      # Horizon PE: and this source may not be slower to load than the engine it is built on
+      # (tools/load_times.py): start to title, and opening a saved world, by turns, with the
+      # release before beside them.
+      - name: This source loads as fast as its engine
         run: |
           python3 port/tools/load_times.py --xvfb --offscreen \
             --old-client old/target/fast/horizon-client --old-resources resources-old \
+            --engine-client engine/target/fast/horizon-client --engine-resources resources-engine \
             --new-client port/target/fast/horizon-client --new-resources resources-port
