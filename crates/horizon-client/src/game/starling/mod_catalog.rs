@@ -785,6 +785,10 @@ struct Shared {
 #[derive(Default)]
 pub(super) struct Catalog {
     shown: bool,
+    /// Horizon PE (iOS): a native mod was added since the screen opened: closing it opens the
+    /// Mods page, whose top has the build (`catalog_closed`).
+    #[cfg(target_os = "ios")]
+    native_added: bool,
     shelf: Shelf,
     query: String,
     /// The search box has the keyboard (text_mirror.rs), and when it last changed.
@@ -901,7 +905,10 @@ fn done_notice(done: Done, title: &str) -> String {
     match done {
         // iOS compiles it into the app on GitHub (native_builds_ios.rs), from the Mods page's top.
         Done::NativeMod if cfg!(target_os = "ios") => {
-            format!("{title} is in. Press Build at the top of the Mods page to play with it.")
+            format!(
+                "{title} is added. Closing the catalog opens the Mods page: press Build at its \
+                 top to play with it."
+            )
         }
         Done::NativeMod => {
             format!("{title} is in. Close this and press Compile on its row to play with it.")
@@ -1518,6 +1525,10 @@ impl Game<'_> {
         card.shown = true;
         card.notice = None;
         card.page = None;
+        #[cfg(target_os = "ios")]
+        {
+            card.native_added = false;
+        }
         card.installed = starling_catalog::installed_projects(&Self::game_dir());
         // A picture that could not be had last time is asked for again.
         card.shared
@@ -1540,9 +1551,21 @@ impl Game<'_> {
             if card.page.take().is_none() {
                 card.shown = false;
                 card.typing = false;
+                #[cfg(target_os = "ios")]
+                self.catalog_closed();
             }
         }
         true
+    }
+
+    /// Horizon PE (iOS): the screen has just closed. A native mod plays only once it is built
+    /// into the app, so if one was added while the screen was open the Mods page opens now, its
+    /// top having the build. Until then the player goes on looking for mods.
+    #[cfg(target_os = "ios")]
+    fn catalog_closed(&mut self) {
+        if std::mem::take(&mut self.catalog.native_added) {
+            self.open_options_at(self.title.is_some(), horizon_client::options_ui::Page::Mods);
+        }
     }
 
     /// Horizon PE: opens the page of the list's row `index`, and asks its source for its
@@ -2024,14 +2047,17 @@ impl Game<'_> {
         let Some((title, result)) = finished else {
             return;
         };
-        // Horizon PE (iOS): a native mod plays only once it is built into the app, so the catalog
-        // gives way to the Mods page, whose top has the build.
-        #[cfg(target_os = "ios")]
-        let to_mods_page = matches!(result, Ok(Done::NativeMod));
         self.catalog.notice = Some(match result {
             Ok(done) => {
                 match done {
-                    Done::NativeMod => self.list_new_native_mods(),
+                    Done::NativeMod => {
+                        self.list_new_native_mods();
+                        // Horizon PE (iOS): the Mods page opens when the screen closes.
+                        #[cfg(target_os = "ios")]
+                        {
+                            self.catalog.native_added = true;
+                        }
+                    }
                     Done::ShaderPack => {
                         self.settings.shader_packs =
                             horizon_client::shader_pack_list::scan(&Self::shader_packs_dir());
@@ -2051,13 +2077,6 @@ impl Game<'_> {
             }
             Err(e) => (install_failed(&title, &e), true),
         });
-        #[cfg(target_os = "ios")]
-        if to_mods_page {
-            self.catalog.shown = false;
-            self.catalog.typing = false;
-            self.catalog.page = None;
-            self.open_options_at(self.title.is_some(), horizon_client::options_ui::Page::Mods);
-        }
     }
 
     fn catalog_install(&mut self, index: usize) {
@@ -2231,7 +2250,11 @@ impl Game<'_> {
             return true;
         };
         match act {
-            Act::Close => card.shown = false,
+            Act::Close => {
+                card.shown = false;
+                #[cfg(target_os = "ios")]
+                self.catalog_closed();
+            }
             Act::Shelf(shelf) => {
                 card.shelf = shelf;
                 card.typed_at = None;

@@ -36,16 +36,19 @@ thread_local! {
 }
 
 /// The command line of the next start.
-/// The game's window on an iPhone or iPad: the home bar fades away while it isn't touched, and
-/// a swipe or tap at the bottom or top edge goes to the game first (the system's own gesture
-/// needs a second one there), so a thumb near the edge doesn't open Type to Siri, the app
-/// switcher or the Control Center in the middle of play.
+/// The game's window on an iPhone or iPad: a swipe or tap at the bottom or top edge goes to
+/// the game first (the system's own gesture needs a second one there), so a thumb near the edge
+/// doesn't leave the game, open the app switcher or the Control Center in the middle of play.
+///
+/// The home bar is not asked to fade away: iOS honours one of the two wishes, and when the bar
+/// is asked to hide it is the hiding that wins and one swipe leaves the game. With the bar left
+/// to the system it stays as a dim line, and it is that line a first swipe lights up.
 pub fn window_attributes(
     attributes: winit::window::WindowAttributes,
 ) -> winit::window::WindowAttributes {
     use winit::platform::ios::{ScreenEdge, WindowAttributesExtIOS};
     attributes
-        .with_prefers_home_indicator_hidden(true)
+        .with_prefers_home_indicator_hidden(false)
         .with_preferred_screen_edges_deferring_system_gestures(ScreenEdge::BOTTOM | ScreenEdge::TOP)
 }
 

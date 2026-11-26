@@ -1,6 +1,6 @@
 //! Horizon PE: the parts of the phone controls that are this port's own (a held Attack button,
-//! the finger on the hotbar, the hotbar's size), kept apart from the engine's and free of the
-//! game, so each rule has a test that runs on any machine.
+//! a held Use button that builds, the finger on the hotbar, the hotbar's size), kept apart from
+//! the engine's and free of the game, so each rule has a test that runs on any machine.
 use std::time::{Duration, Instant};
 
 /// What a held Attack button finds under the crosshair.
@@ -107,6 +107,36 @@ impl AttackHold {
     }
 }
 
+/// One hold of the Use button with a block in hand.
+///
+/// A held Use places again every fourth tick, on whatever side of whatever block the crosshair
+/// is on by then: a thumb that steers while it holds gets blocks on the top and the sides of the
+/// ones it just placed. A hold builds one way instead: its first block chooses the side (the top
+/// of a block, or its north side, ...), and for as long as the button stays down a block goes
+/// only on that same side. A pillar, a bridge, a row along the ground and a wall all keep one
+/// side from their first block to their last. Lifting the finger ends it.
+#[derive(Debug, Default)]
+pub struct PlaceHold {
+    /// The side the hold's first use was on (the direction from the block that was touched to
+    /// the one that was placed).
+    face: Option<[i32; 3]>,
+}
+
+impl PlaceHold {
+    /// The button is up, or pressed anew: the next use may be on any side.
+    pub fn reset(&mut self) {
+        self.face = None;
+    }
+    /// May the hold's repeat use the side `face` of a block?
+    pub fn allows(&self, face: [i32; 3]) -> bool {
+        self.face.is_none_or(|first| first == face)
+    }
+    /// A use on the side `face` did something: the hold keeps to it.
+    pub fn used(&mut self, face: [i32; 3]) {
+        self.face.get_or_insert(face);
+    }
+}
+
 /// The finger that landed on the hotbar and slides along it.
 #[derive(Debug, Default)]
 pub struct HotbarSlide {
@@ -170,9 +200,23 @@ pub fn hotbar_slot_at(w: f32, h: f32, zoom: f32, point: [f32; 2], sliding: bool)
     (sliding || landed).then(|| (x / 20.0).floor().clamp(0.0, 8.0) as usize)
 }
 
+/// The HUD's margins `zone` (left, top, right, bottom, in GUI pixels) with the bottom one no
+/// less than the home bar's `strip`, in a view `height` high: the hotbar stands above the strip
+/// iOS keeps for the home bar. The strip is taken whole, and never as more than a quarter of the
+/// view whatever it is said to be.
+pub fn above_home_bar(mut zone: [f32; 4], strip: f32, height: f32) -> [f32; 4] {
+    if strip.is_finite() && strip > 0.0 {
+        zone[3] = zone[3].max(strip.ceil().min((height / 4.0).floor()));
+    }
+    zone
+}
+
 /// A slot's width a thumb finds without looking, in millimetres. Apple's least for anything
 /// tapped is 44 points, 6.9 mm.
 pub const SLOT_MM: f32 = 6.6;
+/// The slot widths that may be asked for (the "Hotbar size" slider's ends). One no wider than
+/// the hotbar already is leaves it as it is.
+pub const SLOT_MM_RANGE: [f32; 2] = [3.0, 10.0];
 /// How much of the HUD's width the hotbar may take.
 const WIDEST: f32 = 0.62;
 /// Two buttons may overlap by this much of each one's size before they count as in each
@@ -189,6 +233,8 @@ pub struct HotbarRoom<'a> {
     pub gui: f32,
     /// Pixels to a millimetre; 0 where it is not known (the hotbar stays as it is).
     pub px_per_mm: f32,
+    /// The slot width asked for, in millimetres ([`SLOT_MM`] unless the player chose another).
+    pub slot_mm: f32,
     /// The buttons on screen (x, y, width, height as fractions of the surface), the Inventory
     /// button left out when it is the factory's.
     pub obstacles: &'a [[f32; 4]],
@@ -207,6 +253,8 @@ pub struct HotbarFit {
     pub zoom: f32,
     /// The Inventory button's centre (a fraction of the surface's width) when it moves.
     pub inventory_x: Option<f32>,
+    /// A slot's width as it is drawn, in millimetres; 0 when the hotbar is left as it is.
+    pub slot_mm: f32,
 }
 
 impl Default for HotbarFit {
@@ -214,6 +262,7 @@ impl Default for HotbarFit {
         Self {
             zoom: 1.0,
             inventory_x: None,
+            slot_mm: 0.0,
         }
     }
 }
@@ -227,7 +276,8 @@ fn overlap(a: [f32; 4], b: [f32; 4]) -> bool {
     a[0] < b[0] + b[2] && b[0] < a[0] + a[2] && a[1] < b[1] + b[3] && b[1] < a[1] + a[3]
 }
 
-/// The biggest hotbar, up to slots of [`SLOT_MM`], that is in no button's way. Its size is a
+/// The biggest hotbar, up to slots of the width asked for, that is in no button's way. Its size
+/// is a
 /// whole number of pixels to a GUI pixel, so its art and its numbers stay sharp.
 pub fn fit_hotbar(room: &HotbarRoom) -> HotbarFit {
     let [sw, sh] = room.surface;
@@ -238,7 +288,13 @@ pub fn fit_hotbar(room: &HotbarRoom) -> HotbarFit {
     }
     let px = |[x, y, w, h]: [f32; 4]| [x * sw, y * sh, w * sw, h * sh];
     let obstacles: Vec<[f32; 4]> = room.obstacles.iter().map(|r| inset(px(*r))).collect();
-    let wanted = (SLOT_MM * room.px_per_mm / 20.0).ceil();
+    let [least, most] = SLOT_MM_RANGE;
+    let slot_mm = if room.slot_mm.is_finite() {
+        room.slot_mm.clamp(least, most)
+    } else {
+        SLOT_MM
+    };
+    let wanted = (slot_mm * room.px_per_mm / 20.0).ceil();
     let mut size = wanted.min((aw * WIDEST / 182.0).floor());
     while size > room.gui {
         let hot = [
@@ -250,6 +306,7 @@ pub fn fit_hotbar(room: &HotbarRoom) -> HotbarFit {
         let fit = HotbarFit {
             zoom: size / room.gui,
             inventory_x: None,
+            slot_mm: 20.0 * size / room.px_per_mm,
         };
         size -= 1.0;
         if obstacles.iter().any(|o| overlap(hot, *o)) {
@@ -382,6 +439,45 @@ mod tests {
     }
 
     #[test]
+    fn the_hud_stands_above_the_home_bar() {
+        // A phone with a home bar, 63 pixels at 4 to a GUI pixel: 16 GUI pixels, rounded up.
+        assert_eq!(
+            above_home_bar([0.0; 4], 15.75, 292.0),
+            [0.0, 0.0, 0.0, 16.0]
+        );
+        // A margin the player set is kept when it is the bigger one, and the sides are theirs.
+        let set = [10.0, 8.0, 10.0, 20.0];
+        assert_eq!(above_home_bar(set, 15.75, 292.0), set);
+        assert_eq!(
+            above_home_bar([10.0, 8.0, 10.0, 8.0], 15.75, 292.0)[3],
+            16.0
+        );
+        // A phone with a home button has no strip.
+        assert_eq!(above_home_bar(set, 0.0, 292.0), set);
+        assert_eq!(above_home_bar([0.0; 4], f32::NAN, 292.0), [0.0; 4]);
+        assert_eq!(above_home_bar([0.0; 4], 900.0, 292.0)[3], 73.0, "a quarter");
+    }
+
+    #[test]
+    fn a_hold_of_use_builds_on_the_side_of_its_first_block() {
+        const UP: [i32; 3] = [0, 1, 0];
+        const NORTH: [i32; 3] = [0, 0, -1];
+        let mut hold = PlaceHold::default();
+        assert!(hold.allows(UP) && hold.allows(NORTH), "none chosen yet");
+        hold.used(UP);
+        assert!(hold.allows(UP), "the next block of a pillar or a row");
+        assert!(!hold.allows(NORTH), "not the new block's side");
+        // The first side stays the hold's, whatever is used after it.
+        hold.used(NORTH);
+        assert!(hold.allows(UP) && !hold.allows(NORTH));
+        // Lifting the finger ends it: the next press chooses again.
+        hold.reset();
+        assert!(hold.allows(NORTH));
+        hold.used(NORTH);
+        assert!(!hold.allows(UP));
+    }
+
+    #[test]
     fn a_finger_on_the_hotbar_slides_and_its_id_is_free_once_it_lifts() {
         let mut slide = HotbarSlide::default();
         assert_eq!(slide.touch(5, true, false, Some(2), 2), Some(2));
@@ -441,6 +537,7 @@ mod tests {
             area: [0.0, 0.0, surface[0], surface[1]],
             gui,
             px_per_mm: 12.84,
+            slot_mm: SLOT_MM,
             obstacles,
             inventory: None,
             inventory_own: 1.0,
@@ -456,11 +553,33 @@ mod tests {
         let fit = fit_hotbar(&room(WIDE, 3.0, &[]));
         assert_eq!(fit.zoom, 5.0 / 3.0);
         assert_eq!(fit.inventory_x, None);
+        assert!((fit.slot_mm - 100.0 / 12.84).abs() < 0.001, "as drawn");
         // Never smaller than it is, and never touched where the size is unknown.
         assert_eq!(fit_hotbar(&room(WIDE, 6.0, &[])).zoom, 1.0);
         let mut unknown = room(WIDE, 3.0, &[]);
         unknown.px_per_mm = 0.0;
         assert_eq!(fit_hotbar(&unknown).zoom, 1.0);
+    }
+
+    #[test]
+    fn the_hotbar_is_the_size_that_is_asked_for() {
+        let asked = |mm: f32| {
+            let mut r = room(WIDE, 3.0, &[]);
+            r.slot_mm = mm;
+            fit_hotbar(&r)
+        };
+        // 12.84 pixels a millimetre and 3 pixels to a GUI pixel: a slot is 4.67 mm as it is.
+        assert_eq!(asked(3.0), HotbarFit::default(), "no smaller than it is");
+        assert_eq!(asked(4.6), HotbarFit::default());
+        // A slot is never narrower than was asked for: the next whole size up.
+        assert_eq!(asked(4.7).zoom, 4.0 / 3.0);
+        assert_eq!(asked(5.0).zoom, 4.0 / 3.0);
+        assert_eq!(asked(6.6).zoom, 5.0 / 3.0);
+        // 62% of 2000 pixels is 1240: 6 pixels to a GUI pixel (1092), and no more.
+        assert_eq!(asked(9.0).zoom, 2.0);
+        assert_eq!(asked(10.0).zoom, 2.0);
+        assert_eq!(asked(400.0).zoom, 2.0, "the slider's end is the most");
+        assert_eq!(asked(f32::NAN).zoom, 5.0 / 3.0, "the usual size");
     }
 
     #[test]

@@ -864,6 +864,10 @@ pub enum Opt {
     /// Horizon PE: `touch.hold_attack`.
     TouchHoldAttack,
     TouchBigHotbar,
+    /// Horizon PE: `touch.hotbar_mm`.
+    TouchHotbarSize,
+    /// Horizon PE: `touch.place_one_way`.
+    TouchPlaceOneWay,
     TouchDynamicJoystick,
     TouchDynamicAreaX,
     TouchDynamicAreaY,
