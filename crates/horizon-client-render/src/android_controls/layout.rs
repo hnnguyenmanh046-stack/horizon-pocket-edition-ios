@@ -2043,6 +2043,8 @@ impl Settings {
 
     pub fn load_profile(game_home: &std::path::Path, name: &str) -> Self {
         let active = Self::load_from(&game_home.join("horizon-touch.json"));
+        // Horizon PE: what the player set for the phone, not for a layout (pocket.rs).
+        let own = active.own();
         let mut loaded = Self::load_preset(game_home, active.control_style, name);
         loaded.active_mcpe_preset = active.active_mcpe_preset;
         loaded.active_goy_preset = active.active_goy_preset;
@@ -2057,8 +2059,7 @@ impl Settings {
         loaded.ui_vibrate = active.ui_vibrate;
         loaded.show_control_hub = active.show_control_hub;
         loaded.auto_jump = active.auto_jump;
-        // Horizon PE: and what the player set for the phone, not for a layout (pocket.rs).
-        loaded.keep_own(active.own());
+        loaded.keep_own(own);
         match loaded.control_style {
             ControlStyle::Mcpe => loaded.active_mcpe_preset = loaded.preset_id.clone(),
             ControlStyle::GoyControl => loaded.active_goy_preset = loaded.preset_id.clone(),
