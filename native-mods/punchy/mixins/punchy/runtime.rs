@@ -271,6 +271,23 @@ pub(super) fn key(game: &mut Game<'_>, key: &str, pressed: bool) {
         STATE.with(|s| *s.borrow_mut() = State::default());
     }
 }
+/// Every hand is drawn as one holding a sword, tuned from Options > Mods > Punchy: key, label,
+/// default, step a click adds, lowest and highest (past the highest it starts over at the lowest).
+const ARM_SETTINGS: [(&str, &str, f32, f32, f32, f32); 5] = [
+    ("arm_length", "Arm length", 1.5, 0.25, 1.0, 3.0),
+    ("arm_scale", "Arm size", 0.809, 0.05, 0.5, 1.2),
+    ("arm_x", "Arm X", 0.06, 0.02, -0.3, 0.3),
+    ("arm_y", "Arm Y", -0.049, 0.05, -0.5, 0.5),
+    ("arm_z", "Arm Z", -0.537, 0.1, -1.0, 0.5),
+];
+
+fn arm_number(game: &Game<'_>, key: &str, default: f32) -> f32 {
+    game.native_setting(ID, key)
+        .and_then(|v| v.parse::<f32>().ok())
+        .filter(|v| v.is_finite())
+        .unwrap_or(default)
+}
+
 pub(super) fn settings(game: &Game<'_>, buttons: &mut Vec<String>) {
     let on = enabled(game);
     buttons.push(format!("Punchy preview: {}", if on { "ON" } else { "OFF" }));
@@ -284,6 +301,9 @@ pub(super) fn settings(game: &Game<'_>, buttons: &mut Vec<String>) {
             "Punchy"
         }
     ));
+    for (key, label, default, ..) in ARM_SETTINGS {
+        buttons.push(format!("{label}: {:.3}", arm_number(game, key, default)));
+    }
     STATE.with(|s| {
         let mut s = s.borrow_mut();
         load(&mut s);
@@ -315,6 +335,12 @@ pub(super) fn click(game: &Game<'_>, button: usize) {
                 "horizon"
             },
         ),
+        4..=8 => {
+            let (key, _, default, step, min, max) = ARM_SETTINGS[button - 4];
+            let value = arm_number(game, key, default) + step;
+            let value = if value > max + 1e-4 { min } else { value };
+            game.native_set_setting(ID, key, &format!("{value:.3}"));
+        }
         _ => {}
     }
 }
@@ -452,6 +478,10 @@ pub(super) fn begin(game: &mut Game<'_>, alpha: f64) {
             if let (Some(source), Some(tuning)) = (&s.source, &s.tuning) {
                 if let Ok(skeleton) = punchy_engine::skeleton::Skeleton::new(&source.bones)
                 {
+                    let arm_settings: Vec<f32> = ARM_SETTINGS
+                        .iter()
+                        .map(|(key, _, default, ..)| arm_number(game, key, *default))
+                        .collect();
                     for left in [false, true] {
                         let i = usize::from(left);
                         let h = usize::from(s.main_left != left);
@@ -471,7 +501,15 @@ pub(super) fn begin(game: &mut Game<'_>, alpha: f64) {
                         let weight = s.active.as_ref().map_or(1., |p| {
                             p.previous_weight + (p.weight - p.previous_weight) * s.render_alpha
                         });
-                        let arm = tuning.arm_transform("minecraft:netherite_sword", left).unwrap_or_default();
+                        // The same arm for every hand and item: length, size and place from the settings.
+                        let mut arm = punchy_engine::tuning::Transform::default();
+                        arm.scale = arm_settings[1];
+                        arm.offset = [
+                            arm_settings[2] * if left { -1. } else { 1. },
+                            arm_settings[3],
+                            arm_settings[4],
+                        ];
+                        arm.pivot[1] = arm_settings[0] - 1.;
                         let item = tuning.item_transform(id, left).unwrap_or_default();
                         let suppress_tuning = animation.is_some_and(|(c, t, _)| {
                             c.effect_active("disable_arm_tuning", t)
