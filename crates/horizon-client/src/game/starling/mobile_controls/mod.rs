@@ -1552,8 +1552,14 @@ impl Game<'_> {
             return Ok(true);
         }
         if t.phase == TouchPhase::Cancelled {
+            // Horizon PE: LMB and RMB moved by a finger the system then took away (a swipe
+            // from the screen's edge) stay where they were left, the next start too.
+            let moving = self.mobile.ui.mouse_grip.is_some();
             self.mobile.ui.cancel();
             self.android_release_touch_keys(true);
+            if moving {
+                let _ = self.mobile.controls.settings.save();
+            }
             return Ok(true);
         }
         if t.phase == TouchPhase::Ended && self.mobile.ui.owns_key(t.id) {
