@@ -194,7 +194,12 @@ pub fn attach(
     let tuning_pivot = Vec3::from_array(item_tuning.pivot);
     let marker = Vec3::new(if left { 0.04 } else { -0.04 }, -0.14, 0.11);
     let pivot = marker + tuning_pivot;
+    // The arm is drawn longer along its own length (its Y axis), and the hand, with what it holds,
+    // is moved out along it by the same amount (the grip is 0.625 down the arm).
+    const ARM_LENGTH: f32 = 1.5;
+    let arm_drawn = arm * Mat4::from_scale(Vec3::new(1., ARM_LENGTH, 1.));
     let mut item = arm
+        * Mat4::from_translation(Vec3::new(0., 0.625 * (ARM_LENGTH - 1.), 0.))
         * Mat4::from_rotation_x(-std::f32::consts::FRAC_PI_2)
         * Mat4::from_rotation_y(std::f32::consts::PI)
         * Mat4::from_translation(Vec3::new(if left { -1. } else { 1. } / 16., 0.125, -0.625))
@@ -218,7 +223,7 @@ pub fn attach(
                 + Vec3::new(if left { 0.04 } else { -0.04 }, -0.03, -0.02),
         );
     StandardPose {
-        arm: view_flip() * arm,
+        arm: view_flip() * arm_drawn,
         item: view_flip() * item,
     }
 }
