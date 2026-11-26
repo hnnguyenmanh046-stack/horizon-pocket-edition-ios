@@ -118,7 +118,10 @@ impl Game<'_> {
     pub(super) fn draw_hardware_cursor(&self, batch: &mut HudBatch) {
         use winit::platform::ios::WindowExtIOS;
 
-        if self.captured
+        // iOS's own pointer is used (shown on screens, hidden while playing).
+        const DRAW_OWN_CURSOR: bool = false;
+        if !DRAW_OWN_CURSOR
+            || self.captured
             || self.input_mode != InputMode::KeyboardMouse
             || !horizon_gamecontroller::mouse_connected()
         {
