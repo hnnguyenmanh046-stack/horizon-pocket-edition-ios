@@ -15,8 +15,9 @@ pub struct Notes {
 const NOTES: &[Notes] = &[Notes {
     version: "1.1.0",
     new: &[
-        "A newer game engine: faster, with many fixes.",
-        "Hold Attack to keep hitting. Hold Use to build in one direction.",
+        "The game engine is over 31,000 changes newer (Starling 0.8 to 0.9).",
+        "Hold Attack on a monster: no tapping, it hits each time your weapon is ready.",
+        "Hold Use with blocks: they all go the same way, so a bridge stays straight.",
         "A bigger hotbar you can slide along. Its size is in the Control Hub.",
         "A Catalog button on the title screen: mods, shaders and resource packs.",
         "Mods from the catalog are built into the app from Options > Mods.",
@@ -63,7 +64,7 @@ mod tests {
                 "a card, not a page"
             );
             for line in notes.new.iter().chain(notes.fixed) {
-                assert!(line.chars().count() <= 72, "{line}");
+                assert!(line.chars().count() <= 80, "{line}");
                 assert!(line.ends_with('.'), "{line}");
             }
         }

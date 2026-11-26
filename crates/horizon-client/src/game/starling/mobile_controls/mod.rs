@@ -1883,6 +1883,14 @@ impl Game<'_> {
                     settings.big_hotbar = true;
                     let _ = settings.save();
                 }
+                InGameMenuAction::ResetSizes => {
+                    let factory = horizon_client::android_controls::Settings::default();
+                    let settings = &mut self.mobile.controls.settings;
+                    settings.button_scale = factory.button_scale;
+                    settings.hotbar_mm = factory.hotbar_mm;
+                    settings.big_hotbar = factory.big_hotbar;
+                    let _ = settings.save();
+                }
                 InGameMenuAction::StepButtonScale(dir) => {
                     self.mobile.controls.settings.button_scale =
                         (self.mobile.controls.settings.button_scale + dir as f32 * 0.10)

@@ -168,8 +168,11 @@ impl Default for TouchUi {
 }
 
 /// Horizon PE: where the Buttons tab's "Hotbar Size" card starts: right under the button
-/// scale's card, the two sizes together. The tab's rows stand one step lower for it.
+/// scale's card, the two sizes together, and under them the row that puts both back
+/// ([`RESET_SIZES_Y`]). The tab's rows stand two steps lower for them.
 const HOTBAR_SIZE_Y: f32 = 72.0;
+/// Horizon PE: where the Buttons tab's "Reset Sizes" row starts.
+const RESET_SIZES_Y: f32 = 126.0;
 
 /// Horizon PE: the slot width (millimetres) the "Hotbar Size" slider means with a finger at `x`,
 /// its card starting at `cx` and `cw` wide.
@@ -228,6 +231,8 @@ pub enum InGameMenuAction {
     StepButtonScale(i32),
     /// Horizon PE: the slot width the hotbar is asked for, in millimetres.
     SetHotbarSize(f32),
+    /// Horizon PE: the buttons and the hotbar back at the sizes they come with.
+    ResetSizes,
     TriggerKey(KeyCode),
     OpenKeyboard,
     /// Kill the game process now (no save, no shutdown sequence).
@@ -2894,11 +2899,14 @@ impl TouchUi {
                     let size = hotbar_size_at(p[0], cx, cw);
                     return Some(InGameMenuAction::SetHotbarSize(size));
                 }
-                if inside([cx, body_y + 288., cw, 46.]) {
+                if inside([cx, body_y + 342., cw, 46.]) {
                     return Some(InGameMenuAction::ToggleOffhandButton);
                 }
-                if inside([cx, body_y + 342., cw, 46.]) {
+                if inside([cx, body_y + 396., cw, 46.]) {
                     return Some(InGameMenuAction::ToggleShieldButton);
+                }
+                if inside([cx, body_y + RESET_SIZES_Y, cw, 46.]) {
+                    return Some(InGameMenuAction::ResetSizes);
                 }
                 // Tab 3: Buttons & Layout Options
                 let row_h = 46.0;
@@ -2910,13 +2918,13 @@ impl TouchUi {
                     let t = ((p[0] - sl_x) / sl_w).clamp(0.0, 1.0);
                     return Some(InGameMenuAction::SetButtonScale(0.50 + t * 1.50));
                 }
-                if inside([cx, body_y + 18.0 + step * 2.0, cw, row_h]) {
+                if inside([cx, body_y + 18.0 + step * 3.0, cw, row_h]) {
                     return Some(InGameMenuAction::ToggleLeftHanded);
                 }
-                if inside([cx, body_y + 18.0 + step * 3.0, cw, row_h]) {
+                if inside([cx, body_y + 18.0 + step * 4.0, cw, row_h]) {
                     return Some(InGameMenuAction::ToggleSprintMode);
                 }
-                if inside([cx, body_y + 18.0 + step * 4.0, cw, row_h]) {
+                if inside([cx, body_y + 18.0 + step * 5.0, cw, row_h]) {
                     return Some(InGameMenuAction::ToggleInventoryControls);
                 }
             }
@@ -3228,7 +3236,7 @@ impl TouchUi {
             1 => 430.0,
             2 => 470.0,
             // Horizon PE: with the hotbar size slider's card among the rows.
-            3 => 404.0,
+            3 => 458.0,
             _ => 340.0,
         };
         let max_scroll = (content_height - body_h).max(0.0);
@@ -3994,7 +4002,15 @@ impl TouchUi {
                 }
                 draw_toggle_row(
                     &mut ui,
-                    body_y + 288.,
+                    body_y + RESET_SIZES_Y,
+                    "Reset Sizes",
+                    "Buttons back to 100% and the hotbar to its usual size",
+                    None,
+                    None,
+                );
+                draw_toggle_row(
+                    &mut ui,
+                    body_y + 342.,
                     "Offhand Button",
                     "Show the swap-hands button",
                     Some(settings.offhand_button),
@@ -4002,7 +4018,7 @@ impl TouchUi {
                 );
                 draw_toggle_row(
                     &mut ui,
-                    body_y + 342.,
+                    body_y + 396.,
                     "Separate Shield Button",
                     "Off uses crouching to raise the shield",
                     Some(settings.shield_button),
@@ -4072,7 +4088,7 @@ impl TouchUi {
                 ui.border(sc_thumb_x - 7.0, sc_sl_y - 4.0, 14.0, 14.0, 7.0, text_c);
                 draw_toggle_row(
                     &mut ui,
-                    body_y + 18.0 + step * 2.0,
+                    body_y + 18.0 + step * 3.0,
                     "Left-Handed Layout",
                     "Mirror movement and action buttons horizontally",
                     Some(settings.left_handed),
@@ -4080,7 +4096,7 @@ impl TouchUi {
                 );
                 draw_toggle_row(
                     &mut ui,
-                    body_y + 18.0 + step * 3.0,
+                    body_y + 18.0 + step * 4.0,
                     "Toggle Sprint",
                     "Latch sprint on tap instead of holding",
                     Some(settings.sprint_toggle || settings.toggle_sprint),
@@ -4088,7 +4104,7 @@ impl TouchUi {
                 );
                 draw_toggle_row(
                     &mut ui,
-                    body_y + 18.0 + step * 4.0,
+                    body_y + 18.0 + step * 5.0,
                     "Inventory Walk Controls",
                     "Keep movement controls active while inventory is open",
                     Some(settings.inventory_controls),
