@@ -5060,6 +5060,9 @@ impl Game<'_> {
             self.draw_title_player(&mut batch);
             // Horizon PE: the title's Catalog button, on iOS (own_skin.rs).
             self.draw_title_catalog(&mut batch);
+            // Horizon PE: and the button that shows this release's notes again (whats_new.rs).
+            #[cfg(target_os = "ios")]
+            self.draw_title_whats_new(&mut batch);
             self.draw_build_badge(&mut batch);
             // ScreenEvent.Render.Post over the title's own screens: a mod draws
             // over them here (a pack browser over Create New World, say), and the
