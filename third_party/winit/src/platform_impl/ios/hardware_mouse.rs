@@ -145,10 +145,16 @@ impl Mouse {
         unsafe {
             let mice: Retained<NSArray<AnyObject>> = objc2::msg_send_id![class!(GCMouse), mice];
             let mut known = self.mice.borrow_mut();
-            if known
+            let went_away = known
                 .iter()
-                .any(|old| !mice.iter().any(|m| std::ptr::eq(&*m, &**old)))
-            {
+                .any(|old| !mice.iter().any(|m| std::ptr::eq(&*m, &**old)));
+            if went_away {
+                trace(format_args!("a mouse went away ({} left)", mice.len()));
+            }
+            // Only when the last one is gone: iOS may list a mouse again as a new device while a
+            // button is held, which is not the button coming up (the new device's own state is
+            // read below).
+            if went_away && mice.is_empty() {
                 // A disconnected device may never deliver button-up.
                 for button in [MouseButton::Left, MouseButton::Right, MouseButton::Middle] {
                     send(
@@ -231,6 +237,21 @@ impl Mouse {
                             },
                         );
                         let _: () = msg_send![&*element, setPressedChangedHandler: &*changed];
+                        // The device's state now, so a button held across its being listed again
+                        // keeps being held (and one let go meanwhile is let go).
+                        let pressed: bool = msg_send![&*element, isPressed];
+                        trace(format_args!("mouse {button:?} listed, pressed={pressed}"));
+                        let state = if pressed { ElementState::Pressed } else { ElementState::Released };
+                        device(DeviceEvent::Button {
+                            button: match button { MouseButton::Left => 0, MouseButton::Right => 1, _ => 2 },
+                            state,
+                        });
+                        if self.captured.get() || relative {
+                            send(
+                                window,
+                                WindowEvent::MouseInput { device_id: DEVICE_ID, state, button },
+                            );
+                        }
                     }
                 }
                 let scroll: Retained<AnyObject> = objc2::msg_send_id![&*input, scroll];
