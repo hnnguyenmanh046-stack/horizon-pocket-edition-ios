@@ -64,7 +64,7 @@ GitHub and hands the finished .ipa back. A build is named by the game's version 
 the same request from anyone is the same build, made once. The service is sent the version, the
 mods and a random number your app made up once (it counts how many builds a device started today,
 six at most); it keeps no account, no address and no list of who asked for what. GitHub keeps each
-build for seven days; after that, asking again builds it again. Builds are never published as
+build for 90 days; after that, asking again builds it again. Builds are never published as
 releases, but anyone signed in to GitHub can download a public repository's build files: they hold
 the game and the mods picked, nothing else.
 

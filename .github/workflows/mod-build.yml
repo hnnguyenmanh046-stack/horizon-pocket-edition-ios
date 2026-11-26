@@ -4,7 +4,7 @@ run-name: mod-build ${{ inputs.key }}
 # code its app did not ship with, so a mod is part of the app itself: the game asks the mod builds
 # service (packaging/mod-builds-worker), which starts this workflow at the release's own tag with
 # the mods and the build's key, then finds the .ipa by that key (the artifact `mod-build-<key>`,
-# kept seven days) and hands it to the player.
+# kept 90 days, the most GitHub keeps one) and hands it to the player.
 #
 # Started at a release tag only: the workflow that builds a release with mods is the one that
 # release has. The request is checked before anything is fetched (tools/mod_build_key.py): a mod is
@@ -144,6 +144,8 @@ jobs:
       mods: ${{ needs.check.outputs.built_in }}
       catalog_mods: ${{ needs.check.outputs.mods }}
       artifact: mod-build-${{ needs.check.outputs.key }}
-      retention: 7
+      # The longest GitHub keeps a build's file: the same mods asked for again within that time
+      # are this build, at once.
+      retention: 90
       # A player's build is not started in the Simulator (they wait on it); the workflow's test is.
       simulator: ${{ github.event_name == 'push' || inputs.self_test == true }}
