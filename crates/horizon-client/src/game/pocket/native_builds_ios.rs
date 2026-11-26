@@ -18,9 +18,7 @@
 use super::Game;
 use horizon_client::hud::HudBatch;
 use horizon_client::mod_builds::{self, Pending, State, mods_label};
-use horizon_client::mod_list::{
-    NOT_BUILT, NativeGame, NativeGameAct, NativePage, NativePart,
-};
+use horizon_client::mod_list::{NOT_BUILT, NativeGame, NativeGameAct, NativePage, NativePart};
 use horizon_client::{options_ui::Page, text::Text, toasts::SystemToast, ui};
 use horizon_mod_package::index::native::Any;
 use serde_json::Value;
@@ -339,7 +337,7 @@ fn follow(shared: Arc<Mutex<Shared>>, service: &'static str, device: String) {
             ),
             Ok((key, State::Building { .. })) => keyed(
                 &key,
-                format!("Building: {minutes} min so far, usually 30 to 60. Keep playing."),
+                format!("Building: {minutes} min so far, usually 30 to 60."),
             ),
             Ok((_, State::Failed { reason })) => {
                 return fail(format!(
@@ -553,7 +551,9 @@ impl Game<'_> {
                 }
                 text(
                     &mut game,
-                    "Keep playing: the game tells you when it is ready.".to_owned(),
+                    "You don't have to wait here. Keep playing, or close the app: the build goes \
+                     on without it, and the game tells you when it is ready."
+                        .to_owned(),
                 );
                 game.buttons
                     .push(("Stop following".to_owned(), NativeGameAct::PlayWithout));
@@ -636,9 +636,9 @@ impl Game<'_> {
                     );
                     text(
                         &mut game,
-                        "On iPhone and iPad a mod with code is built into the app. Tap Build \
-                         and keep playing. It takes 30 to 60 minutes, or no time if someone \
-                         built the same mods before."
+                        "On iPhone and iPad a mod with code is built into the app. Tap Build. \
+                         It takes 30 to 60 minutes, or no time if someone built the same mods \
+                         before. You don't have to wait: keep playing, or close the app."
                             .to_owned(),
                     );
                 }

@@ -118,9 +118,10 @@ iOS only runs code that is part of an app, so the game rebuilds itself with your
 need no computer and no account.
 
 1. Install the mods you want, then close the catalog. The Mods page opens.
-2. Tap **Build** and keep playing. It takes 30 to 60 minutes, or no time if someone built the
-   same mods before.
-3. When the game says the build is ready, open **Options > Mods** and tap **Install...**.
+2. Tap **Build**. It takes 30 to 60 minutes, or no time if someone built the same mods before.
+   You don't have to wait: keep playing, or close the app. The build goes on without it.
+3. The game tells you when the build is ready, the next time you open it if it was closed. Open
+   **Options > Mods** and tap **Install...**.
 4. Pick your sideloading app. It installs over your app. Nothing is lost.
 
 | | |

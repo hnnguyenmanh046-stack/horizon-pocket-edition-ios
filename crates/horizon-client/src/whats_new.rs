@@ -58,7 +58,10 @@ mod tests {
     fn the_notes_are_short() {
         for notes in NOTES {
             assert!(!notes.new.is_empty() && !notes.fixed.is_empty());
-            assert!(notes.new.len() + notes.fixed.len() <= 10, "a card, not a page");
+            assert!(
+                notes.new.len() + notes.fixed.len() <= 10,
+                "a card, not a page"
+            );
             for line in notes.new.iter().chain(notes.fixed) {
                 assert!(line.chars().count() <= 72, "{line}");
                 assert!(line.ends_with('.'), "{line}");
