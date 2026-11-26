@@ -48,9 +48,15 @@ enum Line<'a> {
     Gap(f32),
 }
 
-const PAD: f32 = 22.0;
-const BUTTON_H: f32 = 40.0;
-const ITEM_INDENT: f32 = 16.0;
+/// The card is a big one: it is the only thing on screen, and it is read once.
+const CARD_W: f32 = 720.0;
+const PAD: f32 = 30.0;
+const BUTTON: [f32; 2] = [220.0, 50.0];
+const ITEM_INDENT: f32 = 22.0;
+/// The sizes of the title, a heading and an item's text, each with its line's height.
+const TITLE: [f32; 2] = [26.0, 46.0];
+const HEADING: [f32; 2] = [19.0, 32.0];
+const ITEM: [f32; 2] = [17.0, 26.0];
 
 impl Game<'_> {
     /// The notes to show now: over the title's main page only, and not over the catalog or the
@@ -81,12 +87,12 @@ impl Game<'_> {
         let mut ui = Ui::new(&self.gui.atlas, batch, (-1.0, -1.0));
         let (w, h) = (ui.w, ui.h);
         ui.fill(0.0, 0.0, w, h, color::with_alpha(color::bg(), 0.72));
-        let card_w = (w - 48.0).min(520.0);
+        let card_w = (w - 48.0).min(CARD_W);
         let room = card_w - 2.0 * PAD - ITEM_INDENT;
         let mut lines = Vec::new();
         for (heading, items) in [("New", notes.new), ("Fixed", notes.fixed)] {
             if !lines.is_empty() {
-                lines.push(Line::Gap(10.0));
+                lines.push(Line::Gap(14.0));
             }
             lines.push(Line::Heading(heading));
             for item in items {
@@ -98,7 +104,7 @@ impl Game<'_> {
                     } else {
                         format!("{line} {word}")
                     };
-                    if !line.is_empty() && ui.measure(Face::Regular, 14.0, &next) > room {
+                    if !line.is_empty() && ui.measure(Face::Regular, ITEM[0], &next) > room {
                         let full = std::mem::replace(&mut line, word.to_owned());
                         lines.push(Line::Item(full, first));
                         first = false;
@@ -107,67 +113,67 @@ impl Game<'_> {
                     }
                 }
                 lines.push(Line::Item(line, first));
-                lines.push(Line::Gap(4.0));
+                lines.push(Line::Gap(6.0));
             }
         }
         let body: f32 = lines
             .iter()
             .map(|line| match line {
-                Line::Heading(_) => 24.0,
-                Line::Item(..) => 20.0,
+                Line::Heading(_) => HEADING[1],
+                Line::Item(..) => ITEM[1],
                 Line::Gap(gap) => *gap,
             })
             .sum();
-        let card_h = PAD + 26.0 + 12.0 + body + 14.0 + BUTTON_H + PAD;
+        let card_h = PAD + TITLE[1] + body + 16.0 + BUTTON[1] + PAD;
         let (x, y) = ((w - card_w) / 2.0, ((h - card_h) / 2.0).max(8.0));
         ui.rounded(x, y, card_w, card_h, 14.0, color::bg());
         ui.border(x, y, card_w, card_h, 14.0, color::border());
         let title = format!("What's new in {}", notes.version);
         ui.text(
             Face::Semibold,
-            18.0,
+            TITLE[0],
             x + PAD,
             y + PAD,
             color::text(),
             &title,
         );
-        let mut ty = y + PAD + 26.0 + 12.0;
+        let mut ty = y + PAD + TITLE[1];
         for line in &lines {
             match line {
                 Line::Heading(words) => {
-                    ui.text(Face::Semibold, 14.0, x + PAD, ty, color::text(), words);
-                    ty += 24.0;
+                    ui.text(Face::Semibold, HEADING[0], x + PAD, ty, color::text(), words);
+                    ty += HEADING[1];
                 }
                 Line::Item(words, first) => {
                     if *first {
-                        ui.rounded(x + PAD + 2.0, ty + 7.0, 5.0, 5.0, 2.5, color::ACCENT);
+                        ui.rounded(x + PAD + 3.0, ty + 9.0, 6.0, 6.0, 3.0, color::ACCENT);
                     }
                     let left = x + PAD + ITEM_INDENT;
-                    ui.text(Face::Regular, 14.0, left, ty, color::MUTED, words);
-                    ty += 20.0;
+                    ui.text(Face::Regular, ITEM[0], left, ty, color::MUTED, words);
+                    ty += ITEM[1];
                 }
                 Line::Gap(gap) => ty += gap,
             }
         }
         let button = [
-            x + card_w - PAD - 160.0,
-            y + card_h - PAD - BUTTON_H,
-            160.0,
-            BUTTON_H,
+            x + card_w - PAD - BUTTON[0],
+            y + card_h - PAD - BUTTON[1],
+            BUTTON[0],
+            BUTTON[1],
         ];
         ui.rounded(
             button[0],
             button[1],
             button[2],
             button[3],
-            10.0,
+            12.0,
             color::ACCENT,
         );
         ui.text_centered(
             Face::Semibold,
-            15.0,
+            18.0,
             button[0] + button[2] / 2.0,
-            button[1] + (button[3] - 15.0) / 2.0 - 2.0,
+            button[1] + (button[3] - 18.0) / 2.0 - 2.0,
             color::ON_ACCENT,
             "Got it",
         );
