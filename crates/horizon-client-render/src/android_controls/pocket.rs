@@ -343,9 +343,80 @@ pub fn fit_hotbar(room: &HotbarRoom) -> HotbarFit {
     none
 }
 
+/// What a player set for the phone and the hand, not for one layout: where the virtual mouse's
+/// LMB and RMB stand, the hotbar's size, and how holding Attack and Use act. A preset, the other
+/// control system and "Default" bring layouts of their own, and upstream carries a list of such
+/// settings over each of them by hand; these are ours on that list. Without it the pair of
+/// buttons was back at its factory place after any of them.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Own {
+    mouse_buttons_pos: Option<[f32; 2]>,
+    hotbar_mm: f32,
+    big_hotbar: bool,
+    hold_attack: bool,
+    place_one_way: bool,
+}
+
+impl super::layout::Settings {
+    pub fn own(&self) -> Own {
+        Own {
+            mouse_buttons_pos: self.mouse_buttons_pos,
+            hotbar_mm: self.hotbar_mm,
+            big_hotbar: self.big_hotbar,
+            hold_attack: self.hold_attack,
+            place_one_way: self.place_one_way,
+        }
+    }
+
+    pub fn keep_own(&mut self, own: Own) {
+        self.mouse_buttons_pos = own.mouse_buttons_pos;
+        self.hotbar_mm = own.hotbar_mm;
+        self.big_hotbar = own.big_hotbar;
+        self.hold_attack = own.hold_attack;
+        self.place_one_way = own.place_one_way;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_preset_keeps_what_the_player_set_for_the_phone() {
+        use super::super::layout::{ControlStyle, Settings};
+        let tmp = std::env::temp_dir().join(format!("horizon-own-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let mut s = Settings {
+            mouse_buttons_pos: Some([0.25, 0.4]),
+            hotbar_mm: 5.0,
+            big_hotbar: false,
+            hold_attack: false,
+            place_one_way: false,
+            ..Settings::default()
+        };
+        let own = s.own();
+        // A preset of the player's, saved before the pair was moved again.
+        s.save_profile(&tmp, "Mine").unwrap();
+        s.mouse_buttons_pos = Some([0.6, 0.3]);
+        let own_now = s.own();
+        assert_ne!(own, own_now);
+        s.select_preset(&tmp, ControlStyle::Mcpe, "mine");
+        assert_eq!(s.own(), own_now, "a preset of the player's");
+        s.select_preset(&tmp, ControlStyle::Mcpe, "default");
+        assert_eq!(s.own(), own_now, "the Default preset");
+        s.switch_control_system(&tmp, ControlStyle::GoyControl);
+        assert_eq!(s.own(), own_now, "the other control system");
+        s.switch_control_system(&tmp, ControlStyle::Mcpe);
+        assert_eq!(s.own(), own_now, "and back");
+        s.apply_preset("default");
+        assert_eq!(s.own(), own_now, "Default applied");
+        let loaded = Settings::load_profile(&tmp, "mine");
+        assert_eq!(loaded.own(), own_now, "a saved profile");
+        // And the file a later start reads has it.
+        let read = Settings::load_from(&tmp.join("horizon-touch.json"));
+        assert_eq!(read.own(), own_now, "the saved file");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
     use HoldTarget::{Block, Living, Monster, Nothing, Thing};
 
     const HIT: HoldStep = HoldStep {
