@@ -4957,6 +4957,8 @@ impl Game<'_> {
     // runs no code built elsewhere (no native builds).
     #[cfg(target_os = "ios")]
     fn draw_phone_offers(&mut self, batch: &mut HudBatch) {
+        // What this release brought, once; under the offer of a newer one.
+        self.draw_whats_new(batch);
         self.draw_update_offer(batch);
         self.draw_catalog(batch);
     }

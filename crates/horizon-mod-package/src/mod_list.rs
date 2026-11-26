@@ -81,7 +81,21 @@ pub struct ModList {
 pub struct NativeGame {
     /// Lines of text, each with whether it is a warning (red).
     pub lines: Vec<(String, bool)>,
+    /// Horizon PE (iOS): what the page's top says, in titled parts, after `lines`.
+    pub parts: Vec<NativePart>,
     pub buttons: Vec<(String, NativeGameAct)>,
+}
+
+/// Horizon PE: one part of the Mods page's top (`NativeGame::parts`). A page of plain lines reads
+/// as one long text; a title over each thing it says tells a player where they are.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum NativePart {
+    /// A section's title.
+    Title(String),
+    /// A sentence or two, wrapped to the page.
+    Text(String),
+    /// The same, in red: something that needs doing or went wrong.
+    Warning(String),
 }
 
 /// A button of [`NativeGame`].

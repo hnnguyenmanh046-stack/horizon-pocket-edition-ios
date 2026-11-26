@@ -769,6 +769,10 @@ impl OptionsUi {
                             let label = tr(&key);
                             self.heading_row(&mut out, label, &mut y, w, top);
                         }
+                        Row::Title(text) => {
+                            let label = Text::literal(text);
+                            self.heading_row(&mut out, label, &mut y, w, top);
+                        }
                         Row::Note(text) => {
                             out.push(Widget {
                                 x: text_left,

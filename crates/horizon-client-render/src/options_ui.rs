@@ -2822,6 +2822,15 @@ fn native_game_rows(s: &Settings) -> Vec<Row> {
             });
         }
     }
+    // Horizon PE: the top in titled parts.
+    for part in &game.parts {
+        use crate::mod_list::NativePart;
+        rows.push(match part {
+            NativePart::Title(text) => Row::Title(text.clone()),
+            NativePart::Text(text) => Row::Paragraph(text.clone()),
+            NativePart::Warning(text) => Row::Warning(text.clone()),
+        });
+    }
     let widget = |(label, act): &(String, crate::mod_list::NativeGameAct), w: f32| {
         button(
             0.0,
@@ -2850,6 +2859,11 @@ fn native_game_page_rows(s: &Settings) -> Vec<Row> {
     if s.mods.installed.is_empty() {
         rows.push(Row::Header("horizon.mods.empty"));
         return rows;
+    }
+    // Horizon PE (iOS): the list has a title of its own, and says what a tap does.
+    if cfg!(target_os = "ios") {
+        rows.push(Row::Title("Installed mods".into()));
+        rows.push(Row::Paragraph("Tap a mod to turn it on or off.".into()));
     }
     rows.push(Row::Buttons(
         button(
@@ -2979,6 +2993,8 @@ enum Row {
     Header(&'static str),
     /// A heading the page makes at run time, by lang key (the Music page's groups).
     Heading(String),
+    /// Horizon PE: a heading in the page's own words (the Mods page's top).
+    Title(String),
     /// A line of grey text (a path).
     Note(String),
     /// Grey text in as many lines as the page's width takes (a page's explanations).
@@ -8446,6 +8462,32 @@ mod tests {
     }
 
     #[test]
+    fn the_mods_pages_top_is_drawn_in_titled_parts() {
+        use crate::mod_list::{NativeGame, NativePart};
+        let mut s = Settings::default();
+        let mut ui = OptionsUi::default();
+        s.mods.native_game = Some(NativeGame {
+            parts: vec![
+                NativePart::Title("Build needed".into()),
+                NativePart::Text("Not in this app yet: Zoom 1.0.0.".into()),
+                NativePart::Warning("No build service.".into()),
+            ],
+            ..NativeGame::default()
+        });
+        ui.show(Page::NativeGame);
+        let (widgets, ..) = ui.layout(&s, 480.0, 400.0);
+        let found = |words: &str, wanted: u32| {
+            widgets.iter().any(|w| match &w.kind {
+                WKind::Text { text, color, .. } => text.plain() == words && *color == wanted,
+                _ => false,
+            })
+        };
+        assert!(found("Build needed", u32::MAX), "a title");
+        assert!(found("Not in this app yet: Zoom 1.0.0.", 0xFFA0A0A0));
+        assert!(found("No build service.", rgba(255, 85, 85, 255)));
+    }
+
+    #[test]
     fn the_native_game_page_says_which_game_runs_above_the_mods_and_its_buttons_act() {
         use crate::mod_list::{NativeGame, NativeGameAct};
         let atlas = atlas();
@@ -8456,6 +8498,7 @@ mod tests {
         let old = "The build with Wrench was made for an earlier install of Starling, so it no \
                    longer loads. Compile again.";
         s.mods.native_game = Some(NativeGame {
+            parts: Vec::new(),
             lines: vec![(now.into(), false), (old.into(), true)],
             buttons: vec![
                 ("Compile".into(), NativeGameAct::Compile),
