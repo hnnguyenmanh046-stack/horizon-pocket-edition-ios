@@ -441,11 +441,17 @@ mod tests {
     #[test]
     fn the_hud_stands_above_the_home_bar() {
         // A phone with a home bar, 63 pixels at 4 to a GUI pixel: 16 GUI pixels, rounded up.
-        assert_eq!(above_home_bar([0.0; 4], 15.75, 292.0), [0.0, 0.0, 0.0, 16.0]);
+        assert_eq!(
+            above_home_bar([0.0; 4], 15.75, 292.0),
+            [0.0, 0.0, 0.0, 16.0]
+        );
         // A margin the player set is kept when it is the bigger one, and the sides are theirs.
         let set = [10.0, 8.0, 10.0, 20.0];
         assert_eq!(above_home_bar(set, 15.75, 292.0), set);
-        assert_eq!(above_home_bar([10.0, 8.0, 10.0, 8.0], 15.75, 292.0)[3], 16.0);
+        assert_eq!(
+            above_home_bar([10.0, 8.0, 10.0, 8.0], 15.75, 292.0)[3],
+            16.0
+        );
         // A phone with a home button has no strip.
         assert_eq!(above_home_bar(set, 0.0, 292.0), set);
         assert_eq!(above_home_bar([0.0; 4], f32::NAN, 292.0), [0.0; 4]);
@@ -562,9 +568,11 @@ mod tests {
             r.slot_mm = mm;
             fit_hotbar(&r)
         };
-        // 12.84 pixels a millimetre and 3 pixels to a GUI pixel: a slot is 4.7 mm as it is.
+        // 12.84 pixels a millimetre and 3 pixels to a GUI pixel: a slot is 4.67 mm as it is.
         assert_eq!(asked(3.0), HotbarFit::default(), "no smaller than it is");
-        assert_eq!(asked(4.7), HotbarFit::default());
+        assert_eq!(asked(4.6), HotbarFit::default());
+        // A slot is never narrower than was asked for: the next whole size up.
+        assert_eq!(asked(4.7).zoom, 4.0 / 3.0);
         assert_eq!(asked(5.0).zoom, 4.0 / 3.0);
         assert_eq!(asked(6.6).zoom, 5.0 / 3.0);
         // 62% of 2000 pixels is 1240: 6 pixels to a GUI pixel (1092), and no more.
