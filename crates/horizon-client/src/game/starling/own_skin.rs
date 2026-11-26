@@ -487,7 +487,7 @@ impl Game<'_> {
     /// own buttons, the twin of Customize... on the other side: left of the menu's 200 wide
     /// column where the player stands on its right, at the same height. None off the title's
     /// main page, under the options or the credits, and where the screen leaves it no room.
-    fn title_catalog_layout(&self) -> Option<[f32; 3]> {
+    pub(in crate::game) fn title_catalog_layout(&self) -> Option<[f32; 3]> {
         let hidden = matches!(self.screen, super::Screen::Options | super::Screen::Win);
         if !cfg!(target_os = "ios") || !self.title_main() || hidden {
             return None;

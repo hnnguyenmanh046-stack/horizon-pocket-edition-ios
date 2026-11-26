@@ -3,24 +3,41 @@
 //! after an update and after a new install alike (`horizon_client::whats_new` has the words).
 //! "Got it" closes it for good: the version is written down in the private folder.
 //!
+//! Nobody is to miss it by accident: the card takes every touch, only a finger that goes down
+//! and comes up on "Got it" closes it, and not in its first moments (a tap meant for the title
+//! screen as it appears). And it can be read again: the title screen has a "What's New" button
+//! above Catalog for as long as this version has notes.
+//!
 //! The card is drawn under the update's card and takes its touches after it, so a newer release
 //! is offered first; it steps aside for the catalog and the options.
 use super::Game;
 use horizon_client::{
     hud::HudBatch,
+    text::Text,
+    ui,
     ui_theme::{Face, Ui, color},
     whats_new::{self, Notes},
 };
 use std::sync::{Mutex, PoisonError};
+use std::time::{Duration, Instant};
 use winit::event::{Touch, TouchPhase};
 
 /// The version whose notes were closed, in the private folder.
 const SEEN_FILE: &str = "whats-new-seen";
+/// How long the card shows before "Got it" answers.
+const HOLD: Duration = Duration::from_millis(1500);
 
 struct Card {
     /// The file was read.
     checked: bool,
+    /// This version's notes, seen or not: the title's button opens them.
     notes: Option<&'static Notes>,
+    /// The card shows.
+    open: bool,
+    /// Since when it has been drawn.
+    since: Option<Instant>,
+    /// The finger that went down on "Got it".
+    finger: Option<u64>,
     /// The button as last drawn (UI units).
     button: Option<[f32; 4]>,
 }
@@ -29,11 +46,23 @@ struct Card {
 static CARD: Mutex<Card> = Mutex::new(Card {
     checked: false,
     notes: None,
+    open: false,
+    since: None,
+    finger: None,
     button: None,
 });
 
 fn card() -> std::sync::MutexGuard<'static, Card> {
-    CARD.lock().unwrap_or_else(PoisonError::into_inner)
+    let mut card = CARD.lock().unwrap_or_else(PoisonError::into_inner);
+    if !card.checked {
+        card.checked = true;
+        let seen = std::fs::read_to_string(seen_path()).ok();
+        if let Some((version, _)) = crate::android::app_version() {
+            card.notes = whats_new::notes(&version);
+            card.open = whats_new::due(&version, seen.as_deref()).is_some();
+        }
+    }
+    card
 }
 
 fn seen_path() -> std::path::PathBuf {
@@ -70,20 +99,15 @@ impl Game<'_> {
         if !on_title || self.catalog_open() {
             return None;
         }
-        let mut card = card();
-        if !card.checked {
-            card.checked = true;
-            let seen = std::fs::read_to_string(seen_path()).ok();
-            card.notes = crate::android::app_version()
-                .and_then(|(version, _)| whats_new::due(&version, seen.as_deref()));
-        }
-        card.notes
+        let card = card();
+        if card.open { card.notes } else { None }
     }
 
     pub(super) fn draw_whats_new(&self, batch: &mut HudBatch) {
         let Some(notes) = self.whats_new_shown() else {
             return;
         };
+        let ready = card().since.get_or_insert_with(Instant::now).elapsed() >= HOLD;
         let mut ui = Ui::new(&self.gui.atlas, batch, (-1.0, -1.0));
         let (w, h) = (ui.w, ui.h);
         ui.fill(0.0, 0.0, w, h, color::with_alpha(color::bg(), 0.72));
@@ -168,14 +192,13 @@ impl Game<'_> {
             BUTTON[0],
             BUTTON[1],
         ];
-        ui.rounded(
-            button[0],
-            button[1],
-            button[2],
-            button[3],
-            12.0,
-            color::ACCENT,
-        );
+        // Pale until it answers.
+        let fill = if ready {
+            color::ACCENT
+        } else {
+            color::with_alpha(color::ACCENT, 0.35)
+        };
+        ui.rounded(button[0], button[1], button[2], button[3], 12.0, fill);
         ui.text_centered(
             Face::Semibold,
             18.0,
@@ -188,28 +211,89 @@ impl Game<'_> {
         card().button = Some(button);
     }
 
-    /// While the card shows it takes every touch; a finger lifted on "Got it" closes it for good.
+    /// While the card shows it takes every touch. Only a finger that went down on "Got it" and
+    /// is lifted on it closes the card, and not before it has shown for [`HOLD`].
     pub(super) fn whats_new_touch(&mut self, touch: &Touch) -> bool {
         let Some(notes) = self.whats_new_shown() else {
             return false;
         };
-        if touch.phase != TouchPhase::Ended {
-            return true;
-        }
         let [w, h] = self.touch_size();
         // The UI's scale for a window of this size (as `Ui::new`).
         let d = (w as f32 / 1040.0).min(h as f32 / 700.0).clamp(1.0, 4.0);
         let p = [touch.location.x as f32 / d, touch.location.y as f32 / d];
         let mut card = card();
-        let pressed = card.button.is_some_and(|r| {
+        let on_button = card.button.is_some_and(|r| {
             p[0] >= r[0] && p[0] <= r[0] + r[2] && p[1] >= r[1] && p[1] <= r[1] + r[3]
         });
-        if pressed {
-            card.notes = None;
-            card.button = None;
-            if let Err(e) = std::fs::write(seen_path(), notes.version) {
-                log::warn!("Horizon PE: the notes of {} show again: {e}", notes.version);
+        let ready = card.since.is_some_and(|since| since.elapsed() >= HOLD);
+        match touch.phase {
+            TouchPhase::Started => {
+                if on_button && ready {
+                    card.finger = Some(touch.id);
+                }
             }
+            TouchPhase::Moved => {}
+            TouchPhase::Cancelled => {
+                if card.finger == Some(touch.id) {
+                    card.finger = None;
+                }
+            }
+            TouchPhase::Ended => {
+                if card.finger == Some(touch.id) {
+                    card.finger = None;
+                    if on_button {
+                        card.open = false;
+                        card.since = None;
+                        card.button = None;
+                        if let Err(e) = std::fs::write(seen_path(), notes.version) {
+                            log::warn!("Horizon PE: notes of {} show again: {e}", notes.version);
+                        }
+                    }
+                }
+            }
+        }
+        true
+    }
+
+    /// The title screen's "What's New" button: right above Catalog, the same size, for as long
+    /// as this version has notes. x, y and width in GUI pixels.
+    fn title_whats_new_layout(&self) -> Option<[f32; 3]> {
+        let [x, y, w] = self.title_catalog_layout()?;
+        let has_notes = card().notes.is_some();
+        has_notes.then_some([x, y - 24.0, w])
+    }
+
+    /// The title screen's "What's New" button, drawn as the menu draws its own.
+    pub(super) fn draw_title_whats_new(&self, batch: &mut HudBatch) {
+        let Some([x, y, w]) = self.title_whats_new_layout() else {
+            return;
+        };
+        let hover = ui::hovered(self.cursor, x, y, w, 20.0);
+        let label = Text::literal("What's New");
+        ui::button(batch, &self.gui.atlas, x, y, w, 20.0, &label, true, hover);
+    }
+
+    /// A finger on the title screen's "What's New" button: lifting on it opens the card again.
+    /// True when the button took the touch.
+    pub(super) fn title_whats_new_touch(&mut self, touch: &Touch) -> bool {
+        let b = self.interface_batch(self.touch_size());
+        let [ox, oy] = self.interface_origin();
+        let at = (
+            touch.location.x as f32 / b.scale - ox,
+            touch.location.y as f32 / b.scale - oy,
+        );
+        let on = self
+            .title_whats_new_layout()
+            .is_some_and(|[x, y, w]| ui::hovered(at, x, y, w, 20.0));
+        if !on || self.catalog_open() {
+            return false;
+        }
+        if touch.phase == TouchPhase::Ended {
+            self.audio.play_button_click();
+            let mut card = card();
+            card.open = true;
+            card.since = None;
+            card.finger = None;
         }
         true
     }
