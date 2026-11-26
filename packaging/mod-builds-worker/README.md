@@ -42,8 +42,8 @@ itself starts. An app built before it shows no Build button and says it has no b
 
 ## Good to know
 
-- A build takes about half an hour and is kept seven days. Asking for the same mods again within
-  that time gives the same build at once.
+- A build takes about half an hour and is kept 90 days. Asking for the same mods again within
+  that time gives the same build at once, to anyone.
 - The service builds at a release's tag, so it works for apps of a published release (1.1.0 or
   newer), not for test builds made from a branch.
 - Limits: 6 new builds a day for one device, 300 a day for everyone, 24 mods in a build. They are
