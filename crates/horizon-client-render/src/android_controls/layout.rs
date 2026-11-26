@@ -1444,6 +1444,8 @@ impl Settings {
         loaded.ui_vibrate = prev_ui_vibrate;
         loaded.show_control_hub = prev_hub;
         loaded.auto_jump = prev_auto_jump;
+        // Horizon PE: and what the player set for the phone, not for a layout (pocket.rs).
+        loaded.keep_own(self.own());
         *self = loaded;
         let _ = self.save_to(&game_home.join("horizon-touch.json"));
     }
@@ -1496,6 +1498,8 @@ impl Settings {
         loaded.ui_vibrate = prev_ui_vibrate;
         loaded.show_control_hub = prev_hub;
         loaded.auto_jump = prev_auto_jump;
+        // Horizon PE: and what the player set for the phone, not for a layout (pocket.rs).
+        loaded.keep_own(self.own());
         *self = loaded;
         let _ = self.save_to(&game_home.join("horizon-touch.json"));
     }
@@ -1966,7 +1970,10 @@ impl Settings {
             let prev_ui_vibrate = self.ui_vibrate;
             let prev_hub = self.show_control_hub;
             let prev_auto_jump = self.auto_jump;
+            // Horizon PE: and what the player set for the phone, not for a layout (pocket.rs).
+            let own = self.own();
             *self = Self::default_for_style(style);
+            self.keep_own(own);
             self.active_mcpe_preset = prev_mcpe;
             self.active_goy_preset = prev_goy;
             self.floating_menu_pos = prev_floating;
@@ -2019,6 +2026,8 @@ impl Settings {
         loaded.ui_vibrate = active.ui_vibrate;
         loaded.show_control_hub = active.show_control_hub;
         loaded.auto_jump = active.auto_jump;
+        // Horizon PE: and what the player set for the phone, not for a layout (pocket.rs).
+        loaded.keep_own(active.own());
         match loaded.control_style {
             ControlStyle::Mcpe => loaded.active_mcpe_preset = loaded.preset_id.clone(),
             ControlStyle::GoyControl => loaded.active_goy_preset = loaded.preset_id.clone(),

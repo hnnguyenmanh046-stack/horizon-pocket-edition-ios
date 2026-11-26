@@ -17,6 +17,7 @@ on:
     paths:
       - .github/workflows/world-upgrade.yml
       - tools/world_upgrade.py
+      - tools/load_times.py
 permissions:
   contents: read
 concurrency:
@@ -126,5 +127,12 @@ jobs:
       - name: The release before plays; this source's game opens its folder
         run: |
           python3 port/tools/world_upgrade.py --xvfb --offscreen \
+            --old-client old/target/fast/horizon-client --old-resources resources-old \
+            --new-client port/target/fast/horizon-client --new-resources resources-port
+      # Horizon PE: and neither build may be slower to load than the release before
+      # (tools/load_times.py): start to title, and opening a saved world, by turns.
+      - name: This source loads as fast as the release before
+        run: |
+          python3 port/tools/load_times.py --xvfb --offscreen \
             --old-client old/target/fast/horizon-client --old-resources resources-old \
             --new-client port/target/fast/horizon-client --new-resources resources-port
