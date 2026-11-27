@@ -91,7 +91,10 @@ if [ -n "$crashes" ]; then
     failed=1
   fi
 fi
-if xcrun simctl spawn "$device" launchctl list | grep -q "UIKitApplication:$bundle"; then
+# (Listed whole, then searched: a search that stops at its first match closes the pipe on the
+# lister, and its "Broken pipe" was read here as the app having left.)
+services=$(xcrun simctl spawn "$device" launchctl list 2>/dev/null || true)
+if printf '%s' "$services" | grep -q "UIKitApplication:$bundle"; then
   echo 'The app is still running.'
 elif [ $simulator_stop = 1 ]; then
   echo "The app stopped at the Simulator's limit."
