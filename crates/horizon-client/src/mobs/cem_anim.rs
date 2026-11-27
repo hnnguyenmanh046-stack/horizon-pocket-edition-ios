@@ -593,8 +593,10 @@ fn params(m: &Mob, s: &State, frame: &Frame, slots: &mut [f32]) {
             PosX => m.position.x as f32,
             PosY => m.position.y as f32,
             PosZ => m.position.z as f32,
-            RotX => m.head_pitch,
-            RotY => m.body_yaw,
+            // EMF gives the entity's rotation in radians (`Math.toRadians` of its pitch and body
+            // yaw), as it does the player's: Fresh Animations reads `rot_y` as one.
+            RotX => m.head_pitch.to_radians(),
+            RotY => m.body_yaw.to_radians(),
             Id => m.id as f32,
             // OptiFine's `time` loops at 27720 ticks to keep float precision.
             Time => (frame.time % 27720.0) as f32,
@@ -606,8 +608,8 @@ fn params(m: &Mob, s: &State, frame: &Frame, slots: &mut [f32]) {
             PlayerX => frame.player[0] as f32,
             PlayerY => frame.player[1] as f32,
             PlayerZ => frame.player[2] as f32,
-            PlayerRotX => frame.player_rot[0],
-            PlayerRotY => frame.player_rot[1],
+            PlayerRotX => frame.player_rot[0].to_radians(),
+            PlayerRotY => frame.player_rot[1].to_radians(),
             // Random models' rule (a later change); the model's own rule is 0 until then.
             RuleIndex => 0.0,
             // A client knows only a wolf's anger end time (as a remaining time taken when it
