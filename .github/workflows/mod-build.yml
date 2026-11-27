@@ -39,7 +39,10 @@ permissions:
   contents: read
 concurrency:
   # The same request asked twice is built once: the second waits and finds the first's file.
-  group: mod-build-${{ github.ref }}-${{ inputs.mods }}
+  # By the request's key, not its list of mods: GitHub refuses to start a run whose group's name
+  # is over 400 characters, which a list of twenty mods and more is (a request without a key,
+  # made by hand, is its own group).
+  group: mod-build-${{ github.ref }}-${{ inputs.key || github.run_id }}
   cancel-in-progress: false
 
 jobs:
