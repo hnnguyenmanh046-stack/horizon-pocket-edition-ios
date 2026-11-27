@@ -331,7 +331,16 @@ jobs:
           import zipfile
           with zipfile.ZipFile('HorizonPE-iOS-unsigned.ipa') as ipa:
               names = ipa.namelist()
-          bad = [n for n in names if n.endswith(('.jar', '.ogg')) or '/minecraft/' in n or n.endswith('asset-index.json')]
+          # A catalog mod's own content (horizon-native-mods/<id>/) has sounds of its own and a
+          # data/minecraft/ folder (its tags and recipes for the game's names): the mod's files
+          # from the registry, not the game's.
+          def games(n):
+              if n.endswith(('.jar', 'asset-index.json')):
+                  return True
+              if n.startswith('Payload/HorizonPE.app/horizon-native-mods/'):
+                  return False
+              return n.endswith('.ogg') or '/minecraft/' in n
+          bad = [n for n in names if games(n)]
           if bad:
               raise SystemExit(f'::error::the .ipa carries game files: {bad[:5]}')
           print(f'{len(names)} entries, none of them Mojang files')
