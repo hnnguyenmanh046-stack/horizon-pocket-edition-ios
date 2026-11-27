@@ -1,0 +1,34 @@
+[mod]
+id = "accurate_placement"
+version = "1.0.2"
+priority = 100
+
+[compatibility]
+horizon_revision = "8f83e5c85ae3b9a117f742e8d91170c5c9080a06"
+
+# The mod's brain: pure standard library, tested on its own.
+[[module]]
+id = "runtime"
+file = "crates/horizon-client/src/game.rs"
+name = "accurate_placement"
+source = "runtime.rs"
+
+# Once a frame: where the crosshair is, so a fast sweep loses no spot.
+[[injection]]
+id = "frame"
+kind = "HEAD"
+target = "horizon_client::game::native_hooks::Game<'_>::native_frame"
+helper = "frame.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+]
+
+# Once a tick, right before the tick's own clicks: the blocks that are due.
+[[injection]]
+id = "tick"
+kind = "HEAD"
+target = "horizon_client::game::remote::Game<'_>::remote_send_carried"
+helper = "tick.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+]
