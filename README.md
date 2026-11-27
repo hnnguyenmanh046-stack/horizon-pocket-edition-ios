@@ -47,9 +47,9 @@ Pick one. They are the same game; each adds to the one before it.
 
 | Edition | For you if | Download |
 | --- | --- | --- |
-| **Horizon PE** | You play alone, on servers, or with friends by invite code | [**1.0.0**](https://github.com/shopifygav222/horizon-pocket-edition-ios/releases/download/v1.0.0/HorizonPE-1.0.0.ipa) |
-| **Shared Worlds** | Your group wants one world any of you can open, and voice chat in it | [**1.0.0**](https://github.com/shopifygav222/horizon-pocket-edition-ios/releases/download/v1.0.0-shared-worlds/HorizonPE-1.0.0-SharedWorlds.ipa) |
-| **Shared Worlds + Mods** | You want that, plus 15 mods ready from the first start | [**1.0.0**](https://github.com/shopifygav222/horizon-pocket-edition-ios/releases/download/v1.0.0-shared-worlds-mods/HorizonPE-1.0.0-SharedWorlds-Mods.ipa) |
+| **Horizon PE** | You play alone, on servers, or with friends by invite code | [**1.1.0**](https://github.com/shopifygav222/horizon-pocket-edition-ios/releases/download/v1.1.0/HorizonPE-1.1.0.ipa) |
+| **Shared Worlds** | Your group wants one world any of you can open, and voice chat in it | [**1.1.0**](https://github.com/shopifygav222/horizon-pocket-edition-ios/releases/download/v1.1.0-shared-worlds/HorizonPE-1.1.0-SharedWorlds.ipa) |
+| **Shared Worlds + Mods** | You want that, plus 15 mods ready from the first start | [**1.1.0**](https://github.com/shopifygav222/horizon-pocket-edition-ios/releases/download/v1.1.0-shared-worlds-mods/HorizonPE-1.1.0-SharedWorlds-Mods.ipa) |
 
 You can switch later: install another edition over the app and your worlds, settings and
 accounts stay.
