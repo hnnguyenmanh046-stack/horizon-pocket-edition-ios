@@ -1,7 +1,7 @@
 
 name: Unzip native mods
 
-on:
+on: 
   workflow_dispatch:
 
 permissions:
@@ -10,12 +10,11 @@ permissions:
 jobs:
   unzip:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Extract ZIP inside native-mods
+      - name: Extract ZIP
         run: |
           cd native-mods
           unzip -o mods.zip -d .
