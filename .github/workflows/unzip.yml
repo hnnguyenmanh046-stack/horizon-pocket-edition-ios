@@ -1,4 +1,5 @@
-name: Unzip files
+
+name: Unzip native mods
 
 on:
   workflow_dispatch:
@@ -9,20 +10,21 @@ permissions:
 jobs:
   unzip:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Unzip archive
+      - name: Extract ZIP inside native-mods
         run: |
-          mkdir -p native-mods
-          unzip -o mods.zip -d native-mods
+          cd native-mods
+          unzip -o mods.zip -d .
+          rm mods.zip
 
       - name: Commit extracted files
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git add native-mods
-          git commit -m "Extract mods from zip" || true
+          git commit -m "Extract native mods" || true
           git push
-
