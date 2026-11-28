@@ -1,0 +1,28 @@
+name: Restore orphan commit
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: Full commit SHA
+        required: true
+      branch_name:
+        description: New branch name
+        required: true
+        default: original-build
+
+permissions:
+  contents: write
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create branch from commit
+        run: |
+          git init repo
+          cd repo
+          git remote add origin https://github.com/${{ github.repository }}.git
+          git fetch origin "${{ inputs.commit_sha }}"
+          git checkout -b "${{ inputs.branch_name }}" FETCH_HEAD
+          git push origin "${{ inputs.branch_name }}"
