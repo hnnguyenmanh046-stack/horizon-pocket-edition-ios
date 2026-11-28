@@ -1,23 +1,27 @@
 #![allow(clippy::unnecessary_cast)]
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::mem;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use objc2::rc::Retained;
-use objc2::runtime::{NSObjectProtocol, ProtocolObject};
+use objc2::runtime::{Imp, NSObjectProtocol, ProtocolObject, Sel};
 use objc2::{declare_class, msg_send, msg_send_id, mutability, sel, ClassType, DeclaredClass};
 use objc2_foundation::{CGFloat, CGPoint, CGRect, MainThreadMarker, NSObject, NSSet, NSString};
 use objc2_ui_kit::{
-    UICoordinateSpace, UIEvent, UIForceTouchCapability, UIGestureRecognizer,
+    UICoordinateSpace, UIDevice, UIEvent, UIForceTouchCapability, UIGestureRecognizer,
     UIGestureRecognizerDelegate, UIGestureRecognizerState, UIHoverGestureRecognizer, UIKeyInput,
     UIPanGestureRecognizer, UIPinchGestureRecognizer, UIPress, UIPressesEvent, UIResponder,
     UIRotationGestureRecognizer, UITapGestureRecognizer, UITextInputTraits, UITouch, UITouchPhase,
-    UITouchType, UITraitEnvironment, UIView,
+    UITouchType, UITraitEnvironment, UIUserInterfaceIdiom, UIView,
 };
 
 use super::app_state::{self, EventWrapper};
 use super::window::WinitUIWindow;
 use crate::dpi::PhysicalPosition;
-use crate::event::{ElementState, Event, Force, KeyEvent, Touch, TouchPhase, WindowEvent};
+use crate::event::{
+    ElementState, Event, Force, KeyEvent, MouseScrollDelta, Touch, TouchPhase, WindowEvent,
+};
 use crate::keyboard::{
     Key, KeyCode, KeyLocation, ModifiersState, NamedKey, PhysicalKey,
 };
@@ -25,11 +29,63 @@ use crate::platform_impl::platform::DEVICE_ID;
 use crate::platform_impl::KeyEventExtra;
 use crate::window::{WindowAttributes, WindowId as RootWindowId};
 
+#[link(name = "UIKit", kind = "framework")]
+extern "C" {
+    fn UIAccessibilityIsAssistiveTouchRunning() -> objc2::runtime::Bool;
+}
+
+static IN_ENABLE_HOOK: AtomicBool = AtomicBool::new(false);
+static ENABLE_HOOK_SET: AtomicBool = AtomicBool::new(false);
+
+type UpdateEnabled = extern "C" fn(&objc2::runtime::AnyObject, Sel);
+
+/// Stands in for UIPointerInteraction's own check of whether it may run, which keeps it off on a
+/// phone. An interaction that runs can hide the pointer there (see `pointer_style_for_region`).
+extern "C" fn pointer_interaction_enabled(this: &objc2::runtime::AnyObject, _sel: Sel) {
+    if IN_ENABLE_HOOK.swap(true, Ordering::Relaxed) {
+        return;
+    }
+    // SAFETY: `enabled` is a plain property of UIPointerInteraction.
+    let _: () = unsafe { msg_send![this, setEnabled: true] };
+    IN_ENABLE_HOOK.store(false, Ordering::Relaxed);
+}
+
+/// Once. Left alone if iOS has no such method.
+fn keep_pointer_interaction_enabled() {
+    if ENABLE_HOOK_SET.swap(true, Ordering::Relaxed) {
+        return;
+    }
+    let class = objc2::class!(UIPointerInteraction);
+    let Some(method) = class.instance_method(sel!(_updateInteractionIsEnabled)) else {
+        super::hardware_mouse::trace(format_args!("no _updateInteractionIsEnabled on this iOS"));
+        return;
+    };
+    super::hardware_mouse::trace(format_args!("pointer interaction hook installed"));
+    // SAFETY: the same signature as the method it takes the place of.
+    let hook = unsafe { mem::transmute::<UpdateEnabled, Imp>(pointer_interaction_enabled) };
+    // SAFETY: as above; nothing else relies on the old implementation.
+    unsafe { method.set_implementation(hook) };
+}
+
+fn assistive_touch_running() -> bool {
+    // SAFETY: a plain UIKit query with no arguments.
+    unsafe { UIAccessibilityIsAssistiveTouchRunning() }.as_bool()
+}
+
 pub struct WinitViewState {
     pinch_gesture_recognizer: RefCell<Option<Retained<UIPinchGestureRecognizer>>>,
     doubletap_gesture_recognizer: RefCell<Option<Retained<UITapGestureRecognizer>>>,
     rotation_gesture_recognizer: RefCell<Option<Retained<UIRotationGestureRecognizer>>>,
     pan_gesture_recognizer: RefCell<Option<Retained<UIPanGestureRecognizer>>>,
+    /// Hears a mouse wheel's or a trackpad's scroll, which iOS keeps from GameController while
+    /// its pointer is on screen.
+    scroll_gesture_recognizer: RefCell<Option<Retained<UIPanGestureRecognizer>>>,
+    scroll_last: Cell<CGPoint>,
+    /// The pointer interaction that hides iOS's pointer over this view was added.
+    pointer_hidden: Cell<bool>,
+    pointer_interaction: RefCell<Option<Retained<objc2::runtime::AnyObject>>>,
+    /// Touches iOS made from a mouse's click, left out as they came.
+    dropped_touches: RefCell<std::collections::HashSet<u64>>,
 
     // for iOS delta references the start of the Gesture
     rotation_last_delta: Cell<CGFloat>,
@@ -58,6 +114,8 @@ declare_class!(
     unsafe impl WinitView {
         #[method(drawRect:)]
         fn draw_rect(&self, rect: CGRect) {
+            // The mouse's buttons as they are now, once a frame (see `Mouse::poll`).
+            self.ivars().mouse.poll();
             let mtm = MainThreadMarker::new().unwrap();
             let window = self.window().unwrap();
             app_state::handle_nonuser_event(
@@ -321,6 +379,66 @@ declare_class!(
             app_state::handle_nonuser_event(mtm, gesture_event);
         }
 
+        // UIPointerInteractionDelegate: on a phone, AssistiveTouch's circle is hidden over the
+        // game, which draws its own cursor. A pad's pointer stays as it is.
+        #[method_id(pointerInteraction:styleForRegion:)]
+        fn pointer_style_for_region(
+            &self,
+            _interaction: &objc2::runtime::AnyObject,
+            _region: &objc2::runtime::AnyObject,
+        ) -> Option<Retained<objc2::runtime::AnyObject>> {
+            let mtm = MainThreadMarker::from(self);
+            let phone =
+                UIDevice::currentDevice(mtm).userInterfaceIdiom() == UIUserInterfaceIdiom::Phone;
+            super::hardware_mouse::trace(format_args!("iOS asked the pointer's style (phone={phone})"));
+            let playing = self.ivars().mouse.captured();
+            // No early `return`: this macro wraps the value the body ends with.
+            if phone && playing {
+                unsafe { msg_send_id![objc2::class!(UIPointerStyle), hiddenPointerStyle] }
+            } else {
+                None
+            }
+        }
+
+        #[method(scrollGesture:)]
+        fn scroll_gesture(&self, recognizer: &UIPanGestureRecognizer) {
+            let Some(window) = self.window() else { return };
+            let translation = recognizer.translationInView(Some(self));
+            let (dx, dy) = match recognizer.state() {
+                UIGestureRecognizerState::Began => {
+                    self.ivars().scroll_last.set(translation);
+                    (0.0, 0.0)
+                }
+                UIGestureRecognizerState::Changed | UIGestureRecognizerState::Ended => {
+                    let last = self.ivars().scroll_last.replace(translation);
+                    (translation.x - last.x, translation.y - last.y)
+                }
+                _ => {
+                    self.ivars().scroll_last.set(CGPoint { x: 0.0, y: 0.0 });
+                    (0.0, 0.0)
+                }
+            };
+            super::hardware_mouse::trace(format_args!("scroll gesture {dx} {dy}"));
+            if (dx == 0.0 && dy == 0.0) || !super::hardware_mouse::scroll_gesture_allowed() {
+                return;
+            }
+            // A wheel notch is about this many points of a scroll gesture.
+            const POINTS_PER_LINE: f64 = 12.0;
+            let event = EventWrapper::StaticEvent(Event::WindowEvent {
+                window_id: RootWindowId(window.id()),
+                event: WindowEvent::MouseWheel {
+                    device_id: DEVICE_ID,
+                    delta: MouseScrollDelta::LineDelta(
+                        (dx / POINTS_PER_LINE) as f32,
+                        (dy / POINTS_PER_LINE) as f32,
+                    ),
+                    phase: TouchPhase::Moved,
+                },
+            });
+            let mtm = MainThreadMarker::new().unwrap();
+            app_state::handle_nonuser_event(mtm, event);
+        }
+
         // Remain a responder during gameplay while an empty input view hides the software keyboard.
         #[method(inputView)]
         fn input_view(&self) -> Option<&UIView> {
@@ -363,6 +481,7 @@ declare_class!(
 
         #[method(hardwareHover:)]
         fn hardware_hover(&self, recognizer: &UIHoverGestureRecognizer) {
+            super::hardware_mouse::note_hover();
             if self.ivars().mouse.captured() { return; }
             let Some(window) = self.window() else { return };
             let at = unsafe { recognizer.locationInView(Some(self)) };
@@ -419,6 +538,11 @@ impl WinitView {
             doubletap_gesture_recognizer: RefCell::new(None),
             rotation_gesture_recognizer: RefCell::new(None),
             pan_gesture_recognizer: RefCell::new(None),
+            scroll_gesture_recognizer: RefCell::new(None),
+            scroll_last: Cell::new(CGPoint { x: 0.0, y: 0.0 }),
+            pointer_hidden: Cell::new(false),
+            pointer_interaction: RefCell::new(None),
+            dropped_touches: RefCell::new(std::collections::HashSet::new()),
 
             rotation_last_delta: Cell::new(0.0),
             pinch_last_delta: Cell::new(0.0),
@@ -556,6 +680,38 @@ impl WinitView {
             if touch_type == UITouchType::IndirectPointer && self.ivars().mouse.captured() {
                 continue;
             }
+            // On a phone, AssistiveTouch's pointer reports its clicks as touches while the mouse
+            // reports them through GameController: each click came twice, and a touch click is a
+            // finger's (a picked stack stays framed in its slot instead of following the cursor).
+            // The mouse's own are kept.
+            if touch_type == UITouchType::IndirectPointer
+                && super::hardware_mouse::gc_mouse_present()
+                && UIDevice::currentDevice(MainThreadMarker::from(self)).userInterfaceIdiom()
+                    == UIUserInterfaceIdiom::Phone
+            {
+                super::hardware_mouse::trace(format_args!("dropped an indirect pointer touch"));
+                continue;
+            }
+            // With AssistiveTouch on, iOS makes a finger's touch of a mouse's click as well as
+            // GameController's own click: the game would click twice. A touch that begins while
+            // a mouse is in use is that, and is left out until it ends.
+            if touch_type == UITouchType::Direct {
+                let id = touch as *const UITouch as u64;
+                let phase = touch.phase();
+                let mut dropped = self.ivars().dropped_touches.borrow_mut();
+                if matches!(phase, UITouchPhase::Began) {
+                    if super::hardware_mouse::mouse_recently_used() && assistive_touch_running() {
+                        super::hardware_mouse::trace(format_args!("dropped a direct touch"));
+                        dropped.insert(id);
+                        continue;
+                    }
+                } else if dropped.contains(&id) {
+                    if matches!(phase, UITouchPhase::Ended | UITouchPhase::Cancelled) {
+                        dropped.remove(&id);
+                    }
+                    continue;
+                }
+            }
             let force = if os_supports_force {
                 let trait_collection = self.traitCollection();
                 let touch_capability = trait_collection.forceTouchCapability();
@@ -645,11 +801,82 @@ impl WinitView {
     pub(crate) fn set_mouse_captured(&self, captured: bool) {
         self.ivars().mouse.capture(captured);
         self.update_mice();
+        // Ask the pointer's style again: hidden while playing, shown on a screen.
+        if let Some(interaction) = self.ivars().pointer_interaction.borrow().as_ref() {
+            // SAFETY: UIPointerInteraction's own method.
+            let _: () = unsafe { msg_send![&**interaction, invalidate] };
+        }
+    }
+
+    /// Once: a pan that only a scroll can start (no finger is allowed to). iOS 13.4+.
+    fn ensure_scroll_recognizer(&self) {
+        if self.ivars().scroll_gesture_recognizer.borrow().is_some() {
+            return;
+        }
+        let mtm = MainThreadMarker::from(self);
+        unsafe {
+            let pan = UIPanGestureRecognizer::initWithTarget_action(
+                mtm.alloc(),
+                Some(self),
+                Some(sel!(scrollGesture:)),
+            );
+            let supported: bool = msg_send![&*pan, respondsToSelector: sel!(setAllowedScrollTypesMask:)];
+            if !supported {
+                return;
+            }
+            // Only a pointer's scroll (UITouchTypeIndirectPointer is 3), with no finger needed.
+            let indirect: Retained<objc2::runtime::AnyObject> =
+                msg_send_id![objc2::class!(NSNumber), numberWithInteger: 3isize];
+            let types: Retained<objc2::runtime::AnyObject> =
+                msg_send_id![objc2::class!(NSArray), arrayWithObject: &*indirect];
+            let _: () = msg_send![&*pan, setAllowedTouchTypes: &*types];
+            let _: () = msg_send![&*pan, setAllowedScrollTypesMask: 3isize];
+            let _: () = msg_send![&*pan, setMinimumNumberOfTouches: 0usize];
+            let _: () = msg_send![&*pan, setMaximumNumberOfTouches: 0usize];
+            super::hardware_mouse::trace(format_args!("scroll recognizer installed"));
+            pan.setDelegate(Some(ProtocolObject::from_ref(self)));
+            self.addGestureRecognizer(&pan);
+            self.ivars().scroll_gesture_recognizer.replace(Some(pan));
+        }
+    }
+
+    /// Once, on a phone: an interaction whose delegate hides the pointer (Hynis does the same).
+    fn ensure_hidden_pointer(&self) {
+        if self.ivars().pointer_hidden.get() {
+            return;
+        }
+        let mtm = MainThreadMarker::from(self);
+        if UIDevice::currentDevice(mtm).userInterfaceIdiom() != UIUserInterfaceIdiom::Phone {
+            return;
+        }
+        self.ivars().pointer_hidden.set(true);
+        keep_pointer_interaction_enabled();
+        unsafe {
+            let alloc: objc2::rc::Allocated<objc2::runtime::AnyObject> =
+                msg_send_id![objc2::class!(UIPointerInteraction), alloc];
+            let interaction: Retained<objc2::runtime::AnyObject> =
+                msg_send_id![alloc, initWithDelegate: self];
+            let _: () = msg_send![self, addInteraction: &*interaction];
+            self.ivars().pointer_interaction.replace(Some(interaction));
+        }
     }
 
     pub(crate) fn update_mice(&self) {
+        self.ensure_scroll_recognizer();
+        self.ensure_hidden_pointer();
         if let Some(window) = self.window() {
-            self.ivars().mouse.update(RootWindowId(window.id()));
+            let size = self.bounds().size;
+            let scale = self.contentScaleFactor() as f64;
+            // A phone's mouse: its buttons click as a mouse's (an item picked follows the cursor),
+            // while iOS's own pointer, found by the hover gesture, says where the cursor is.
+            let phone = UIDevice::currentDevice(MainThreadMarker::from(self)).userInterfaceIdiom()
+                == UIUserInterfaceIdiom::Phone;
+            self.ivars().mouse.update(
+                RootWindowId(window.id()),
+                (size.width * scale, size.height * scale),
+                scale,
+                phone,
+            );
         }
     }
 
