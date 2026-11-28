@@ -29,12 +29,33 @@ use std::{
 #[link(name = "GameController", kind = "framework")]
 extern "C" {}
 
+/// Horizon PE: whether the app draws the mouse's pointer itself. This build leaves the pointer to
+/// iOS (its own, shown on the game's screens at the cursor the hover gesture finds, hidden while
+/// playing), so the game never draws one.
+pub(crate) fn drawn_pointer() -> bool {
+    false
+}
+
+/// Horizon PE: whether a GameController mouse is attached.
+pub(super) fn attached() -> bool {
+    // SAFETY: a read-only GCMouse class property, on the main thread.
+    let mice: Retained<NSArray<AnyObject>> = unsafe { objc2::msg_send_id![class!(GCMouse), mice] };
+    mice.iter().next().is_some()
+}
+
 static START: OnceLock<Instant> = OnceLock::new();
 /// When (in ms since start, plus one: zero is never) the mouse last did anything, a scroll of
 /// its wheel came by GameController, and one came by UIKit's scroll gesture.
 static LAST_ACTIVE: AtomicU64 = AtomicU64::new(0);
 static LAST_WHEEL: AtomicU64 = AtomicU64::new(0);
 static LAST_SCROLL_GESTURE: AtomicU64 = AtomicU64::new(0);
+static LAST_HOVER: AtomicU64 = AtomicU64::new(0);
+
+/// UIKit's hover gesture placed the cursor (where iOS's own pointer is): the mouse's relative
+/// motion is then left out, so the two do not fight over where the cursor is.
+pub(super) fn note_hover() {
+    LAST_HOVER.store(now_ms(), Ordering::Relaxed);
+}
 
 static TRACED: AtomicU32 = AtomicU32::new(0);
 
@@ -65,7 +86,10 @@ fn within(stamp: &AtomicU64, ms: u64) -> bool {
 /// A mouse moved, clicked or scrolled lately. With AssistiveTouch on, iOS turns its clicks into
 /// touches too, which would click a second time: the view leaves those out while this is true.
 pub(super) fn mouse_recently_used() -> bool {
-    within(&LAST_ACTIVE, 15_000)
+    // As long as a mouse is connected, not only for a while after it moved: a click that came
+    // after a pause (the first touch of it ahead of the mouse's own report) was let through, and
+    // counted twice.
+    gc_mouse_present() || within(&LAST_ACTIVE, 15_000)
 }
 
 /// A scroll from UIKit's gesture counts unless the wheel already came by GameController, so that
@@ -89,6 +113,8 @@ pub(super) struct Mouse {
     size: Rc<Cell<(f64, f64)>>,
     window: Cell<Option<WindowId>>,
     relative: Cell<bool>,
+    /// Which of the left, right and middle buttons the game was last told are down.
+    down: Rc<Cell<[bool; 3]>>,
 }
 
 fn device(event: DeviceEvent) {
@@ -105,6 +131,58 @@ fn send(window: WindowId, event: WindowEvent) {
 
 impl Mouse {
     pub(super) fn captured(&self) -> bool { self.captured.get() }
+
+    /// Once a frame: each button as the device says it is now, against what the game was told. A
+    /// hold whose change events were missed (or a release that never was) is put right here: held
+    /// down for a while, a button used to stop counting.
+    pub(super) fn poll(&self) {
+        let Some(window) = self.window.get() else { return };
+        if !(self.captured.get() || self.relative.get()) {
+            return;
+        }
+        let mut held = [false; 3];
+        {
+            // Not held while the events go out: the game may ask for `update` meanwhile.
+            let mice = self.mice.borrow();
+            if mice.is_empty() {
+                return;
+            }
+            // SAFETY: documented GCMouse/GCMouseInput/GCControllerButtonInput properties, on the
+            // main thread.
+            unsafe {
+                for mouse in mice.iter() {
+                let Some(input): Option<Retained<AnyObject>> =
+                    objc2::msg_send_id![&**mouse, mouseInput]
+                else {
+                    continue;
+                };
+                for (i, selector) in
+                    [sel!(leftButton), sel!(rightButton), sel!(middleButton)].into_iter().enumerate()
+                {
+                    let element: Option<Retained<AnyObject>> =
+                        objc2::msg_send_id![&*input, performSelector: selector];
+                    if let Some(element) = element {
+                        let pressed: bool = msg_send![&*element, isPressed];
+                        held[i] |= pressed;
+                    }
+                }
+                }
+            }
+        }
+        let told = self.down.get();
+        for (i, button) in [MouseButton::Left, MouseButton::Right, MouseButton::Middle]
+            .into_iter()
+            .enumerate()
+        {
+            if held[i] != told[i] {
+                trace(format_args!("{button:?} was {} by the game, the mouse says {}", told[i], held[i]));
+                let state = if held[i] { ElementState::Pressed } else { ElementState::Released };
+                device(DeviceEvent::Button { button: i as u32, state });
+                send(window, WindowEvent::MouseInput { device_id: DEVICE_ID, state, button });
+            }
+        }
+        self.down.set(held);
+    }
     pub(super) fn capture(&self, captured: bool) {
         self.captured.set(captured);
         if !captured {
@@ -155,6 +233,7 @@ impl Mouse {
             // button is held, which is not the button coming up (the new device's own state is
             // read below).
             if went_away && mice.is_empty() {
+                self.down.set([false; 3]);
                 // A disconnected device may never deliver button-up.
                 for button in [MouseButton::Left, MouseButton::Right, MouseButton::Middle] {
                     send(
@@ -179,7 +258,7 @@ impl Mouse {
                 let moved = RcBlock::new(move |_: &AnyObject, dx: f32, dy: f32| {
                     LAST_ACTIVE.store(now_ms(), Ordering::Relaxed);
                     device(DeviceEvent::MouseMotion { delta: (dx as f64, -dy as f64) });
-                    if captured.get() || !relative {
+                    if captured.get() || !relative || within(&LAST_HOVER, 1500) {
                         return;
                     }
                     let (width, height) = size.get();
@@ -207,9 +286,18 @@ impl Mouse {
                         objc2::msg_send_id![&*input, performSelector: selector];
                     if let Some(element) = element {
                         let captured = self.captured.clone();
+                        let told = self.down.clone();
+                        let index = match button {
+                            MouseButton::Left => 0,
+                            MouseButton::Right => 1,
+                            _ => 2,
+                        };
                         let changed = RcBlock::new(
                             move |_: &AnyObject, _: f32, down: objc2::runtime::Bool| {
                                 LAST_ACTIVE.store(now_ms(), Ordering::Relaxed);
+                                let mut now = told.get();
+                                now[index] = down.as_bool();
+                                told.set(now);
                                 trace(format_args!(
                                     "GameController {button:?} down={} captured={} relative={relative}",
                                     down.as_bool(),
@@ -241,6 +329,9 @@ impl Mouse {
                         // keeps being held (and one let go meanwhile is let go).
                         let pressed: bool = msg_send![&*element, isPressed];
                         trace(format_args!("mouse {button:?} listed, pressed={pressed}"));
+                        let mut now = self.down.get();
+                        now[index] = pressed;
+                        self.down.set(now);
                         let state = if pressed { ElementState::Pressed } else { ElementState::Released };
                         device(DeviceEvent::Button {
                             button: match button { MouseButton::Left => 0, MouseButton::Right => 1, _ => 2 },
